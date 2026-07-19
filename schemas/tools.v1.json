@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://retiregolden.org/schemas/mcp-tools/v1.json",
+  "title": "RetireGolden MCP tool surface v1",
+  "description": "Versioned tool contract for stdio and future HTTP transports. Educational decision-support only.",
+  "tools": [
+    "build_plan",
+    "validate_plan",
+    "run_projection",
+    "run_monte_carlo",
+    "batch_evaluate",
+    "run_optimizer",
+    "solve_max_spending",
+    "compare_scenarios",
+    "explain_modeled_result",
+    "get_session",
+    "clear_session"
+  ],
+  "calculator_arm": ["build_plan", "run_projection", "batch_evaluate"],
+  "optimizer_arm": ["build_plan", "run_projection", "batch_evaluate", "run_optimizer", "solve_max_spending"]
+}

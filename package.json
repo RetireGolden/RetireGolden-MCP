@@ -1,0 +1,60 @@
+{
+  "name": "@retiregolden/mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for the RetireGolden retirement-planning engine: headless, in-memory sessions over stdio (and optional HTTP).",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RetireGolden/RetireGolden-MCP.git"
+  },
+  "homepage": "https://github.com/RetireGolden/RetireGolden-MCP#readme",
+  "bugs": "https://github.com/RetireGolden/RetireGolden-MCP/issues",
+  "keywords": [
+    "mcp",
+    "retirement",
+    "financial-planning",
+    "retiregolden",
+    "model-context-protocol"
+  ],
+  "bin": {
+    "retiregolden-mcp": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "schemas",
+    "skills",
+    "LICENSE",
+    "DISCLAIMER.md",
+    "README.md",
+    "NOTICE"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "mcp": "node dist/cli.js",
+    "test": "tsc -p tsconfig.json && vitest run",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@retiregolden/engine": "^0.1.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

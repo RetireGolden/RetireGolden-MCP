@@ -1,0 +1,22 @@
+name: Bug report
+description: Report a bug in the MCP server or adapter
+labels: [bug]
+body:
+  - type: textarea
+    id: describe
+    attributes:
+      label: What happened?
+      description: Clear description and expected vs actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      placeholder: "@retiregolden/mcp x.y.z"

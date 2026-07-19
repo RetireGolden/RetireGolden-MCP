@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose an enhancement to the MCP surface
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed tool or behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This stays within RetireGolden engine capabilities (no third-party engines)
+          required: true
+        - label: Tool descriptions remain educational / decision-support only
+          required: true

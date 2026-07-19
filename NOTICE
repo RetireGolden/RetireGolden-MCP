@@ -1,0 +1,11 @@
+# RetireGolden-MCP
+
+This package depends on `@retiregolden/engine`, which is licensed under the
+GNU Affero General Public License v3.0 only (AGPL-3.0-only).
+
+If you modify this software and provide it to users over a network (including
+as an HTTP/MCP gateway or hosted API), AGPL-3.0 requires that you offer the
+corresponding source to those users under AGPL-3.0.
+
+Agent skill documents under `skills/` are separately licensed under the MIT
+License (see `skills/LICENSE`).
