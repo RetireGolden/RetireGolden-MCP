@@ -21,9 +21,10 @@
     "model-context-protocol"
   ],
   "bin": {
-    "retiregolden-mcp": "./dist/cli.js"
+    "retiregolden-mcp": "./bin/retiregolden-mcp.js"
   },
   "files": [
+    "bin",
     "dist",
     "schemas",
     "skills",

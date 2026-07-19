@@ -65,13 +65,23 @@ Configure your MCP client to launch `retiregolden-mcp` (or
 See [`skills/retiregolden/SKILL.md`](skills/retiregolden/SKILL.md) (MIT). Bench
 and product runners should pin the skill file digest used for scored runs.
 
-## Development
+## npm publish
 
 ```bash
-npm ci
-npm test
-npm run build
-npm run mcp
+npm login   # RetireGolden org account with publish rights
+npm publish --access public
+```
+
+Until published, consumers can install from git:
+
+```bash
+npm install github:RetireGolden/RetireGolden-MCP
+```
+
+Or run locally after `npm run build`:
+
+```bash
+node bin/retiregolden-mcp.js
 ```
 
 ## Related
