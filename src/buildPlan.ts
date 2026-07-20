@@ -14,13 +14,25 @@ export const PersonParamsSchema = z.object({
   roth: z.number().min(0).describe('Roth balance in dollars'),
   pia: z.number().min(0).describe('Social Security primary insurance amount, monthly dollars at FRA'),
   pension: z.number().min(0).optional().describe('Annual pension income in dollars (ordinary-taxed)'),
-  wage: z.number().min(0).optional().describe('Annual wage (not modeled; retired household assumed)'),
+  wage: z
+    .number()
+    .min(0)
+    .optional()
+    .describe(
+      'Annual wage — NOT modeled. A non-zero wage is a hard build error (retired household is the explicit contract of the typed path); remove it or use the full plan JSON path.',
+    ),
   fra_years: z.number().min(0).max(120).optional().describe('Full retirement age in years'),
 })
 export type PersonParams = z.infer<typeof PersonParamsSchema>
 
 export const HouseholdParamsSchema = z.object({
   filing: z.enum(['single', 'mfj']).describe('Tax filing status: single or married-filing-jointly'),
+  state: z
+    .string()
+    .length(2)
+    .describe(
+      '2-letter state-of-residence code (REQUIRED), e.g. "CA". The engine requires a residence state — there is no hardcoded default. `assumptions.state` can override the value used. NOTE: naming a state does NOT by itself model that state\'s income tax; set `assumptions.stateEffectiveTaxPct` for that.',
+    ),
   persons: z.array(PersonParamsSchema).min(1).describe('One entry per household member'),
   taxable: z.number().min(0).describe('Taxable brokerage balance in dollars'),
   taxable_basis: z.number().min(0).describe('Cost basis of the taxable brokerage account in dollars'),
@@ -104,7 +116,7 @@ export const AssumptionsSchema = z
       .length(2)
       .nullable()
       .optional()
-      .describe('2-letter state-of-residence code (e.g. "CA"); omitted keeps the default KY. NOTE: setting state alone does NOT model that state\'s income tax — state tax stays 0% unless you also set stateEffectiveTaxPct'),
+      .describe('2-letter state-of-residence OVERRIDE (e.g. "CA"); when omitted or null, the required household.state is used. NOTE: setting state alone does NOT model that state\'s income tax — state tax stays 0% unless you also set stateEffectiveTaxPct'),
     stateEffectiveTaxPct: z
       .number()
       .optional()
@@ -118,7 +130,7 @@ export const AssumptionsSchema = z
       .min(0)
       .max(1)
       .optional()
-      .describe('Fraction (0-1) of taxable-account dividends taxed at qualified rates (e.g. 0.85)'),
+      .describe('Fraction (0-1) of taxable-account dividends taxed at qualified rates. Default 0.85 (a reasonable neutral value, overridable) — not a bench artifact.'),
     dobMonthDay: z
       .string()
       .regex(/^\d{2}-\d{2}$/, 'dobMonthDay must be "MM-DD" with a zero-padded two-digit month and day')
@@ -128,14 +140,14 @@ export const AssumptionsSchema = z
       })
       .optional()
       .describe(
-        'Birth month-day as "MM-DD", combined with each person birth_year (e.g. "06-15"). Calendar-validated (month 01-12, day within that month; 02-29 allowed). Leap-year interaction with each person birth_year is left to the engine.',
+        'Birth month-day as "MM-DD", combined with each person birth_year (e.g. "06-15"). Default "06-15" (a reasonable neutral value, overridable) — not a bench artifact. Calendar-validated (month 01-12, day within that month; 02-29 allowed). Leap-year interaction with each person birth_year is left to the engine.',
       ),
     sex: z
       .enum(['female', 'male', 'average'])
       .optional()
-      .describe('Person sex for mortality/longevity: female, male, or average (percent-free enum)'),
+      .describe("Person sex for mortality/longevity: female, male, or average (percent-free enum). Default 'average' (a reasonable neutral value, overridable) — not a bench artifact."),
   })
-  .describe('Optional overrides for the typed-path default modeling assumptions (0% inflation, 0% SS COLA, state KY with 0% state tax); set real values when modeling a real household — omitted fields keep their defaults')
+  .describe("Optional overrides for the typed-path modeling assumptions. Defaults now follow the ENGINE's own defaults: ~2.5%/yr inflation, +3%/yr healthcare inflation above general, 5.5% fallback return, SS COLA tracking inflation, 0% state/local income tax. Household state is a REQUIRED input (household.state), not an assumption. Set explicit values to override; omitted fields keep the engine defaults.")
 export type AssumptionsInput = z.infer<typeof AssumptionsSchema>
 
 export const ConversionSchema = z
@@ -223,6 +235,32 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
       issues: ['policy.claim_ages must have an entry for each person'],
     }
   }
+  // state is a required household input — the engine needs a residence state and
+  // there is no longer a hardcoded KY default. assumptions.state can override the
+  // value used, but household.state must still be provided.
+  if (typeof hh.state !== 'string' || !/^[A-Za-z]{2}$/.test(hh.state)) {
+    return {
+      ok: false,
+      startYear,
+      caveats,
+      issues: [
+        'household.state is required: provide a 2-letter state-of-residence code (e.g. "CA"); assumptions.state can override the value used',
+      ],
+    }
+  }
+  // Wages are not modeled by the typed path — a retired household is the explicit
+  // contract here (previously a silent caveat; now a hard error).
+  const wageIdx = hh.persons.findIndex((p) => (p.wage ?? 0) !== 0)
+  if (wageIdx >= 0) {
+    return {
+      ok: false,
+      startYear,
+      caveats,
+      issues: [
+        `person ${wageIdx}: wages are not modeled; remove wage or use full plan JSON`,
+      ],
+    }
+  }
 
   try {
     return buildTypedPlan(input, hh, policy, startYear, conventions, caveats)
@@ -253,9 +291,10 @@ function buildTypedPlan(
 
   const plan = createEmptyPlan({ newId, now, name: 'mcp-session' })
   plan.household.filingStatus = filing
-  // state override is applied only for a provided 2-letter code; null/absent keeps the
-  // bench default (the engine's household.state is a required string, not nullable).
-  plan.household.state = asmpt?.state ?? 'KY'
+  // Household state is a required input (validated in buildPlanFromParams).
+  // assumptions.state, when provided, overrides the value used; null/absent keeps
+  // the household's own state.
+  plan.household.state = asmpt?.state ?? hh.state
   // Footgun: naming a state does NOT switch on that state's income tax. Unless the
   // caller also sets a flat stateEffectiveTaxPct, state tax stays modeled at 0%.
   if (asmpt?.state != null && asmpt.stateEffectiveTaxPct == null) {
@@ -280,11 +319,6 @@ function buildTypedPlan(
     )
   }
   plan.household.people = hh.persons.map((p, i) => {
-    if ((p.wage ?? 0) !== 0) {
-      caveats.push(
-        `person ${i} has non-zero wage ${p.wage}; wages are not mapped (retired household assumed)`,
-      )
-    }
     return {
       id: `person-${i}`,
       name: `P${i}`,
@@ -401,14 +435,20 @@ function buildTypedPlan(
     plan.strategies.rothConversion = { mode: 'none' }
   }
 
+  // Modeling assumptions: let the engine's createEmptyPlan defaults through
+  // (inflationPct 2.5, healthcareExtraInflationPct 3, defaultReturnPct 5.5,
+  // ssCola { mode: 'matchInflation' }, state/local tax 0) unless the caller
+  // overrides a field explicitly. Only heirTaxRatePct is always set, from the
+  // required household.heir_ordinary_rate.
   const a = plan.assumptions
-  a.inflationPct = asmpt?.inflationPct ?? 0
-  a.healthcareExtraInflationPct = asmpt?.healthcareExtraInflationPct ?? 0
-  a.defaultReturnPct = asmpt?.defaultReturnPct ?? 0
-  a.ssCola = { mode: 'fixed', annualPct: asmpt?.ssColaPct ?? 0 }
-  a.ssHaircut = null
-  a.stateEffectiveTaxPct = asmpt?.stateEffectiveTaxPct ?? 0
-  a.localIncomeTaxPct = asmpt?.localIncomeTaxPct ?? 0
+  if (asmpt?.inflationPct != null) a.inflationPct = asmpt.inflationPct
+  if (asmpt?.healthcareExtraInflationPct != null) {
+    a.healthcareExtraInflationPct = asmpt.healthcareExtraInflationPct
+  }
+  if (asmpt?.defaultReturnPct != null) a.defaultReturnPct = asmpt.defaultReturnPct
+  if (asmpt?.ssColaPct != null) a.ssCola = { mode: 'fixed', annualPct: asmpt.ssColaPct }
+  if (asmpt?.stateEffectiveTaxPct != null) a.stateEffectiveTaxPct = asmpt.stateEffectiveTaxPct
+  if (asmpt?.localIncomeTaxPct != null) a.localIncomeTaxPct = asmpt.localIncomeTaxPct
   a.heirTaxRatePct = hh.heir_ordinary_rate * 100
 
   const pre = conventions.irmaaLookbackMagis ?? hh.pre_horizon_magi ?? ([0, 0] as [number, number])

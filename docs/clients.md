@@ -189,10 +189,12 @@ Units & assumptions (easy to get wrong):
 - Rate units differ by field: `household.growth.*` and `household.heir_ordinary_rate`
   and `policy.conversion_bracket` are FRACTIONS (0.05 = 5%); everything under
   `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them.
-- Typed-path defaults model a bench, not a real household: 0% inflation, 0% SS
-  COLA, state KY with 0% state tax, June-15 DOBs, sex 'average'. For a real
-  household, pass an `assumptions` block with real values (e.g. `inflationPct`,
-  `state` + `stateEffectiveTaxPct`, real `dobMonthDay`).
+- Typed-path defaults (v0.3.0) follow the engine's real-world defaults: ~2.5%
+  inflation, SS COLA tracking inflation, +3% healthcare inflation, 0% state/local
+  tax (not modeled until you set it), June-15 DOBs, sex 'average'. `household.state`
+  is REQUIRED (2-letter code); a non-zero `wage` is a hard error (retired household).
+  To model real state income tax pass `stateEffectiveTaxPct`; override any default
+  via the `assumptions` block (e.g. `inflationPct`, `ssColaPct`, `dobMonthDay`).
 - `run_projection` returns summary-only by default; pass `detail: 'years'` when
   you need the per-year ledger (taxes, conversions, withdrawals, IRMAA by year).
 ```
@@ -281,9 +283,12 @@ Units & assumptions (easy to get wrong):
 - Rate units differ by field: `household.growth.*`, `household.heir_ordinary_rate`,
   and `policy.conversion_bracket` are FRACTIONS (0.05 = 5%); everything under
   `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them.
-- Typed-path defaults model a bench, not a real household: 0% inflation, 0% SS
-  COLA, state KY with 0% state tax, June-15 DOBs, sex 'average'. For a real
-  household, pass an `assumptions` block with real values.
+- Typed-path defaults (v0.3.0) follow the engine's real-world defaults: ~2.5%
+  inflation, SS COLA tracking inflation, +3% healthcare inflation, 0% state/local
+  tax (not modeled until you set it), June-15 DOBs, sex 'average'. `household.state`
+  is REQUIRED (2-letter code); a non-zero `wage` is a hard error (retired household).
+  To model real state income tax pass `stateEffectiveTaxPct`; override any default
+  via the `assumptions` block (e.g. `inflationPct`, `ssColaPct`, `dobMonthDay`).
 - `run_projection` returns summary-only by default; pass `detail: 'years'` when
   you need the per-year ledger.
 ```

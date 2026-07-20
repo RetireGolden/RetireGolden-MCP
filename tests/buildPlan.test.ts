@@ -145,6 +145,52 @@ describe('buildPlanFromParams — validation guards', () => {
     expect(res.ok).toBe(false)
     expect(res.issues).toEqual(['policy.claim_ages must have an entry for each person'])
   })
+
+  it('rejects a typed build with no household.state (WS1.3: state is required)', () => {
+    const { state: _dropped, ...noState } = singleHousehold
+    const res = buildPlanFromParams({
+      household: noState as typeof singleHousehold,
+      policy: singlePolicy,
+    })
+    expect(res.ok).toBe(false)
+    expect(res.plan).toBeUndefined()
+    expect(res.issues).toHaveLength(1)
+    expect(res.issues![0]).toContain('household.state is required')
+    expect(res.issues![0]).toContain('2-letter')
+  })
+
+  it('rejects an invalid (non-2-letter) household.state', () => {
+    const res = buildPlanFromParams({
+      household: { ...singleHousehold, state: 'California' },
+      policy: singlePolicy,
+    })
+    expect(res.ok).toBe(false)
+    expect(res.issues![0]).toContain('household.state is required')
+  })
+
+  it('rejects a non-zero wage as a hard error (WS1.3: wages are not modeled)', () => {
+    const res = buildPlanFromParams({
+      household: {
+        ...singleHousehold,
+        persons: [{ ...singleHousehold.persons[0]!, wage: 40_000 }],
+      },
+      policy: singlePolicy,
+    })
+    expect(res.ok).toBe(false)
+    expect(res.plan).toBeUndefined()
+    expect(res.issues).toEqual(['person 0: wages are not modeled; remove wage or use full plan JSON'])
+  })
+
+  it('allows an explicit zero wage (no wage is being modeled)', () => {
+    const res = buildPlanFromParams({
+      household: {
+        ...singleHousehold,
+        persons: [{ ...singleHousehold.persons[0]!, wage: 0 }],
+      },
+      policy: singlePolicy,
+    })
+    expect(res.ok).toBe(true)
+  })
 })
 
 describe('buildPlanFromParams — conventions and caveats', () => {

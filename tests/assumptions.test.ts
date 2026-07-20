@@ -1,9 +1,10 @@
 /**
- * WS2 assumptions overrides — each override must demonstrably reach the built
- * plan (and, where it changes math, move the projection). Omitting the whole
- * block reproduces the RetireBench bench defaults; that byte-identical guarantee
- * is proven numerically by tests/goldens.test.ts, so here we only assert that
- * each field lands where the engine reads it.
+ * WS2/WS1.3 assumptions overrides — each override must demonstrably reach the
+ * built plan (and, where it changes math, move the projection). Omitting the
+ * whole block now lets the ENGINE defaults through (WS1.3 default flip); the
+ * legacy bench values are reproduced only by passing them explicitly, proven
+ * numerically by tests/goldens.test.ts. Here we assert that each field lands
+ * where the engine reads it, and that omission keeps the engine default.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -20,6 +21,7 @@ function taxableAccount(plan: NonNullable<ReturnType<typeof buildPlanFromParams>
 
 describe('assumptions overrides reach the plan', () => {
   it('inflationPct override lands on assumptions and moves the projection', () => {
+    // base = no assumptions → engine default inflation (2.5%).
     const base = createSession()
     adapter.setPlanFromBuild(base, { household: singleHousehold, policy: singlePolicy })
     const baseProj = adapter.runProjection(base)
@@ -29,14 +31,14 @@ describe('assumptions overrides reach the plan', () => {
     const built = adapter.setPlanFromBuild(infl, {
       household: singleHousehold,
       policy: singlePolicy,
-      assumptions: { inflationPct: 2.5 },
+      assumptions: { inflationPct: 6 },
     })
     expect(built.ok).toBe(true)
-    expect(built.plan!.assumptions.inflationPct).toBe(2.5)
+    expect(built.plan!.assumptions.inflationPct).toBe(6)
     const inflProj = adapter.runProjection(infl)
     expect(inflProj.ok).toBe(true)
     if (baseProj.ok && inflProj.ok) {
-      // A non-zero inflation must change the modeled outcome vs the bench default.
+      // An explicit override must change the modeled outcome vs the engine default.
       expect(inflProj.summary.endingAfterTaxEstate).not.toBe(
         baseProj.summary.endingAfterTaxEstate,
       )
@@ -53,10 +55,21 @@ describe('assumptions overrides reach the plan', () => {
     expect(res.plan!.household.state).toBe('CA')
   })
 
-  it('omitted state keeps the bench default KY', () => {
+  it('omitted assumptions.state uses the required household.state', () => {
+    // singleHousehold declares state: 'KY'; with no override it flows through.
     const res = buildPlanFromParams({ household: singleHousehold, policy: singlePolicy })
     expect(res.ok).toBe(true)
     expect(res.plan!.household.state).toBe('KY')
+  })
+
+  it('assumptions.state overrides the household state', () => {
+    const res = buildPlanFromParams({
+      household: { ...singleHousehold, state: 'KY' },
+      policy: singlePolicy,
+      assumptions: { state: 'TX' },
+    })
+    expect(res.ok).toBe(true)
+    expect(res.plan!.household.state).toBe('TX')
   })
 
   it('qualifiedRatio override lands on the taxable account', () => {
@@ -69,7 +82,7 @@ describe('assumptions overrides reach the plan', () => {
     expect(taxableAccount(res.plan!).qualifiedRatio).toBe(0.5)
   })
 
-  it('omitted qualifiedRatio keeps the bench default 0.85', () => {
+  it('omitted qualifiedRatio keeps the neutral default 0.85', () => {
     const res = buildPlanFromParams({ household: singleHousehold, policy: singlePolicy })
     expect(res.ok).toBe(true)
     expect(taxableAccount(res.plan!).qualifiedRatio).toBe(0.85)
@@ -88,7 +101,7 @@ describe('assumptions overrides reach the plan', () => {
     }
   })
 
-  it('omitted dobMonthDay and sex keep bench defaults (06-15 / average)', () => {
+  it('omitted dobMonthDay and sex keep neutral defaults (06-15 / average)', () => {
     const res = buildPlanFromParams({ household: singleHousehold, policy: singlePolicy })
     expect(res.ok).toBe(true)
     for (const person of res.plan!.household.people) {

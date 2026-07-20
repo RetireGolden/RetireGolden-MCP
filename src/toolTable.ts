@@ -60,7 +60,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     inputShape: {
       plan: z.unknown().optional().describe('Full RetireGolden plan JSON (validated by the engine)'),
       household: HouseholdParamsSchema.optional().describe(
-        'Typed household params (bench vocabulary): filing, persons[], taxable/basis, spending, horizon, growth rates, IRMAA lookback MAGIs, heir rate',
+        'Typed household params: filing, REQUIRED 2-letter state, persons[] (retired — a non-zero wage is a hard error), taxable/basis, spending, horizon, growth rates, IRMAA lookback MAGIs, heir rate',
       ),
       policy: PolicyParamsSchema.optional().describe(
         'Typed policy params: claim_ages[], optional conversion_bracket/conversion_years, withdrawal ordering',
@@ -80,7 +80,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         })
         .optional(),
       assumptions: AssumptionsSchema.optional().describe(
-        'Optional overrides for default modeling assumptions (inflation, returns, SS COLA, state, taxes, qualified ratio, dob month-day, sex). Defaults assume 0% inflation and state KY — set real values for real households; omitted fields keep their defaults.',
+        "Optional overrides for default modeling assumptions (inflation, returns, SS COLA, state, taxes, qualified ratio, dob month-day, sex). Defaults now follow the engine (~2.5% inflation, SS COLA tracking inflation, 0% state/local tax); household state is a REQUIRED input, not an assumption. Set explicit values to override; omitted fields keep the engine defaults.",
       ),
     },
     handler: (session, args) => adapter.setPlanFromBuild(session, args as unknown as BuildPlanInput),
