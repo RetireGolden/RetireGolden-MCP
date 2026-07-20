@@ -67,6 +67,20 @@ export const PolicyParamsSchema = z.object({
 })
 export type PolicyParams = z.infer<typeof PolicyParamsSchema>
 
+/** Max day per month (1-indexed); February allows 29 (leap-year check left to the engine). */
+const MAX_DAY_BY_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const
+
+/** True when `MM-DD` names a real calendar month-day (month 01-12, day within that month, 02-29 allowed). */
+function isValidMonthDay(v: string): boolean {
+  const [mmStr, ddStr] = v.split('-')
+  const mm = Number(mmStr)
+  const dd = Number(ddStr)
+  if (!Number.isInteger(mm) || !Number.isInteger(dd)) return false
+  if (mm < 1 || mm > 12) return false
+  const max = MAX_DAY_BY_MONTH[mm - 1]!
+  return dd >= 1 && dd <= max
+}
+
 export const AssumptionsSchema = z
   .object({
     inflationPct: z
@@ -90,7 +104,7 @@ export const AssumptionsSchema = z
       .length(2)
       .nullable()
       .optional()
-      .describe('2-letter state-of-residence code (e.g. "CA"); omitted keeps the default (KY, with 0% state tax unless stateEffectiveTaxPct is set)'),
+      .describe('2-letter state-of-residence code (e.g. "CA"); omitted keeps the default KY. NOTE: setting state alone does NOT model that state\'s income tax — state tax stays 0% unless you also set stateEffectiveTaxPct'),
     stateEffectiveTaxPct: z
       .number()
       .optional()
@@ -107,9 +121,15 @@ export const AssumptionsSchema = z
       .describe('Fraction (0-1) of taxable-account dividends taxed at qualified rates (e.g. 0.85)'),
     dobMonthDay: z
       .string()
-      .regex(/^\d{2}-\d{2}$/)
+      .regex(/^\d{2}-\d{2}$/, 'dobMonthDay must be "MM-DD" with a zero-padded two-digit month and day')
+      .refine((v) => isValidMonthDay(v), {
+        message:
+          'dobMonthDay must be a real calendar date: month 01-12 and day within that month (02-29 allowed; 13-40, 00-00, 02-31 rejected)',
+      })
       .optional()
-      .describe('Birth month-day as "MM-DD", combined with each person birth_year (e.g. "06-15")'),
+      .describe(
+        'Birth month-day as "MM-DD", combined with each person birth_year (e.g. "06-15"). Calendar-validated (month 01-12, day within that month; 02-29 allowed). Leap-year interaction with each person birth_year is left to the engine.',
+      ),
     sex: z
       .enum(['female', 'male', 'average'])
       .optional()
@@ -158,6 +178,20 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
     const parsed = parsePlan(input.plan)
     if (!parsed.ok) {
       return { ok: false, startYear, caveats, issues: parsed.issues }
+    }
+    // Mixed-mode is allowed for compatibility, but full plan JSON takes precedence:
+    // any typed household/policy/conversion/assumptions supplied alongside it are
+    // ignored. Surface exactly which, so the caller is not silently surprised.
+    // (conventions are NOT listed here — applyConventions below still honors them.)
+    const ignored: string[] = []
+    if (input.household != null) ignored.push('household')
+    if (input.policy != null) ignored.push('policy')
+    if (input.conversion != null) ignored.push('conversion')
+    if (input.assumptions != null) ignored.push('assumptions')
+    if (ignored.length > 0) {
+      caveats.push(
+        `${ignored.join(', ')} ignored: full plan JSON was supplied and takes precedence`,
+      )
     }
     applyConventions(parsed.plan, conventions, caveats)
     return { ok: true, plan: parsed.plan, startYear, caveats }
@@ -222,9 +256,29 @@ function buildTypedPlan(
   // state override is applied only for a provided 2-letter code; null/absent keeps the
   // bench default (the engine's household.state is a required string, not nullable).
   plan.household.state = asmpt?.state ?? 'KY'
+  // Footgun: naming a state does NOT switch on that state's income tax. Unless the
+  // caller also sets a flat stateEffectiveTaxPct, state tax stays modeled at 0%.
+  if (asmpt?.state != null && asmpt.stateEffectiveTaxPct == null) {
+    caveats.push(
+      `assumptions.state=${asmpt.state} set but stateEffectiveTaxPct is not — state income tax is still modeled at 0%; set stateEffectiveTaxPct to model it`,
+    )
+  }
 
   const dobMonthDay = asmpt?.dobMonthDay ?? '06-15'
   const sex = asmpt?.sex ?? 'average'
+  // Footgun: sex / dobMonthDay are single scalars — they apply to EVERY person, so a
+  // multi-person household cannot give members distinct values via the typed path.
+  if ((asmpt?.sex != null || asmpt?.dobMonthDay != null) && hh.persons.length > 1) {
+    const which = [
+      asmpt?.sex != null ? 'sex' : null,
+      asmpt?.dobMonthDay != null ? 'dobMonthDay' : null,
+    ]
+      .filter(Boolean)
+      .join(' and ')
+    caveats.push(
+      `assumptions.${which} applies to every person in this ${hh.persons.length}-person household (the typed path has no per-person override)`,
+    )
+  }
   plan.household.people = hh.persons.map((p, i) => {
     if ((p.wage ?? 0) !== 0) {
       caveats.push(

@@ -17,14 +17,25 @@ financial advice. See [DISCLAIMER.md](../DISCLAIMER.md).
 The agent skill ([`skills/retiregolden/SKILL.md`](../skills/retiregolden/SKILL.md),
 MIT) tells the client *how* to drive the tools (typed `build_plan` first, prefer
 `batch_evaluate` for search, always surface caveats). It ships inside the npm
-tarball, so after any install it lives at:
+tarball as a **folder** — `SKILL.md` plus a `references/` directory it links to —
+so after any install it lives at:
 
 ```
-node_modules/@retiregolden/mcp/skills/retiregolden/SKILL.md
+node_modules/@retiregolden/mcp/skills/retiregolden/
+├── SKILL.md
+└── references/
+    ├── examples.md
+    └── plan-json.md
 ```
 
-Only Claude clients have a native skill format. For Cursor and Codex, translate
-the same guidance into that client's rules/instructions file (templates below).
+Always install the **whole `retiregolden/` folder**, not just `SKILL.md`:
+`SKILL.md` links the `references/` files, so copying the file alone leaves the
+skill incomplete.
+
+Claude clients (Claude Desktop, Claude Code) have a native skill format and
+discover this folder directly. Codex discovers the same folder from its
+`.agents/skills/` locations (see the Codex section). For Cursor, translate the
+guidance into a rules file (template below).
 
 ---
 
@@ -59,10 +70,11 @@ after editing — it reads the config on startup.
 
 Two ways to make the skill available:
 
-- **claude.ai (Settings → Capabilities → Skills):** upload the shipped
-  `node_modules/@retiregolden/mcp/skills/retiregolden/SKILL.md` (drop the whole
-  `retiregolden/` folder if the uploader accepts a directory). Skills synced here
-  are available to Claude Desktop signed into the same account.
+- **claude.ai (Settings → Capabilities → Skills):** upload the **whole** shipped
+  `node_modules/@retiregolden/mcp/skills/retiregolden/` folder — `SKILL.md` links
+  files under `references/`, so uploading `SKILL.md` on its own leaves the skill
+  incomplete. Skills synced here are available to Claude Desktop signed into the
+  same account.
 - **Claude Code project skills:** copy the folder into a project's
   `.claude/skills/` (see the Claude Code section below).
 
@@ -96,17 +108,23 @@ instead of just the current one.
 
 ### Skill
 
-Drop the skill folder into `.claude/skills/` so the directory looks like:
-
-```
-.claude/skills/retiregolden/SKILL.md
-```
-
-Copy it straight from the installed package, e.g.:
+Copy the **whole** skill folder into `.claude/skills/` — it ships with `SKILL.md`
+plus the `references/` files that `SKILL.md` links, so copy the directory, not
+just `SKILL.md`:
 
 ```bash
-mkdir -p .claude/skills/retiregolden
-cp node_modules/@retiregolden/mcp/skills/retiregolden/SKILL.md .claude/skills/retiregolden/
+mkdir -p .claude/skills
+cp -R node_modules/@retiregolden/mcp/skills/retiregolden .claude/skills/
+```
+
+The result looks like:
+
+```
+.claude/skills/retiregolden/
+├── SKILL.md
+└── references/
+    ├── examples.md
+    └── plan-json.md
 ```
 
 Use `~/.claude/skills/` instead of a project path to install it for every
@@ -166,6 +184,17 @@ Rules:
   limitations stay visible.
 - Money is nominal USD; ages in years. Read returned `caveats` — some engine
   knobs are best-effort.
+
+Units & assumptions (easy to get wrong):
+- Rate units differ by field: `household.growth.*` and `household.heir_ordinary_rate`
+  and `policy.conversion_bracket` are FRACTIONS (0.05 = 5%); everything under
+  `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them.
+- Typed-path defaults model a bench, not a real household: 0% inflation, 0% SS
+  COLA, state KY with 0% state tax, June-15 DOBs, sex 'average'. For a real
+  household, pass an `assumptions` block with real values (e.g. `inflationPct`,
+  `state` + `stateEffectiveTaxPct`, real `dobMonthDay`).
+- `run_projection` returns summary-only by default; pass `detail: 'years'` when
+  you need the per-year ledger (taxes, conversions, withdrawals, IRMAA by year).
 ```
 
 Reload Cursor after adding the server; the rule applies as soon as the file is
@@ -201,11 +230,37 @@ List what's configured with `codex mcp list`.
 > Note the snake_case `mcp_servers` table (not `mcpServers`) — Codex silently
 > ignores the block if the key is spelled the JSON way.
 
-### Skill → AGENTS.md
+### Skill
 
-Codex has no skill format either; put the same guidance in an `AGENTS.md` at your
-repo root (Codex reads it automatically, walking from the project root down to
-the working directory):
+Codex now discovers `SKILL.md` skill packages natively, so the **preferred**
+setup is to drop the shipped folder where Codex looks — no hand-translation
+needed. An abbreviated `AGENTS.md` snippet is offered as an alternative.
+
+#### Primary: native skills folder
+
+Codex scans `.agents/skills/` in every directory from the working directory up
+to the repo root, and `~/.agents/skills/` for skills that apply to every repo
+(see the [Codex skills docs](https://developers.openai.com/codex/skills)). Copy
+the **whole** shipped folder into one of those locations:
+
+```bash
+# Project scope (this repo only):
+mkdir -p .agents/skills
+cp -R node_modules/@retiregolden/mcp/skills/retiregolden .agents/skills/
+
+# …or user scope (every repo you work in):
+mkdir -p ~/.agents/skills
+cp -R node_modules/@retiregolden/mcp/skills/retiregolden ~/.agents/skills/
+```
+
+The result looks like `.agents/skills/retiregolden/SKILL.md` (+ `references/`).
+Codex loads the full `SKILL.md` only when it decides to use the skill.
+
+#### Alternative: AGENTS.md snippet
+
+If you would rather keep instructions inline, put the same guidance in an
+`AGENTS.md` at your repo root (Codex reads it automatically, walking from the
+project root down to the working directory):
 
 ```md
 # RetireGolden calculator tools
@@ -221,6 +276,16 @@ IRMAA, RMDs), use the `retiregolden` MCP tools.
   many single projections.
 - Call `explain_modeled_result` when summarizing so caveats stay visible.
 - Money is nominal USD; ages in years. Honor returned `caveats`.
+
+Units & assumptions (easy to get wrong):
+- Rate units differ by field: `household.growth.*`, `household.heir_ordinary_rate`,
+  and `policy.conversion_bracket` are FRACTIONS (0.05 = 5%); everything under
+  `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them.
+- Typed-path defaults model a bench, not a real household: 0% inflation, 0% SS
+  COLA, state KY with 0% state tax, June-15 DOBs, sex 'average'. For a real
+  household, pass an `assumptions` block with real values.
+- `run_projection` returns summary-only by default; pass `detail: 'years'` when
+  you need the per-year ledger.
 ```
 
 ---

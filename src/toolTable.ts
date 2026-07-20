@@ -214,7 +214,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'export_plan',
-    description: `${EDUCATIONAL} Export the current session plan as full plan JSON, re-importable via build_plan{plan}.`,
+    description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear and conventions. Round-trips via build_plan({ plan, startYear, conventions }) — pass the exported startYear back or a non-2026 session's projection will diverge. Returns a clone; mutating it does not affect the live session.`,
     inputShape: {},
     handler: (session) => adapter.exportPlan(session),
     httpExposed: false,

@@ -16,7 +16,9 @@
  * Generation recipe (scratchpad/baseline-goldens.mjs, unmodified main):
  *   session = createSession()
  *   setPlanFromBuild(session, input)
- *   proj  = runProjection(session)                    // per-year ledger => detail:'years'
+ *   proj  = runProjection(session, { detail: 'years' })  // detail:'years' is REQUIRED
+ *                                                         // for the per-year ledger; the
+ *                                                         // default 'summary' omits years[]
  *   mc    = runMonteCarlo(session, { pathCount: 300, seed: 7 })
  *   batch = batchEvaluate(session,
  *             [policy, { ...policy, conversion_bracket: null, conversion_years: 0 }],

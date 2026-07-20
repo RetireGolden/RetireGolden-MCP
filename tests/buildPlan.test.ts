@@ -84,6 +84,32 @@ describe('buildPlanFromParams — full plan JSON branch', () => {
     expect(res.issues!.length).toBeGreaterThan(0)
   })
 
+  it('pushes a caveat listing typed fields ignored because plan JSON takes precedence', () => {
+    const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
+    const planJson = JSON.parse(JSON.stringify(built.plan))
+    const res = buildPlanFromParams({
+      plan: planJson,
+      household: mfjHousehold,
+      assumptions: { inflationPct: 2.5 },
+    })
+    expect(res.ok).toBe(true)
+    const caveat = res.caveats.find((c) => c.includes('full plan JSON was supplied'))
+    expect(caveat).toBeTruthy()
+    expect(caveat).toContain('assumptions')
+    expect(caveat).toContain('household')
+    // policy/conversion were not supplied here, so they must not be named.
+    expect(caveat).not.toContain('policy')
+    expect(caveat).not.toContain('conversion')
+  })
+
+  it('plan JSON alone produces no ignored-fields caveat', () => {
+    const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
+    const planJson = JSON.parse(JSON.stringify(built.plan))
+    const res = buildPlanFromParams({ plan: planJson })
+    expect(res.ok).toBe(true)
+    expect(res.caveats.some((c) => c.includes('full plan JSON was supplied'))).toBe(false)
+  })
+
   it('requires either plan JSON or both household and policy', () => {
     const res = buildPlanFromParams({ startYear: 2026 })
     expect(res.ok).toBe(false)

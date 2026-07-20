@@ -7,10 +7,10 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { buildPlanFromParams } from '../src/buildPlan.js'
+import { buildPlanFromParams, AssumptionsSchema } from '../src/buildPlan.js'
 import { createSession } from '../src/session.js'
 import * as adapter from '../src/adapter.js'
-import { singleHousehold, singlePolicy } from './fixtures.js'
+import { singleHousehold, singlePolicy, mfjHousehold, mfjPolicy } from './fixtures.js'
 
 function taxableAccount(plan: NonNullable<ReturnType<typeof buildPlanFromParams>['plan']>) {
   const acct = plan.accounts.find((a) => a.type === 'taxable')
@@ -116,5 +116,81 @@ describe('assumptions overrides reach the plan', () => {
     expect(a.ssCola).toEqual({ mode: 'fixed', annualPct: 2.5 })
     expect(a.stateEffectiveTaxPct).toBe(3)
     expect(a.localIncomeTaxPct).toBe(1)
+  })
+})
+
+describe('dobMonthDay calendar-aware validation', () => {
+  const accept = ['01-01', '02-29', '06-15', '12-31', '04-30', '02-28', '11-30']
+  for (const v of accept) {
+    it(`accepts valid month-day ${v}`, () => {
+      expect(AssumptionsSchema.safeParse({ dobMonthDay: v }).success).toBe(true)
+    })
+  }
+
+  const reject = ['13-40', '00-00', '02-31', '00-15', '13-01', '01-00', '01-32', '04-31', '06-00']
+  for (const v of reject) {
+    it(`rejects impossible month-day ${v}`, () => {
+      const parsed = AssumptionsSchema.safeParse({ dobMonthDay: v })
+      expect(parsed.success).toBe(false)
+      if (!parsed.success) {
+        // A clear, actionable message must be attached to the field.
+        expect(parsed.error.issues.some((i) => i.message.includes('dobMonthDay'))).toBe(true)
+      }
+    })
+  }
+
+  it('still rejects the wrong shape (non-MM-DD strings)', () => {
+    expect(AssumptionsSchema.safeParse({ dobMonthDay: '6-15' }).success).toBe(false)
+    expect(AssumptionsSchema.safeParse({ dobMonthDay: '2026-06-15' }).success).toBe(false)
+    expect(AssumptionsSchema.safeParse({ dobMonthDay: 'June 15' }).success).toBe(false)
+  })
+})
+
+describe('assumption-interaction caveats (footguns)', () => {
+  it('warns when state is set but stateEffectiveTaxPct is not (tax still 0%)', () => {
+    const res = buildPlanFromParams({
+      household: singleHousehold,
+      policy: singlePolicy,
+      assumptions: { state: 'CA' },
+    })
+    expect(res.ok).toBe(true)
+    expect(res.plan!.household.state).toBe('CA')
+    expect(res.plan!.assumptions.stateEffectiveTaxPct).toBe(0)
+    expect(
+      res.caveats.some((c) => c.includes('state=CA') && c.includes('stateEffectiveTaxPct')),
+    ).toBe(true)
+  })
+
+  it('does not warn about state tax when stateEffectiveTaxPct is provided', () => {
+    const res = buildPlanFromParams({
+      household: singleHousehold,
+      policy: singlePolicy,
+      assumptions: { state: 'CA', stateEffectiveTaxPct: 6 },
+    })
+    expect(res.ok).toBe(true)
+    expect(res.caveats.some((c) => c.includes('stateEffectiveTaxPct'))).toBe(false)
+  })
+
+  it('warns that sex/dobMonthDay apply to every person in a multi-person household', () => {
+    const res = buildPlanFromParams({
+      household: mfjHousehold, // two persons
+      policy: mfjPolicy,
+      assumptions: { sex: 'male', dobMonthDay: '03-22' },
+    })
+    expect(res.ok).toBe(true)
+    const caveat = res.caveats.find((c) => c.includes('every person'))
+    expect(caveat).toBeTruthy()
+    expect(caveat).toContain('sex')
+    expect(caveat).toContain('dobMonthDay')
+  })
+
+  it('does not warn about per-person overrides for a single-person household', () => {
+    const res = buildPlanFromParams({
+      household: singleHousehold, // one person
+      policy: singlePolicy,
+      assumptions: { sex: 'male', dobMonthDay: '03-22' },
+    })
+    expect(res.ok).toBe(true)
+    expect(res.caveats.some((c) => c.includes('every person'))).toBe(false)
   })
 })

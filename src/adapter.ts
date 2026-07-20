@@ -348,9 +348,18 @@ export function exportPlan(session: SessionState) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
-  // session.plan is already a parsed Plan; JSON round-trips back through parsePlan
-  // when re-imported via build_plan{plan}.
-  return { ok: true as const, plan: session.plan, caveats: session.caveats }
+  // Return a CLONE of the parsed Plan — programmatic consumers (e.g. Pro importing
+  // these adapter helpers) must not be able to mutate the live session plan in place.
+  // startYear + conventions are surfaced so the exported document round-trips faithfully
+  // via build_plan({ plan, startYear, conventions }); without startYear the re-imported
+  // projection would default to 2026 and diverge from any non-2026 session.
+  return {
+    ok: true as const,
+    plan: structuredClone(session.plan),
+    startYear: session.startYear,
+    conventions: session.conventions,
+    caveats: session.caveats,
+  }
 }
 
 export function explainModeledResult(session: SessionState) {
