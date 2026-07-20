@@ -102,6 +102,23 @@ describe('buildPlanFromParams — full plan JSON branch', () => {
     expect(caveat).not.toContain('conversion')
   })
 
+  it('accepts mixed-mode plan JSON alongside a household missing state (household ignored)', () => {
+    // Regression: household.state is required only on the typed path. When full plan
+    // JSON is supplied it takes precedence and the household is ignored, so a
+    // stateless household must NOT block the build.
+    const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
+    const planJson = JSON.parse(JSON.stringify(built.plan))
+    const { state: _dropped, ...noStateHousehold } = mfjHousehold
+    const res = buildPlanFromParams({
+      plan: planJson,
+      household: noStateHousehold as typeof mfjHousehold,
+      policy: mfjPolicy,
+    })
+    expect(res.ok).toBe(true)
+    expect(res.issues).toBeUndefined()
+    expect(res.caveats.some((c) => c.includes('full plan JSON was supplied'))).toBe(true)
+  })
+
   it('plan JSON alone produces no ignored-fields caveat', () => {
     const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
     const planJson = JSON.parse(JSON.stringify(built.plan))
@@ -159,13 +176,28 @@ describe('buildPlanFromParams — validation guards', () => {
     expect(res.issues![0]).toContain('2-letter')
   })
 
-  it('rejects an invalid (non-2-letter) household.state', () => {
+  it('rejects an invalid (non-2-letter) household.state as malformed, not missing', () => {
     const res = buildPlanFromParams({
       household: { ...singleHousehold, state: 'California' },
       policy: singlePolicy,
     })
     expect(res.ok).toBe(false)
-    expect(res.issues![0]).toContain('household.state is required')
+    // A malformed value must not read as "required/missing" (that invites re-adding
+    // the same bad value); it names the format problem and echoes the bad value.
+    expect(res.issues![0]).toContain('household.state must be a 2-letter code')
+    expect(res.issues![0]).toContain('California')
+    expect(res.issues![0]).not.toContain('is required')
+  })
+
+  it('rejects a malformed assumptions.state override before it reaches the engine', () => {
+    const res = buildPlanFromParams({
+      household: singleHousehold, // valid household.state
+      policy: singlePolicy,
+      assumptions: { state: '9!' },
+    })
+    expect(res.ok).toBe(false)
+    expect(res.issues![0]).toContain('assumptions.state must be a 2-letter code')
+    expect(res.issues![0]).toContain('9!')
   })
 
   it('rejects a non-zero wage as a hard error (WS1.3: wages are not modeled)', () => {

@@ -90,6 +90,15 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       if (args.plan == null && (args.household == null || args.policy == null)) {
         return 'Provide either `plan` JSON or both `household` and `policy`'
       }
+      // Required-state is enforced only on the typed path: when a full `plan` is
+      // supplied the household is ignored, so do not demand its state. Mirrors the
+      // runtime rule in buildPlanFromParams for a clean gateway-level message.
+      if (args.plan == null && args.household != null) {
+        const state = (args.household as { state?: unknown }).state
+        if (state == null || (typeof state === 'string' && !/^[A-Za-z]{2}$/.test(state))) {
+          return 'household.state is required on the typed path: provide a 2-letter state-of-residence code (e.g. "CA")'
+        }
+      }
       return null
     },
   },

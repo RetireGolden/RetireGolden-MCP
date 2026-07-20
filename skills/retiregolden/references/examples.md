@@ -82,6 +82,7 @@ A real couple in Ohio. The `assumptions` block pins a specific inflation/COLA/re
 - `pension: 24000` = $24k/yr ordinary-taxed pension for person 0. `pia: 3000` = $3,000/**month** at FRA.
 - `claim_ages: [70, 67]` — person 0 claims at 70, person 1 at 67.
 - **Watch the unit split:** household `growth.*` and `conversion_bracket` are **fractions** (`0.05`, `0.24`), but the `assumptions.*Pct` fields are **percents** (`inflationPct: 3` means 3%, not 300%). `qualifiedRatio` is a fraction (`0.9`). Assumptions fields are optional; each omitted field falls back to the engine default (`household.state` itself is required).
+- **`growth.*` is NOMINAL** (headline) return, not inflation-adjusted — it is written straight into the engine's nominal `annualReturnPct`. With the default ~2.5% inflation, a `growth.trad: 0.05` models ~2.5% real. Use the nominal figure you'd quote (e.g. 5%), not a real one.
 
 ---
 

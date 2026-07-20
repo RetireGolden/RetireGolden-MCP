@@ -27,11 +27,16 @@ export type PersonParams = z.infer<typeof PersonParamsSchema>
 
 export const HouseholdParamsSchema = z.object({
   filing: z.enum(['single', 'mfj']).describe('Tax filing status: single or married-filing-jointly'),
+  // Optional at the Zod layer so mixed-mode `build_plan({ plan, household })`
+  // still validates (full plan JSON takes precedence and the household is ignored).
+  // Required-ness is enforced on the typed path in buildPlanFromParams and mirrored
+  // in the gateway crossFieldValidate when no `plan` is supplied.
   state: z
     .string()
     .length(2)
+    .optional()
     .describe(
-      '2-letter state-of-residence code (REQUIRED), e.g. "CA". The engine requires a residence state — there is no hardcoded default. `assumptions.state` can override the value used. NOTE: naming a state does NOT by itself model that state\'s income tax; set `assumptions.stateEffectiveTaxPct` for that.',
+      '2-letter state-of-residence code — REQUIRED on the typed path (omitting it fails the build when no full `plan` is supplied), e.g. "CA". The engine requires a residence state — there is no hardcoded default. `assumptions.state` can override the value used. NOTE: naming a state does NOT by itself model that state\'s income tax; set `assumptions.stateEffectiveTaxPct` for that.',
     ),
   persons: z.array(PersonParamsSchema).min(1).describe('One entry per household member'),
   taxable: z.number().min(0).describe('Taxable brokerage balance in dollars'),
@@ -40,11 +45,13 @@ export const HouseholdParamsSchema = z.object({
   horizon: z.number().int().min(1).max(100).describe('Number of projection years (1-100)'),
   growth: z
     .object({
-      trad: z.number().describe('Traditional annual return as a fraction, e.g. 0.05'),
-      roth: z.number().describe('Roth annual return as a fraction, e.g. 0.05'),
-      taxable: z.number().describe('Taxable annual return as a fraction, e.g. 0.05'),
+      trad: z.number().describe('Traditional NOMINAL annual return as a fraction, e.g. 0.05'),
+      roth: z.number().describe('Roth NOMINAL annual return as a fraction, e.g. 0.05'),
+      taxable: z.number().describe('Taxable NOMINAL annual return as a fraction, e.g. 0.05'),
     })
-    .describe('Per-bucket real annual return rates (fractions, not percents)'),
+    .describe(
+      'Per-bucket NOMINAL annual return rates (fractions, not percents). These are written straight into the engine\'s nominal annualReturnPct — real return is roughly this minus inflationPct. Use nominal figures (e.g. 0.05 for a 5% headline return), not inflation-adjusted ones.',
+    ),
   pre_horizon_magi: z
     .tuple([z.number(), z.number()])
     .optional()
@@ -235,10 +242,11 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
       issues: ['policy.claim_ages must have an entry for each person'],
     }
   }
-  // state is a required household input — the engine needs a residence state and
-  // there is no longer a hardcoded KY default. assumptions.state can override the
-  // value used, but household.state must still be provided.
-  if (typeof hh.state !== 'string' || !/^[A-Za-z]{2}$/.test(hh.state)) {
+  // state is a required household input on the typed path — the engine needs a
+  // residence state and there is no longer a hardcoded KY default. assumptions.state
+  // can override the value used, but household.state must still be provided.
+  const STATE_CODE = /^[A-Za-z]{2}$/
+  if (hh.state == null || hh.state === '') {
     return {
       ok: false,
       startYear,
@@ -246,6 +254,24 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
       issues: [
         'household.state is required: provide a 2-letter state-of-residence code (e.g. "CA"); assumptions.state can override the value used',
       ],
+    }
+  }
+  if (!STATE_CODE.test(hh.state)) {
+    return {
+      ok: false,
+      startYear,
+      caveats,
+      issues: [`household.state must be a 2-letter code (A–Z), got "${hh.state}"`],
+    }
+  }
+  // assumptions.state overrides household.state, so validate it here too rather than
+  // letting a bad override surface only later as an opaque parsePlan failure.
+  if (input.assumptions?.state != null && !STATE_CODE.test(input.assumptions.state)) {
+    return {
+      ok: false,
+      startYear,
+      caveats,
+      issues: [`assumptions.state must be a 2-letter code (A–Z), got "${input.assumptions.state}"`],
     }
   }
   // Wages are not modeled by the typed path — a retired household is the explicit
@@ -294,12 +320,16 @@ function buildTypedPlan(
   // Household state is a required input (validated in buildPlanFromParams).
   // assumptions.state, when provided, overrides the value used; null/absent keeps
   // the household's own state.
-  plan.household.state = asmpt?.state ?? hh.state
+  const effectiveState = (asmpt?.state ?? hh.state)!
+  plan.household.state = effectiveState
   // Footgun: naming a state does NOT switch on that state's income tax. Unless the
-  // caller also sets a flat stateEffectiveTaxPct, state tax stays modeled at 0%.
-  if (asmpt?.state != null && asmpt.stateEffectiveTaxPct == null) {
+  // caller sets a flat stateEffectiveTaxPct, state tax stays modeled at 0%. This now
+  // fires for the primary happy path too (household.state is always present on the
+  // typed path), not just the assumptions.state override, unless the caller has
+  // explicitly set stateEffectiveTaxPct (even to 0, an acknowledged 0% state tax).
+  if (asmpt?.stateEffectiveTaxPct == null) {
     caveats.push(
-      `assumptions.state=${asmpt.state} set but stateEffectiveTaxPct is not — state income tax is still modeled at 0%; set stateEffectiveTaxPct to model it`,
+      `state=${effectiveState} set but stateEffectiveTaxPct is not — state income tax is modeled at 0%; set stateEffectiveTaxPct to model it`,
     )
   }
 

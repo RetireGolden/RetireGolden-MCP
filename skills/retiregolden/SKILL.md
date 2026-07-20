@@ -21,7 +21,7 @@ Household/policy rates are **fractions** (`0.05` = 5%); passing `5` where `0.05`
 
 | Field | Unit | Example |
 |---|---|---|
-| `growth.trad` / `growth.roth` / `growth.taxable` | fraction (annual return) | `0.05` = 5% |
+| `growth.trad` / `growth.roth` / `growth.taxable` | fraction — **nominal** annual return | `0.05` = 5% headline (real ≈ 5% − inflation) |
 | `conversion_bracket` | fraction (tax bracket top) | `0.24` = the 24% bracket |
 | `heir_ordinary_rate` | fraction | `0.24` = 24% |
 | `assumptions.*Pct` (the `Pct`-suffixed overrides) | **percent** | `2.5` = 2.5% |

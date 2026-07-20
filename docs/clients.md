@@ -188,7 +188,8 @@ Rules:
 Units & assumptions (easy to get wrong):
 - Rate units differ by field: `household.growth.*` and `household.heir_ordinary_rate`
   and `policy.conversion_bracket` are FRACTIONS (0.05 = 5%); everything under
-  `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them.
+  `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them. `growth.*` is a
+  NOMINAL return (not inflation-adjusted); real return ≈ growth − inflation.
 - Typed-path defaults (v0.3.0) follow the engine's real-world defaults: ~2.5%
   inflation, SS COLA tracking inflation, +3% healthcare inflation, 0% state/local
   tax (not modeled until you set it), June-15 DOBs, sex 'average'. `household.state`
@@ -282,7 +283,8 @@ IRMAA, RMDs), use the `retiregolden` MCP tools.
 Units & assumptions (easy to get wrong):
 - Rate units differ by field: `household.growth.*`, `household.heir_ordinary_rate`,
   and `policy.conversion_bracket` are FRACTIONS (0.05 = 5%); everything under
-  `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them.
+  `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them. `growth.*` is a
+  NOMINAL return (not inflation-adjusted); real return ≈ growth − inflation.
 - Typed-path defaults (v0.3.0) follow the engine's real-world defaults: ~2.5%
   inflation, SS COLA tracking inflation, +3% healthcare inflation, 0% state/local
   tax (not modeled until you set it), June-15 DOBs, sex 'average'. `household.state`

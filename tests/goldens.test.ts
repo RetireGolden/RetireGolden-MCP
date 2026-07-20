@@ -131,6 +131,8 @@ function runFixture(
   const totalTax = years.reduce((s, y) => s + y.tax, 0)
   const totalConversions = years.reduce((s, y) => s + y.rothConversion, 0)
   return {
+    build,
+    caveats: build.caveats,
     proj,
     years,
     firstYear: years[0]!,
@@ -321,8 +323,14 @@ describe('golden numbers — MFJ fixture [legacy bench conventions via explicit 
 describe('golden numbers — SINGLE fixture [new engine defaults, no assumptions]', () => {
   const g = runFixture(singleHousehold, singlePolicy)
 
-  it('build carries no assumption/wage/state caveats', () => {
-    expect(g.batch.ok).toBe(true)
+  it('bare build surfaces the state-tax footgun caveat and no wage caveat', () => {
+    // No assumptions block → household.state ('KY') is set but stateEffectiveTaxPct
+    // is not, so the state-income-tax footgun caveat fires on the happy path.
+    const stateCaveat = g.caveats.find((c) => c.includes('stateEffectiveTaxPct'))
+    expect(stateCaveat).toBeTruthy()
+    expect(stateCaveat).toContain('state=KY')
+    // Wages are a hard error, never a caveat — and no wage is set here.
+    expect(g.caveats.some((c) => c.toLowerCase().includes('wage'))).toBe(false)
   })
 
   it('projection window', () => {

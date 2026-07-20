@@ -37,6 +37,16 @@ users. This release flips those defaults. See the governing plan,
 
 ### Changed
 
+- **`household.growth.*` is documented as NOMINAL, not real.** These fractions have
+  always been written straight into the engine's nominal `annualReturnPct`; the prior
+  "real annual return rates" wording was identity-safe only while inflation was forced
+  to 0. With the new ~2.5% default inflation the distinction matters, so the schema,
+  `SKILL.md`, `docs/clients.md`, and `examples.md` now say nominal (real ≈ growth −
+  inflation). This is a documentation/label fix — no numeric behavior changed, and the
+  new-default goldens already reflect nominal returns.
+- The state-income-tax footgun caveat now fires on the primary typed path too (whenever
+  `stateEffectiveTaxPct` is left unset, not only when `assumptions.state` is used), so a
+  plain `household.state: "CA"` build is still warned that state tax is modeled at 0%.
 - `dobMonthDay` (default `06-15`), `sex` (default `average`), and `qualifiedRatio`
   (default `0.85`) are unchanged as neutral, overridable defaults — their tool/schema
   descriptions now state they are defaults, not bench artifacts.
