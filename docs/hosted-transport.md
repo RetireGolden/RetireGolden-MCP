@@ -31,8 +31,9 @@ matrix against this surface.
 - Sessions expire after 30 min idle and are capped (excess → `429 TOO_MANY_SESSIONS`).
   A session slot is only allocated once a request fully validates — malformed
   JSON, unknown tools, and invalid arguments never consume one.
-- Request bodies are capped at 1 MiB → `413 PAYLOAD_TOO_LARGE` (the 413 is written
-  before the connection is closed).
+- Request bodies are capped at 1 MiB → `413 PAYLOAD_TOO_LARGE`. Excess payload is
+  discarded (never buffered) and the 413 is sent once the upload completes, so
+  clients reliably receive it; drain time is bounded by the 30s request timeout.
 - Tool arguments are validated with the same zod schemas as stdio (`household`/
   `policy` shapes, `batch_evaluate` policies 1–500, objective enum) → `400 INVALID_ARGS`.
 - `GET /health` is unauthenticated and reports only `{ ok, transport, sessions }`

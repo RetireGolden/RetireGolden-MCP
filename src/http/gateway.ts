@@ -82,18 +82,18 @@ function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | n
   return new Promise((resolve) => {
     const chunks: Buffer[] = []
     let received = 0
+    let tooLarge = false
     let settled = false
     req.on('data', (chunk: Buffer) => {
-      if (settled) return
+      if (tooLarge) return
       received += chunk.length
       if (received > MAX_BODY_BYTES) {
-        settled = true
+        // Discard the payload but keep consuming the stream: responding while
+        // the client is still uploading races the socket close (observed as
+        // ECONNRESET on macOS). The 413 is sent once the request stream ends,
+        // so it always reaches the client; time is bounded by requestTimeout.
+        tooLarge = true
         chunks.length = 0
-        res.writeHead(413, { Connection: 'close' })
-        res.end(JSON.stringify({ error: 'PAYLOAD_TOO_LARGE' }))
-        // Keep draining (discarding) the remaining body so the client can read
-        // the 413 before the connection closes; bounded by server.requestTimeout.
-        resolve(null)
         return
       }
       chunks.push(chunk)
@@ -101,6 +101,12 @@ function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | n
     req.on('end', () => {
       if (settled) return
       settled = true
+      if (tooLarge) {
+        res.writeHead(413)
+        res.end(JSON.stringify({ error: 'PAYLOAD_TOO_LARGE' }))
+        resolve(null)
+        return
+      }
       resolve(Buffer.concat(chunks))
     })
     req.on('error', () => {
