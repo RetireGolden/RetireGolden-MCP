@@ -45,6 +45,11 @@ Configure your MCP client to launch `retiregolden-mcp` (or
 }
 ```
 
+## Connect your AI client
+
+Per-client, copy-paste setup for Claude Desktop, Claude Code, Cursor, and Codex
+(MCP config + agent skill / rules) is in [`docs/clients.md`](docs/clients.md).
+
 ## Tools (v1)
 
 Read-only with respect to your finances and disk: no trades, no persistence.
