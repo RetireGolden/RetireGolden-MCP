@@ -8,8 +8,8 @@
 # workflow filename, and the `npm-publish` environment, so no long-lived token
 # is needed. This requires npm >= 11.5.1, which is newer than the npm bundled
 # with Node 22 — hence the explicit `npm install -g npm@latest` step below.
-# The NPM_TOKEN secret is retained only as a rollback path and can be deleted
-# once an OIDC release has succeeded.
+# There is no NPM_TOKEN: token-based publishing has been retired, and the npm
+# package is set to disallow tokens, so releases authenticate only via OIDC.
 #
 # The publish job runs in the `npm-publish` environment, which requires manual
 # approval from FlyOverCoderKY before any release. Its deployment branch policy
