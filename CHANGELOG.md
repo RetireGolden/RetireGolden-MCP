@@ -69,8 +69,9 @@ users. This release flips those defaults. See the governing plan,
 
 - Adopts **`@retiregolden/engine` 0.1.2** (tax withdrawal fixed-point convergence
   fix plus graceful handling of tax-solver discontinuities). The engine is now
-  **exact-pinned** (`0.1.2`, no caret). Projection, tax, conversion, and Monte
-  Carlo golden/expected numbers have been refreshed to reflect 0.1.2 output.
+  **exact-pinned** (`0.1.2`, no caret). Projection, tax, conversion, and batch
+  golden/expected numbers have been refreshed to reflect 0.1.2 output; Monte Carlo
+  success rates (pathCount 300 / seed 7) are unchanged.
 
 ## 0.2.1
 
