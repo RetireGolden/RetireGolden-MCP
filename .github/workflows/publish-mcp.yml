@@ -1,0 +1,70 @@
+# Publishes @retiregolden/mcp to npm.
+#
+# Trigger by pushing a tag `mcp-v<version>` (must match package.json version),
+# or manually via workflow_dispatch (defaults to dry-run).
+#
+# Requires repository secret NPM_TOKEN: same @retiregolden org granular
+# automation token used by RetireGolden (publish rights on @retiregolden/mcp).
+
+name: Publish mcp package
+
+on:
+  push:
+    tags: ["mcp-v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Use npm publish --dry-run (no release)
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check tag matches package version
+        if: startsWith(github.ref, 'refs/tags/mcp-v')
+        run: |
+          tag="${GITHUB_REF_NAME#mcp-v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag mcp-v$tag does not match package.json version $version" >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" != "false" ]; then
+            npm publish --access public --dry-run
+          else
+            npm publish --access public --provenance
+          fi

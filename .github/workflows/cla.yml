@@ -31,7 +31,7 @@ jobs:
           path-to-signatures: signatures/v1/cla.json
           path-to-document: https://github.com/RetireGolden/RetireGolden-MCP/blob/main/CLA.md
           branch: main
-          allowlist: FlyOverCoderKY,*[bot]
+          allowlist: FlyOverCoderKY,dependabot[bot],dependabot-preview[bot],*[bot]
           custom-notsigned-prcomment: >
             Thank you for your contribution to RetireGolden-MCP! Before we can merge,
             please sign our
