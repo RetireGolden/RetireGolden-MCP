@@ -5,6 +5,13 @@
 #
 # Requires repository secret NPM_TOKEN: same @retiregolden org granular
 # automation token used by RetireGolden (publish rights on @retiregolden/mcp).
+#
+# The publish job runs in the `npm-publish` environment. The repo owner must
+# create this environment under Settings > Environments and add required
+# reviewers so releases pause for manual approval before publishing.
+#
+# Recommended follow-up: adopt npm Trusted Publishing via OIDC to retire the
+# long-lived NPM_TOKEN secret entirely.
 
 name: Publish mcp package
 
@@ -29,6 +36,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm-publish
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 

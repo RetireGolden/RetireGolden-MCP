@@ -20,3 +20,5 @@ body:
     attributes:
       label: Package version
       placeholder: "@retiregolden/mcp x.y.z"
+    validations:
+      required: true

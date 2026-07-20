@@ -12,7 +12,7 @@
 **Please do not open a public GitHub issue for security vulnerabilities.**
 
 Report privately via the [Security](https://github.com/RetireGolden/RetireGolden-MCP/security)
-tab → **Report a vulnerability**.
+tab → **Report a vulnerability**, or email [info@retiregolden.org](mailto:info@retiregolden.org).
 
 Include a clear description, impact, reproduction steps, and any PoC you are
 comfortable sharing. We aim to acknowledge reports within **7 business days**.

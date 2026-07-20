@@ -33,13 +33,12 @@ export function setPlanFromBuild(session: SessionState, input: BuildPlanInput) {
   return result
 }
 
-export function runProjection(session: SessionState, startYear?: number) {
+export function runProjection(session: SessionState) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
-  const year = startYear ?? session.startYear
   const result = simulatePlan(session.plan, {
-    startYear: year,
+    startYear: session.startYear,
     taxCalculator: taxCalc(),
   })
   const summary = summarizeProjection(session.plan, result)
@@ -66,21 +65,20 @@ export function runProjection(session: SessionState, startYear?: number) {
 
 export function runMonteCarlo(
   session: SessionState,
-  opts: { pathCount?: number; seed?: number; startYear?: number } = {},
+  opts: { pathCount?: number; seed?: number } = {},
 ) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
   const pathCount = opts.pathCount ?? 200
   const seed = opts.seed ?? 42
-  const startYear = opts.startYear ?? session.startYear
   const model = createLognormalModel({
     type: 'lognormal',
     inflationMeanPct: session.plan.assumptions.inflationPct,
     returnVolPct: 12,
   })
   const paths = runMonteCarloPaths(session.plan, {
-    startYear,
+    startYear: session.startYear,
     taxCalculator: taxCalc(),
     model,
     seed,
@@ -114,9 +112,22 @@ export function batchEvaluate(
     caveats: string[]
   }> = []
 
+  const ssIncomeCount = session.plan.incomes.filter((inc) => inc.type === 'socialSecurity').length
+
   for (let i = 0; i < policies.length; i++) {
     const policy = policies[i]!
     try {
+      if (policy.claim_ages.length < ssIncomeCount) {
+        results.push({
+          index: i,
+          policy,
+          objective: null,
+          ok: false,
+          error: `claim_ages has ${policy.claim_ages.length} entries but the plan has ${ssIncomeCount} Social Security incomes`,
+          caveats: session.caveats,
+        })
+        continue
+      }
       const planJson = structuredClone(session.plan) as Plan
       const caveats = [...session.caveats]
 

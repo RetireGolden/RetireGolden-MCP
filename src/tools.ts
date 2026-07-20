@@ -8,6 +8,11 @@ import * as adapter from './adapter.js'
 import type { SessionState } from './session.js'
 import { clearSession } from './session.js'
 import type { BuildPlanInput, PolicyParams } from './buildPlan.js'
+import {
+  HouseholdParamsSchema,
+  PolicyParamsSchema,
+  ConversionSchema,
+} from './buildPlan.js'
 
 const EDUCATIONAL =
   'Educational decision-support only — not tax, legal, or financial advice. Do not prescribe securities actions.'
@@ -23,10 +28,16 @@ export function registerTools(server: McpServer, session: SessionState): void {
     'build_plan',
     `${EDUCATIONAL} Build or replace the in-memory plan from typed household/policy params or full plan JSON.`,
     {
-      plan: z.unknown().optional().describe('Full RetireGolden plan JSON'),
-      household: z.unknown().optional().describe('Typed household params (bench vocabulary)'),
-      policy: z.unknown().optional().describe('Typed policy params'),
-      conversion: z.unknown().optional(),
+      plan: z.unknown().optional().describe('Full RetireGolden plan JSON (validated by the engine)'),
+      household: HouseholdParamsSchema.optional().describe(
+        'Typed household params (bench vocabulary): filing, persons[], taxable/basis, spending, horizon, growth rates, IRMAA lookback MAGIs, heir rate',
+      ),
+      policy: PolicyParamsSchema.optional().describe(
+        'Typed policy params: claim_ages[], optional conversion_bracket/conversion_years, withdrawal ordering',
+      ),
+      conversion: ConversionSchema.optional().describe(
+        'Optional manual Roth conversion schedule (overrides bracket-fill conversions)',
+      ),
       startYear: z.number().int().optional(),
       conventions: z
         .object({
@@ -63,20 +74,17 @@ export function registerTools(server: McpServer, session: SessionState): void {
 
   server.tool(
     'run_projection',
-    `${EDUCATIONAL} Run a deterministic year-by-year projection on the session plan.`,
-    {
-      startYear: z.number().int().optional(),
-    },
-    async (args) => jsonResult(adapter.runProjection(session, args.startYear)),
+    `${EDUCATIONAL} Run a deterministic year-by-year projection on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it).`,
+    {},
+    async () => jsonResult(adapter.runProjection(session)),
   )
 
   server.tool(
     'run_monte_carlo',
-    `${EDUCATIONAL} Run a Monte Carlo summary on the session plan.`,
+    `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it).`,
     {
       pathCount: z.number().int().positive().max(5000).optional(),
       seed: z.number().int().optional(),
-      startYear: z.number().int().optional(),
     },
     async (args) => jsonResult(adapter.runMonteCarlo(session, args)),
   )
@@ -85,7 +93,11 @@ export function registerTools(server: McpServer, session: SessionState): void {
     'batch_evaluate',
     `${EDUCATIONAL} Evaluate many policies against the current household plan (search-friendly). Cap batches sensibly (~40 tool calls total in agent loops).`,
     {
-      policies: z.array(z.unknown()).min(1).max(500),
+      policies: z
+        .array(PolicyParamsSchema)
+        .min(1)
+        .max(500)
+        .describe('Typed policy params to sweep: claim_ages[], conversion_bracket/years, ordering'),
       objective: z.enum(['after_tax_estate', 'cumulative_tax', 'ending_trad']).optional(),
     },
     async (args) =>
