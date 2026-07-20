@@ -6,9 +6,12 @@
 # Requires repository secret NPM_TOKEN: same @retiregolden org granular
 # automation token used by RetireGolden (publish rights on @retiregolden/mcp).
 #
-# The publish job runs in the `npm-publish` environment. The repo owner must
-# create this environment under Settings > Environments and add required
-# reviewers so releases pause for manual approval before publishing.
+# The publish job runs in the `npm-publish` environment, which requires manual
+# approval from FlyOverCoderKY before any release. Its deployment branch policy
+# allows the tag pattern `mcp-v*` plus the `main` branch; `main` is permitted
+# only so dry-runs can be dispatched, and the `guard` job below is what keeps a
+# dispatch from ever becoming a real publish. Self-review is deliberately
+# allowed (single-maintainer org — otherwise every release deadlocks).
 #
 # Recommended follow-up: adopt npm Trusted Publishing via OIDC to retire the
 # long-lived NPM_TOKEN secret entirely.
@@ -34,8 +37,24 @@ permissions:
   id-token: write
 
 jobs:
+  # Real publishes must originate from an `mcp-v*` tag push, because the tag is
+  # what triggers the version-consistency check below. A manual dispatch skips
+  # that check, so dispatch is dry-run only. This guard deliberately lives in
+  # its own ungated job: the `npm-publish` environment pauses `publish` for
+  # approval before any of its steps run, so a guard inside that job would only
+  # fire after a reviewer had already approved the deployment.
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject non-dry-run manual dispatch
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false'
+        run: |
+          echo "Manual dispatch is dry-run only. To publish for real, push a tag mcp-v<version> matching package.json." >&2
+          exit 1
+
   publish:
     runs-on: ubuntu-latest
+    needs: guard
     environment: npm-publish
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -69,9 +88,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
-          DRY_RUN: ${{ inputs.dry_run }}
+        # Belt-and-braces: any workflow_dispatch publishes with --dry-run, no
+        # matter what the dry_run input says. The `guard` job already rejects a
+        # dispatch with dry_run=false, but even if that guard is removed this
+        # step still cannot make a real release from a dispatch. Real publishes
+        # come only from an `mcp-v*` tag push (event_name = push), which is what
+        # runs the tag/package.json version check above.
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" != "false" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             npm publish --access public --dry-run
           else
             npm publish --access public --provenance
