@@ -88,12 +88,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
-          DRY_RUN: ${{ inputs.dry_run }}
-        # The `guard` job already rejects dispatch with dry_run=false, so this
-        # branch is belt-and-braces: if that guard is ever removed, a dispatch
-        # still fails safe to --dry-run rather than publishing.
+        # Belt-and-braces: any workflow_dispatch publishes with --dry-run, no
+        # matter what the dry_run input says. The `guard` job already rejects a
+        # dispatch with dry_run=false, but even if that guard is removed this
+        # step still cannot make a real release from a dispatch. Real publishes
+        # come only from an `mcp-v*` tag push (event_name = push), which is what
+        # runs the tag/package.json version check above.
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" != "false" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             npm publish --access public --dry-run
           else
             npm publish --access public --provenance
