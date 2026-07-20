@@ -6,14 +6,15 @@ Every rate below is a **fraction** (`0.05` = 5%). `pia` is **monthly** dollars a
 
 ---
 
-## 1. Single filer (bench conventions)
+## 1. Single filer (engine defaults)
 
-No `assumptions` block → bench defaults (0% inflation, KY, June-15 dob, etc.). Fine for RetireBench, wrong for a real person.
+No `assumptions` block → the engine's real-world defaults (~2.5% inflation, SS COLA tracking inflation, +3% healthcare inflation, 0% state/local tax, June-15 dob, `qualifiedRatio` 0.85). `state` is **required**. Add an `assumptions` block to model a specific inflation/return/COLA regime or a real state income-tax rate.
 
 ```json
 {
   "household": {
     "filing": "single",
+    "state": "OH",
     "persons": [
       { "birth_year": 1958, "trad": 800000, "roth": 120000, "pia": 2800 }
     ],
@@ -37,14 +38,15 @@ No `assumptions` block → bench defaults (0% inflation, KY, June-15 dob, etc.).
 
 ---
 
-## 2. MFJ with pension + real-household assumptions overrides
+## 2. MFJ with pension + explicit assumptions overrides
 
-A real couple in Ohio. The `assumptions` block overrides the bench defaults — always do this for real-user questions and **state these assumptions in your answer**.
+A real couple in Ohio. The `assumptions` block pins a specific inflation/COLA/return regime and the real Ohio state + local income-tax rates (the engine models state tax at 0% until you set `stateEffectiveTaxPct`) — **state these assumptions in your answer**.
 
 ```json
 {
   "household": {
     "filing": "mfj",
+    "state": "OH",
     "persons": [
       { "birth_year": 1959, "trad": 900000, "roth": 150000, "pia": 3000, "pension": 24000 },
       { "birth_year": 1961, "trad": 300000, "roth": 50000, "pia": 1800 }
@@ -79,7 +81,8 @@ A real couple in Ohio. The `assumptions` block overrides the bench defaults — 
 
 - `pension: 24000` = $24k/yr ordinary-taxed pension for person 0. `pia: 3000` = $3,000/**month** at FRA.
 - `claim_ages: [70, 67]` — person 0 claims at 70, person 1 at 67.
-- **Watch the unit split:** household `growth.*` and `conversion_bracket` are **fractions** (`0.05`, `0.24`), but the `assumptions.*Pct` fields are **percents** (`inflationPct: 3` means 3%, not 300%). `qualifiedRatio` is a fraction (`0.9`). Fields are optional; each omitted field falls back to its bench default.
+- **Watch the unit split:** household `growth.*` and `conversion_bracket` are **fractions** (`0.05`, `0.24`), but the `assumptions.*Pct` fields are **percents** (`inflationPct: 3` means 3%, not 300%). `qualifiedRatio` is a fraction (`0.9`). Assumptions fields are optional; each omitted field falls back to the engine default (`household.state` itself is required).
+- **`growth.*` is NOMINAL** (headline) return, not inflation-adjusted — it is written straight into the engine's nominal `annualReturnPct`. With the default ~2.5% inflation, a `growth.trad: 0.05` models ~2.5% real. Use the nominal figure you'd quote (e.g. 5%), not a real one.
 
 ---
 

@@ -3,6 +3,68 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.3.0
+
+**The typed `build_plan` path now defaults to real-world, end-user modeling
+instead of RetireBench conventions.** The MCP is marketed as a general-purpose
+retirement calculator; through 0.2.x the documented easy path silently applied
+bench conventions (0% inflation, Kentucky residency, retired-household) to real
+users. This release flips those defaults. See the governing plan,
+`enhancements/mcp-end-user-realignment.md` WS1.3.
+
+### Breaking
+
+- **Typed-path defaults flipped to the engine's own defaults.** A typed
+  `build_plan` with no `assumptions` block no longer forces the growth-neutral
+  zeros. The engine's `createEmptyPlan` defaults now flow through:
+  **inflation 2.5%/yr** (was 0%), **SS COLA `matchInflation`** i.e. tracking
+  inflation (was fixed 0%), **healthcare extra inflation +3%/yr** (was 0%),
+  **fallback return 5.5%** for accounts without an explicit rate (was 0%). State
+  and local income tax stay at the engine default **0%** (unchanged — set
+  `stateEffectiveTaxPct` / `localIncomeTaxPct` to model them). Existing numeric
+  results from a bare typed build **will change** (real inflation, non-zero COLA).
+- **`household.state` is now REQUIRED.** The old hardcoded `KY` default is gone;
+  the engine requires a residence state, so the typed household must supply a
+  2-letter `state` code. A typed build that omits it is rejected with
+  `household.state is required: provide a 2-letter state-of-residence code …`.
+  `assumptions.state` remains an override of the value used, but the household
+  must still declare one.
+- **A non-zero `wage` is now a hard error.** Previously a person's `wage` was
+  silently unmapped with a caveat; the typed path is a retired-household contract,
+  so a non-zero wage now fails the build with
+  `person <i>: wages are not modeled; remove wage or use full plan JSON`. Model
+  pre-retirement earnings via the full plan JSON path.
+
+### Changed
+
+- **`household.growth.*` is documented as NOMINAL, not real.** These fractions have
+  always been written straight into the engine's nominal `annualReturnPct`; the prior
+  "real annual return rates" wording was identity-safe only while inflation was forced
+  to 0. With the new ~2.5% default inflation the distinction matters, so the schema,
+  `SKILL.md`, `docs/clients.md`, and `examples.md` now say nominal (real ≈ growth −
+  inflation). This is a documentation/label fix — no numeric behavior changed, and the
+  new-default goldens already reflect nominal returns.
+- The state-income-tax footgun caveat now fires on the primary typed path too (whenever
+  `stateEffectiveTaxPct` is left unset, not only when `assumptions.state` is used), so a
+  plain `household.state: "CA"` build is still warned that state tax is modeled at 0%.
+- `dobMonthDay` (default `06-15`), `sex` (default `average`), and `qualifiedRatio`
+  (default `0.85`) are unchanged as neutral, overridable defaults — their tool/schema
+  descriptions now state they are defaults, not bench artifacts.
+- Every tool description, `SKILL.md`, `skills/retiregolden/references/`, and
+  `docs/clients.md` updated to document the new defaults, the required `state`
+  field, and the wage hard error, and to explain when to still pass `assumptions`.
+
+### Compatibility
+
+- **RetireBench is unaffected.** It pins `@retiregolden/mcp` at `0.2.x` and, as of
+  its WS1.2 change, passes every convention explicitly through the `assumptions`
+  block (plus `state: 'KY'`), so its scored numbers do not move with this flip.
+- **RetireGolden-Pro is not updated here.** Pro pins `^0.1.1`/`0.2.x` and needs a
+  deliberate bump to consume 0.3.0 (plan WS5.11) — intentionally out of scope.
+- The golden-number suite proves both directions: the legacy bench literals still
+  reproduce exactly when the conventions are passed explicitly (legacy override
+  path preserved), and a second golden set pins the new engine-default outputs.
+
 ## 0.2.1
 
 No functional changes. This release validates the switch to npm Trusted

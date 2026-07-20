@@ -1,10 +1,10 @@
 # Full engine-plan JSON
 
-The `plan` argument to `build_plan` accepts a complete engine plan document (schema v1), bypassing the typed `household`/`policy` path and its bench conventions. Use it when you need fields the typed path does not expose (allocations, HSA, annuities, care events, per-account estate beneficiaries, etc.).
+The `plan` argument to `build_plan` accepts a complete engine plan document (schema v1), bypassing the typed `household`/`policy` path entirely. Use it when you need fields the typed path does not expose (allocations, HSA, annuities, care events, per-account estate beneficiaries, etc.) — or to model something the typed path refuses, such as wages/pre-retirement earnings.
 
 The engine validates with `parsePlan`; on failure `build_plan` returns `ok: false` with `issues[]`. **Engine rates are percents here** (`annualReturnPct: 5`, `inflationPct: 0`, `heirTaxRatePct: 24`) — this is the internal model, unlike the typed path's fractions.
 
-The example below is minimal but parseable (it round-trips through `parsePlan`), and mirrors the MFJ household in `examples.md` under bench conventions.
+The example below is minimal but parseable (it round-trips through `parsePlan`), and mirrors the MFJ household in `examples.md`. Its `assumptions` are set to explicit growth-neutral zeros for a self-contained, deterministic sample — the typed path no longer defaults to these (see `SKILL.md`).
 
 ## Section notes
 
@@ -14,7 +14,7 @@ The example below is minimal but parseable (it round-trips through `parsePlan`),
 - **incomes** — a union by `type`: `socialSecurity` (with `piaMonthly` and `claimAge`), `recurring` (pensions/other, with `taxTreatment`), `wages`, and `oneTime`.
 - **expenses** — `baseAnnual` spending plus phases, one-time goals, and the `healthcare` premium/Medicare block.
 - **strategies** — `withdrawalOrder`, `rothConversion` (here `fillToTarget` at top of the 24% bracket for 2026–2030), and `qcdAnnual`.
-- **assumptions** — economic knobs: inflation, SS COLA, state/local tax, `recentAnnualMagi` (IRMAA lookback), heir tax rate, safe-withdrawal rate. Bench conventions set the growth-neutral zeros shown here.
+- **assumptions** — economic knobs: inflation, SS COLA, state/local tax, `recentAnnualMagi` (IRMAA lookback), heir tax rate, safe-withdrawal rate. This sample sets explicit growth-neutral zeros; a real plan supplies real values (the typed path fills unset fields from the engine defaults).
 - **scenarios** — named `patch` overlays for comparison; empty here.
 
 ## Example

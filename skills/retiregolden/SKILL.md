@@ -21,13 +21,15 @@ Household/policy rates are **fractions** (`0.05` = 5%); passing `5` where `0.05`
 
 | Field | Unit | Example |
 |---|---|---|
-| `growth.trad` / `growth.roth` / `growth.taxable` | fraction (annual return) | `0.05` = 5% |
+| `growth.trad` / `growth.roth` / `growth.taxable` | fraction — **nominal** annual return | `0.05` = 5% headline (real ≈ 5% − inflation) |
 | `conversion_bracket` | fraction (tax bracket top) | `0.24` = the 24% bracket |
 | `heir_ordinary_rate` | fraction | `0.24` = 24% |
 | `assumptions.*Pct` (the `Pct`-suffixed overrides) | **percent** | `2.5` = 2.5% |
 | `assumptions.qualifiedRatio` | fraction (0–1) | `0.85` |
 | `pia` | **monthly** dollars at FRA | `3000` = $3,000/mo |
-| `pension` / `wage` | **annual** dollars | `24000` = $24k/yr |
+| `pension` | **annual** dollars | `24000` = $24k/yr |
+| `wage` | **not modeled** — a non-zero value is a hard error | omit it (retired household) or use full plan JSON |
+| `state` (household) | **2-letter code, REQUIRED** | `"OH"`, `"CA"` |
 | `taxable` / `trad` / `roth` | dollars (balance) | `400000` |
 | `taxable_basis` | dollars (cost basis) | `250000` |
 | `spending` | annual dollars | `90000` |
@@ -36,20 +38,30 @@ Household/policy rates are **fractions** (`0.05` = 5%); passing `5` where `0.05`
 
 > Full worked `build_plan` calls (single filer, MFJ with pension, batch sweep): **`references/examples.md`**.
 
-## Typed-path assumptions — READ BEFORE ANSWERING REAL USERS
+## Typed-path defaults and assumptions (v0.3.0)
 
-> **⚠️ The typed `household`/`policy` path defaults to RetireBench conventions, not the real world.**
-> With no overrides it bakes in: **0% inflation, 0% SS COLA, state KY with 0% state/local tax, June-15 birthdays, `qualifiedRatio` 0.85, and a retired household (wages are unmapped/ignored).** These are correct for bench replication and **wrong for a real household.**
+As of **v0.3.0** the typed `household`/`policy` path defaults to **end-user-appropriate, real-world modeling** — no more baked-in RetireBench conventions. With no `assumptions` block the ENGINE's own defaults flow through:
 
-For any real-user question, pass an **`assumptions`** block on `build_plan` to override each convention, and **state the assumptions you used** in your answer. Fields (all optional; each falls back to the bench default):
+- **~2.5%/yr inflation** (was 0%), **SS COLA tracking inflation** (was fixed 0%), **+3%/yr healthcare inflation above general**, **5.5% fallback return** (for accounts without an explicit rate).
+- **0% state & local income tax** — the engine models these at 0 until you set `stateEffectiveTaxPct` / `localIncomeTaxPct`. **Naming a state does not by itself switch on that state's income tax.**
+- Neutral, overridable placeholders: **June-15 birthdays**, `sex` **average**, `qualifiedRatio` **0.85**.
 
-`inflationPct`, `ssColaPct`, `defaultReturnPct`, `healthcareExtraInflationPct`, `stateEffectiveTaxPct`, `localIncomeTaxPct` — all **percents** (`2.5` = 2.5%) · `state` (2-letter code, e.g. `"OH"`; null/omitted keeps KY) · `qualifiedRatio` (fraction 0–1) · `dobMonthDay` (`"MM-DD"`, e.g. `"06-15"`) · `sex` (`male` / `female` / `average`).
+Two things are now **required / hard errors**, not silent assumptions:
 
-Do NOT flip the defaults yourself — set real values explicitly. See `references/examples.md` for a real-household MFJ call with overrides.
+1. **`household.state` is REQUIRED** (2-letter code). A typed build that omits it is rejected with a clear issue. `assumptions.state` can override the value used, but the household must still declare one.
+2. **Wages are not modeled.** A non-zero `wage` on any person is a **hard build error** (`wages are not modeled; remove wage or use full plan JSON`) — the typed path is a retired-household contract. Model pre-retirement earnings via full plan JSON.
+
+When to still pass an **`assumptions`** block: to model a specific inflation/return regime, a real state income-tax rate, a specific COLA, or real birth dates — and **state the assumptions you used** in your answer. Override fields (all optional; each omitted field keeps the engine default):
+
+`inflationPct`, `ssColaPct`, `defaultReturnPct`, `healthcareExtraInflationPct`, `stateEffectiveTaxPct`, `localIncomeTaxPct` — all **percents** (`2.5` = 2.5%) · `state` (2-letter override; omitted uses `household.state`) · `qualifiedRatio` (fraction 0–1) · `dobMonthDay` (`"MM-DD"`, e.g. `"06-15"`) · `sex` (`male` / `female` / `average`).
+
+> RetireBench replication: to reproduce the pre-0.3.0 growth-neutral numbers, pass every convention explicitly (`inflationPct: 0`, `ssColaPct: 0`, `state: "KY"`, `stateEffectiveTaxPct: 0`, etc.). The bench harness does exactly this and pins the package version.
+
+See `references/examples.md` for a real-household MFJ call with overrides.
 
 ## Error & caveat semantics
 
-- Tools return their failures **as successful MCP results** with `ok: false` and an `error` code — inspect the JSON body, do not treat these as tool crashes. Codes include `NO_PLAN` (call `build_plan` first), `OPTIMIZER_FAILED`, `SPENDING_SOLVER_FAILED`, `INVALID_PLAN_A` / `INVALID_PLAN_B`. Invalid `build_plan` input returns `ok: false` with an `issues[]` array.
+- Tools return their failures **as successful MCP results** with `ok: false` and an `error` code — inspect the JSON body, do not treat these as tool crashes. Codes include `NO_PLAN` (call `build_plan` first), `OPTIMIZER_FAILED`, `SPENDING_SOLVER_FAILED`, `INVALID_PLAN_A` / `INVALID_PLAN_B`. Invalid `build_plan` input returns `ok: false` with an `issues[]` array — including the two v0.3.0 hard errors: a **missing/invalid `household.state`** and a **non-zero `wage`** (wages are not modeled).
 - **`caveats[]` accumulates approximations** (e.g. IRMAA single-scalar MAGI, `traditional-first` ordering under sequential drain, best-effort law-sunset freeze). It rides along on build, projection, and batch results — **surface it to the user**; never drop it.
 - `explain_modeled_result` returns `framing`, `assumptions`, `conventions`, `caveats`, and `limitations`. Call it when summarizing so the modeling boundaries stay visible.
 

@@ -4,6 +4,7 @@ import { setPlanFromBuild, runProjection, batchEvaluate } from '../src/adapter.j
 
 const sampleHousehold = {
   filing: 'single' as const,
+  state: 'KY',
   persons: [
     {
       birth_year: 1960,

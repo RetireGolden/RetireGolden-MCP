@@ -7,6 +7,7 @@ import type { HouseholdParams, PolicyParams } from '../src/buildPlan.js'
 
 export const singleHousehold: HouseholdParams = {
   filing: 'single',
+  state: 'KY',
   persons: [{ birth_year: 1960, trad: 800_000, roth: 100_000, pia: 2500, fra_years: 67 }],
   taxable: 200_000,
   taxable_basis: 150_000,
@@ -27,6 +28,7 @@ export const singlePolicy: PolicyParams = {
 /** Married-filing-jointly, two people, one with a pension. */
 export const mfjHousehold: HouseholdParams = {
   filing: 'mfj',
+  state: 'KY',
   persons: [
     { birth_year: 1958, trad: 900_000, roth: 150_000, pia: 2800, pension: 24_000, fra_years: 67 },
     { birth_year: 1960, trad: 400_000, roth: 80_000, pia: 1900, fra_years: 67 },
