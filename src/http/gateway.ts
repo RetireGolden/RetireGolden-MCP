@@ -7,22 +7,13 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { z } from 'zod'
 import { createSession, type SessionState } from '../session.js'
-import * as adapter from '../adapter.js'
-import {
-  HouseholdParamsSchema,
-  PolicyParamsSchema,
-  ConversionSchema,
-  type BuildPlanInput,
-  type PolicyParams,
-} from '../buildPlan.js'
+import { getTool, validateToolArgs } from '../toolTable.js'
 
 const DEFAULT_PORT = Number(process.env.PORT ?? process.env.FUNCTIONS_CUSTOMHANDLER_PORT ?? 8787)
 const DEFAULT_HOST = process.env.RETIREGOLDEN_HTTP_HOST ?? '127.0.0.1'
 
 const MAX_BODY_BYTES = 1024 * 1024
-const MAX_POLICIES = 500
 const MAX_SESSIONS = 100
 const MAX_SESSION_ID_LENGTH = 128
 const SESSION_TTL_MS = 30 * 60 * 1000
@@ -38,40 +29,6 @@ function sweepExpired(now: number): void {
   for (const [id, entry] of sessions) {
     if (now - entry.lastSeen > SESSION_TTL_MS) sessions.delete(id)
   }
-}
-
-const PoliciesSchema = z.array(PolicyParamsSchema).min(1).max(MAX_POLICIES)
-const ObjectiveSchema = z.enum(['after_tax_estate', 'cumulative_tax', 'ending_trad'])
-
-function zodIssues(error: z.ZodError): string {
-  return error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
-}
-
-/** Enforce the same constraints the stdio zod schemas apply. Returns an error message or null. */
-function validateArgs(tool: string, args: Record<string, unknown>): string | null {
-  if (tool === 'build_plan') {
-    if (args.plan == null) {
-      if (args.household == null || args.policy == null) {
-        return 'Provide either `plan` JSON or both `household` and `policy`'
-      }
-      const h = HouseholdParamsSchema.safeParse(args.household)
-      if (!h.success) return `Invalid household: ${zodIssues(h.error)}`
-      const p = PolicyParamsSchema.safeParse(args.policy)
-      if (!p.success) return `Invalid policy: ${zodIssues(p.error)}`
-    }
-    if (args.conversion != null) {
-      const c = ConversionSchema.safeParse(args.conversion)
-      if (!c.success) return `Invalid conversion: ${zodIssues(c.error)}`
-    }
-  }
-  if (tool === 'batch_evaluate') {
-    const policies = PoliciesSchema.safeParse(args.policies)
-    if (!policies.success) return `Invalid policies: ${zodIssues(policies.error)}`
-    if (args.objective != null && !ObjectiveSchema.safeParse(args.objective).success) {
-      return 'Invalid objective: expected after_tax_estate | cumulative_tax | ending_trad'
-    }
-  }
-  return null
 }
 
 /**
@@ -121,8 +78,10 @@ function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | n
  * Minimal JSON-RPC-ish HTTP facade for smoke tests and future Azure Functions
  * wrapping. Not a full MCP Streamable HTTP implementation yet — Phase 6 stub.
  *
- * Exposes 5 of the 11 stdio tools: build_plan, run_projection, batch_evaluate,
- * run_optimizer, explain_modeled_result.
+ * The tool surface, arg schemas, and handlers are shared with stdio via the
+ * declarative table (src/toolTable.ts); only the tools flagged httpExposed are
+ * reachable here (build_plan, run_projection, batch_evaluate, run_optimizer,
+ * explain_modeled_result). Everything else answers UNKNOWN_TOOL.
  *
  * Resolves with the listening http.Server so embedders and tests can close it.
  */
@@ -179,20 +138,14 @@ export async function startHttpGateway(
     const tool = body.tool
     const args = body.arguments ?? {}
 
-    const KNOWN_TOOLS = [
-      'build_plan',
-      'run_projection',
-      'batch_evaluate',
-      'run_optimizer',
-      'explain_modeled_result',
-    ]
-    if (typeof tool !== 'string' || !KNOWN_TOOLS.includes(tool)) {
+    const toolEntry = typeof tool === 'string' ? getTool(tool) : undefined
+    if (!toolEntry || !toolEntry.httpExposed) {
       res.writeHead(400)
       res.end(JSON.stringify({ error: 'UNKNOWN_TOOL', tool }))
       return
     }
 
-    const invalid = validateArgs(tool, args)
+    const invalid = validateToolArgs(toolEntry, args)
     if (invalid) {
       res.writeHead(400)
       res.end(JSON.stringify({ error: 'INVALID_ARGS', message: invalid }))
@@ -214,29 +167,8 @@ export async function startHttpGateway(
     entry.lastSeen = now
     const session = entry.state
 
-    let result: unknown
     try {
-      switch (tool) {
-        case 'build_plan':
-          result = adapter.setPlanFromBuild(session, args as BuildPlanInput)
-          break
-        case 'run_projection':
-          result = adapter.runProjection(session)
-          break
-        case 'batch_evaluate':
-          result = adapter.batchEvaluate(
-            session,
-            args.policies as PolicyParams[],
-            (args.objective as 'after_tax_estate') ?? 'after_tax_estate',
-          )
-          break
-        case 'run_optimizer':
-          result = await adapter.runOptimizer(session)
-          break
-        case 'explain_modeled_result':
-          result = adapter.explainModeledResult(session)
-          break
-      }
+      const result = await toolEntry.handler(session, args)
       res.writeHead(200)
       res.end(JSON.stringify(result))
     } catch (e) {

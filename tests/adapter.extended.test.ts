@@ -18,9 +18,9 @@ function mfjSession() {
 describe('runProjection — MFJ two-person with pension', () => {
   it('returns a full ledger with sane numeric outputs', () => {
     const session = mfjSession()
-    const proj = adapter.runProjection(session)
+    const proj = adapter.runProjection(session, { detail: 'years' })
     expect(proj.ok).toBe(true)
-    if (!proj.ok) return
+    if (!proj.ok || !('years' in proj)) return
     expect(proj.startYear).toBe(2026)
     expect(proj.endYear).toBe(2040)
     expect(proj.years).toHaveLength(15)
@@ -63,9 +63,9 @@ describe('runProjection — ordering modes surface their caveats', () => {
       household: singleHousehold,
       policy: { ...singlePolicy, ordering: 'proportional' },
     })
-    const proj = adapter.runProjection(session)
+    const proj = adapter.runProjection(session, { detail: 'years' })
     expect(proj.ok).toBe(true)
-    if (proj.ok) expect(proj.years.length).toBeGreaterThan(0)
+    if (proj.ok && 'years' in proj) expect(proj.years.length).toBeGreaterThan(0)
   })
 
   it('traditional-first carries its approximate-ordering caveat through the projection', () => {

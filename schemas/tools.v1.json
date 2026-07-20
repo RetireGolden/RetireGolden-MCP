@@ -14,6 +14,7 @@
     "compare_scenarios",
     "explain_modeled_result",
     "get_session",
+    "export_plan",
     "clear_session"
   ],
   "calculator_arm": ["build_plan", "run_projection", "batch_evaluate"],

@@ -40,9 +40,9 @@ describe('adapter', () => {
     expect(built.ok).toBe(true)
     expect(session.plan).not.toBeNull()
 
-    const proj = runProjection(session)
+    const proj = runProjection(session, { detail: 'years' })
     expect(proj.ok).toBe(true)
-    if (proj.ok) {
+    if (proj.ok && 'years' in proj) {
       expect(proj.years.length).toBeGreaterThan(0)
       expect(proj.summary).toBeTruthy()
     }

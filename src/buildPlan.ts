@@ -67,6 +67,57 @@ export const PolicyParamsSchema = z.object({
 })
 export type PolicyParams = z.infer<typeof PolicyParamsSchema>
 
+export const AssumptionsSchema = z
+  .object({
+    inflationPct: z
+      .number()
+      .optional()
+      .describe('General price inflation, in percent per year (e.g. 2.5 for 2.5%)'),
+    healthcareExtraInflationPct: z
+      .number()
+      .optional()
+      .describe('Healthcare inflation above general inflation, in percent per year (e.g. 2 for +2%)'),
+    defaultReturnPct: z
+      .number()
+      .optional()
+      .describe('Fallback nominal annual return for accounts without an explicit rate, in percent'),
+    ssColaPct: z
+      .number()
+      .optional()
+      .describe('Social Security COLA as a fixed annual percent (e.g. 2.5 for 2.5%/yr)'),
+    state: z
+      .string()
+      .length(2)
+      .nullable()
+      .optional()
+      .describe('2-letter state-of-residence code (e.g. "CA"); omitted keeps the default (KY, with 0% state tax unless stateEffectiveTaxPct is set)'),
+    stateEffectiveTaxPct: z
+      .number()
+      .optional()
+      .describe('Flat effective state income tax rate, in percent'),
+    localIncomeTaxPct: z
+      .number()
+      .optional()
+      .describe('Flat local income tax rate, in percent'),
+    qualifiedRatio: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Fraction (0-1) of taxable-account dividends taxed at qualified rates (e.g. 0.85)'),
+    dobMonthDay: z
+      .string()
+      .regex(/^\d{2}-\d{2}$/)
+      .optional()
+      .describe('Birth month-day as "MM-DD", combined with each person birth_year (e.g. "06-15")'),
+    sex: z
+      .enum(['female', 'male', 'average'])
+      .optional()
+      .describe('Person sex for mortality/longevity: female, male, or average (percent-free enum)'),
+  })
+  .describe('Optional overrides for the typed-path default modeling assumptions (0% inflation, 0% SS COLA, state KY with 0% state tax); set real values when modeling a real household — omitted fields keep their defaults')
+export type AssumptionsInput = z.infer<typeof AssumptionsSchema>
+
 export const ConversionSchema = z
   .object({
     mode: z.literal('manual'),
@@ -83,6 +134,7 @@ export interface BuildPlanInput {
   conversion?: ConversionInput
   startYear?: number
   conventions?: ConventionKnobs
+  assumptions?: AssumptionsInput
 }
 
 export interface BuildPlanResult {
@@ -163,10 +215,16 @@ function buildTypedPlan(
     return { ok: false, startYear, caveats, issues: [`unknown filing ${hh.filing}`] }
   }
 
+  const asmpt = input.assumptions
+
   const plan = createEmptyPlan({ newId, now, name: 'mcp-session' })
   plan.household.filingStatus = filing
-  plan.household.state = 'KY'
+  // state override is applied only for a provided 2-letter code; null/absent keeps the
+  // bench default (the engine's household.state is a required string, not nullable).
+  plan.household.state = asmpt?.state ?? 'KY'
 
+  const dobMonthDay = asmpt?.dobMonthDay ?? '06-15'
+  const sex = asmpt?.sex ?? 'average'
   plan.household.people = hh.persons.map((p, i) => {
     if ((p.wage ?? 0) !== 0) {
       caveats.push(
@@ -176,8 +234,8 @@ function buildTypedPlan(
     return {
       id: `person-${i}`,
       name: `P${i}`,
-      dob: `${p.birth_year}-06-15`,
-      sex: 'average' as const,
+      dob: `${p.birth_year}-${dobMonthDay}`,
+      sex,
       retirementAge: Math.max(1, startYear - p.birth_year - 1),
       longevity: { planningAge: endYear - p.birth_year, source: 'manual' as const },
     }
@@ -217,7 +275,7 @@ function buildTypedPlan(
     costBasis: hh.taxable_basis,
     interestYieldPct: 0,
     dividendYieldPct: 0,
-    qualifiedRatio: 0.85,
+    qualifiedRatio: asmpt?.qualifiedRatio ?? 0.85,
     reinvestDividends: true,
     annualContribution: 0,
   })
@@ -290,13 +348,13 @@ function buildTypedPlan(
   }
 
   const a = plan.assumptions
-  a.inflationPct = 0
-  a.healthcareExtraInflationPct = 0
-  a.defaultReturnPct = 0
-  a.ssCola = { mode: 'fixed', annualPct: 0 }
+  a.inflationPct = asmpt?.inflationPct ?? 0
+  a.healthcareExtraInflationPct = asmpt?.healthcareExtraInflationPct ?? 0
+  a.defaultReturnPct = asmpt?.defaultReturnPct ?? 0
+  a.ssCola = { mode: 'fixed', annualPct: asmpt?.ssColaPct ?? 0 }
   a.ssHaircut = null
-  a.stateEffectiveTaxPct = 0
-  a.localIncomeTaxPct = 0
+  a.stateEffectiveTaxPct = asmpt?.stateEffectiveTaxPct ?? 0
+  a.localIncomeTaxPct = asmpt?.localIncomeTaxPct ?? 0
   a.heirTaxRatePct = hh.heir_ordinary_rate * 100
 
   const pre = conventions.irmaaLookbackMagis ?? hh.pre_horizon_magi ?? ([0, 0] as [number, number])
