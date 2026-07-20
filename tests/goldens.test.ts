@@ -5,7 +5,7 @@
  *
  *  1. LEGACY bench-convention goldens (`describe('golden numbers — … [legacy …]')`).
  *     The RetireBench conventions (0% inflation, state KY, zero state tax, June-15
- *     dobs, sex 'average', qualifiedRatio 0.85) built via the `assumptions` block,
+ *     DOBs, sex 'average', qualifiedRatio 0.85) built via the `assumptions` block,
  *     NOT via bare typed-path defaults. After the WS1.3 default flip a bare build
  *     no longer reproduces these — the typed-path defaults now follow the ENGINE
  *     (2.5% inflation, matchInflation SS COLA, etc.) — so every bench convention is
