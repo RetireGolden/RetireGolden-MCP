@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildPlanFromParams } from '../src/buildPlan.js'
+import { getTool, validateToolArgs } from '../src/toolTable.js'
 import { mfjHousehold, mfjPolicy, singleHousehold, singlePolicy } from './fixtures.js'
 
 describe('buildPlanFromParams — typed household branch', () => {
@@ -119,6 +120,21 @@ describe('buildPlanFromParams — full plan JSON branch', () => {
     expect(res.caveats.some((c) => c.includes('full plan JSON was supplied'))).toBe(true)
   })
 
+  it('accepts mixed-mode plan JSON alongside a household with a MALFORMED state (household ignored)', () => {
+    // Regression: schema-level state-format validation would reject this before the
+    // full-plan precedence rule runs. State format is validated only on the typed
+    // path, so a bad `state` on an ignored household must not block a valid plan.
+    const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
+    const planJson = JSON.parse(JSON.stringify(built.plan))
+    const res = buildPlanFromParams({
+      plan: planJson,
+      household: { ...mfjHousehold, state: 'California' }, // malformed, but ignored
+      policy: mfjPolicy,
+    })
+    expect(res.ok).toBe(true)
+    expect(res.issues).toBeUndefined()
+  })
+
   it('plan JSON alone produces no ignored-fields caveat', () => {
     const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
     const planJson = JSON.parse(JSON.stringify(built.plan))
@@ -222,6 +238,35 @@ describe('buildPlanFromParams — validation guards', () => {
       policy: singlePolicy,
     })
     expect(res.ok).toBe(true)
+  })
+})
+
+describe('build_plan gateway arg validation (state format deferred to typed path)', () => {
+  const entry = getTool('build_plan')!
+
+  it('accepts a valid plan alongside a malformed-state household (mixed-mode)', () => {
+    // Both transports run validateToolArgs before the handler. A schema-level state
+    // format rule would reject this even though full plan JSON takes precedence.
+    const err = validateToolArgs(entry, {
+      plan: { anything: true },
+      household: { ...mfjHousehold, state: 'California' },
+      policy: mfjPolicy,
+    })
+    expect(err).toBeNull()
+  })
+
+  it('rejects a typed-path build (no plan) whose household state is missing', () => {
+    const { state: _dropped, ...noState } = singleHousehold
+    const err = validateToolArgs(entry, { household: noState, policy: singlePolicy })
+    expect(err).toContain('household.state is required on the typed path')
+  })
+
+  it('rejects a typed-path build (no plan) whose household state is malformed', () => {
+    const err = validateToolArgs(entry, {
+      household: { ...singleHousehold, state: 'California' },
+      policy: singlePolicy,
+    })
+    expect(err).toContain('household.state is required on the typed path')
   })
 })
 

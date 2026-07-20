@@ -27,16 +27,18 @@ export type PersonParams = z.infer<typeof PersonParamsSchema>
 
 export const HouseholdParamsSchema = z.object({
   filing: z.enum(['single', 'mfj']).describe('Tax filing status: single or married-filing-jointly'),
-  // Optional at the Zod layer so mixed-mode `build_plan({ plan, household })`
-  // still validates (full plan JSON takes precedence and the household is ignored).
-  // Required-ness is enforced on the typed path in buildPlanFromParams and mirrored
-  // in the gateway crossFieldValidate when no `plan` is supplied.
+  // Deliberately no format constraint (no `.length(2)`) at the Zod layer: both
+  // transports parse HouseholdParamsSchema before buildPlanFromParams runs, so any
+  // schema-level rule here would reject mixed-mode `build_plan({ plan, household })`
+  // even though full plan JSON takes precedence and the household is ignored. Both
+  // presence AND 2-letter format are enforced on the typed path in
+  // buildPlanFromParams, and mirrored in the gateway crossFieldValidate when no
+  // `plan` is supplied.
   state: z
     .string()
-    .length(2)
     .optional()
     .describe(
-      '2-letter state-of-residence code — REQUIRED on the typed path (omitting it fails the build when no full `plan` is supplied), e.g. "CA". The engine requires a residence state — there is no hardcoded default. `assumptions.state` can override the value used. NOTE: naming a state does NOT by itself model that state\'s income tax; set `assumptions.stateEffectiveTaxPct` for that.',
+      '2-letter state-of-residence code — REQUIRED on the typed path (omitting or malforming it fails the build when no full `plan` is supplied), e.g. "CA". The engine requires a residence state — there is no hardcoded default. `assumptions.state` can override the value used. NOTE: naming a state does NOT by itself model that state\'s income tax; set `assumptions.stateEffectiveTaxPct` for that.',
     ),
   persons: z.array(PersonParamsSchema).min(1).describe('One entry per household member'),
   taxable: z.number().min(0).describe('Taxable brokerage balance in dollars'),
@@ -118,9 +120,11 @@ export const AssumptionsSchema = z
       .number()
       .optional()
       .describe('Social Security COLA as a fixed annual percent (e.g. 2.5 for 2.5%/yr)'),
+    // No `.length(2)` here either: assumptions are also ignored under full-plan
+    // precedence, so schema-level format validation would break the same mixed-mode
+    // flow. Format is enforced on the typed path in buildPlanFromParams.
     state: z
       .string()
-      .length(2)
       .nullable()
       .optional()
       .describe('2-letter state-of-residence OVERRIDE (e.g. "CA"); when omitted or null, the required household.state is used. NOTE: setting state alone does NOT model that state\'s income tax — state tax stays 0% unless you also set stateEffectiveTaxPct'),
