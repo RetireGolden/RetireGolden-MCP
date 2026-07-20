@@ -6,17 +6,25 @@
  * same adapter, different transport.
  */
 
-import { createServer } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { z } from 'zod'
 import { createSession, type SessionState } from '../session.js'
 import * as adapter from '../adapter.js'
-import type { BuildPlanInput, PolicyParams } from '../buildPlan.js'
+import {
+  HouseholdParamsSchema,
+  PolicyParamsSchema,
+  ConversionSchema,
+  type BuildPlanInput,
+  type PolicyParams,
+} from '../buildPlan.js'
 
-const PORT = Number(process.env.PORT ?? process.env.FUNCTIONS_CUSTOMHANDLER_PORT ?? 8787)
-const HOST = process.env.RETIREGOLDEN_HTTP_HOST ?? '127.0.0.1'
+const DEFAULT_PORT = Number(process.env.PORT ?? process.env.FUNCTIONS_CUSTOMHANDLER_PORT ?? 8787)
+const DEFAULT_HOST = process.env.RETIREGOLDEN_HTTP_HOST ?? '127.0.0.1'
 
 const MAX_BODY_BYTES = 1024 * 1024
 const MAX_POLICIES = 500
 const MAX_SESSIONS = 100
+const MAX_SESSION_ID_LENGTH = 128
 const SESSION_TTL_MS = 30 * 60 * 1000
 
 interface SessionEntry {
@@ -32,31 +40,75 @@ function sweepExpired(now: number): void {
   }
 }
 
-function isPolicyShape(p: unknown): p is PolicyParams {
-  if (typeof p !== 'object' || p === null) return false
-  const o = p as Record<string, unknown>
-  if (!Array.isArray(o.claim_ages) || !o.claim_ages.every((a) => typeof a === 'number')) return false
-  if (typeof o.ordering !== 'string') return false
-  return true
+const PoliciesSchema = z.array(PolicyParamsSchema).min(1).max(MAX_POLICIES)
+const ObjectiveSchema = z.enum(['after_tax_estate', 'cumulative_tax', 'ending_trad'])
+
+function zodIssues(error: z.ZodError): string {
+  return error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
 }
 
-/** Enforce the same caps the stdio zod schemas apply. Returns an error code or null. */
+/** Enforce the same constraints the stdio zod schemas apply. Returns an error message or null. */
 function validateArgs(tool: string, args: Record<string, unknown>): string | null {
   if (tool === 'build_plan') {
-    if (args.plan == null && (typeof args.household !== 'object' || args.household === null)) {
-      return 'Provide either `plan` JSON or `household` + `policy`'
+    if (args.plan == null) {
+      if (args.household == null || args.policy == null) {
+        return 'Provide either `plan` JSON or both `household` and `policy`'
+      }
+      const h = HouseholdParamsSchema.safeParse(args.household)
+      if (!h.success) return `Invalid household: ${zodIssues(h.error)}`
+      const p = PolicyParamsSchema.safeParse(args.policy)
+      if (!p.success) return `Invalid policy: ${zodIssues(p.error)}`
     }
-    if (args.policy != null && !isPolicyShape(args.policy)) {
-      return 'Invalid `policy` shape'
+    if (args.conversion != null) {
+      const c = ConversionSchema.safeParse(args.conversion)
+      if (!c.success) return `Invalid conversion: ${zodIssues(c.error)}`
     }
   }
   if (tool === 'batch_evaluate') {
-    const policies = args.policies
-    if (!Array.isArray(policies)) return 'policies must be an array'
-    if (policies.length > MAX_POLICIES) return `policies exceeds max of ${MAX_POLICIES}`
-    if (!policies.every(isPolicyShape)) return 'Invalid policy in policies[]'
+    const policies = PoliciesSchema.safeParse(args.policies)
+    if (!policies.success) return `Invalid policies: ${zodIssues(policies.error)}`
+    if (args.objective != null && !ObjectiveSchema.safeParse(args.objective).success) {
+      return 'Invalid objective: expected after_tax_estate | cumulative_tax | ending_trad'
+    }
   }
   return null
+}
+
+/**
+ * Read the request body up to MAX_BODY_BYTES. On overflow, responds 413 before
+ * tearing the connection down and returns null.
+ */
+function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = []
+    let received = 0
+    let settled = false
+    req.on('data', (chunk: Buffer) => {
+      if (settled) return
+      received += chunk.length
+      if (received > MAX_BODY_BYTES) {
+        settled = true
+        chunks.length = 0
+        res.writeHead(413, { Connection: 'close' })
+        res.end(JSON.stringify({ error: 'PAYLOAD_TOO_LARGE' }))
+        // Keep draining (discarding) the remaining body so the client can read
+        // the 413 before the connection closes; bounded by server.requestTimeout.
+        resolve(null)
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      if (settled) return
+      settled = true
+      resolve(Buffer.concat(chunks))
+    })
+    req.on('error', () => {
+      if (settled) return
+      settled = true
+      resolve(null)
+    })
+  })
 }
 
 /**
@@ -65,8 +117,15 @@ function validateArgs(tool: string, args: Record<string, unknown>): string | nul
  *
  * Exposes 5 of the 11 stdio tools: build_plan, run_projection, batch_evaluate,
  * run_optimizer, explain_modeled_result.
+ *
+ * Resolves with the listening http.Server so embedders and tests can close it.
  */
-export async function startHttpGateway(): Promise<void> {
+export async function startHttpGateway(
+  opts: { port?: number; host?: string } = {},
+): Promise<Server> {
+  const port = opts.port ?? DEFAULT_PORT
+  const host = opts.host ?? DEFAULT_HOST
+
   const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json')
     const now = Date.now()
@@ -89,7 +148,53 @@ export async function startHttpGateway(): Promise<void> {
       res.end(JSON.stringify({ error: 'MISSING_SESSION_ID' }))
       return
     }
+    if (sessionId.length > MAX_SESSION_ID_LENGTH) {
+      res.writeHead(400)
+      res.end(
+        JSON.stringify({
+          error: 'INVALID_SESSION_ID',
+          message: `x-session-id exceeds ${MAX_SESSION_ID_LENGTH} characters`,
+        }),
+      )
+      return
+    }
 
+    const raw = await readBody(req, res)
+    if (raw == null) return
+
+    let body: { tool?: string; arguments?: Record<string, unknown> }
+    try {
+      body = JSON.parse(raw.toString('utf8')) as typeof body
+    } catch {
+      res.writeHead(400)
+      res.end(JSON.stringify({ error: 'INVALID_JSON' }))
+      return
+    }
+    const tool = body.tool
+    const args = body.arguments ?? {}
+
+    const KNOWN_TOOLS = [
+      'build_plan',
+      'run_projection',
+      'batch_evaluate',
+      'run_optimizer',
+      'explain_modeled_result',
+    ]
+    if (typeof tool !== 'string' || !KNOWN_TOOLS.includes(tool)) {
+      res.writeHead(400)
+      res.end(JSON.stringify({ error: 'UNKNOWN_TOOL', tool }))
+      return
+    }
+
+    const invalid = validateArgs(tool, args)
+    if (invalid) {
+      res.writeHead(400)
+      res.end(JSON.stringify({ error: 'INVALID_ARGS', message: invalid }))
+      return
+    }
+
+    // Allocate the session only for a fully validated request so malformed or
+    // oversized traffic cannot exhaust the session cap.
     let entry = sessions.get(sessionId)
     if (!entry) {
       if (sessions.size >= MAX_SESSIONS) {
@@ -103,50 +208,6 @@ export async function startHttpGateway(): Promise<void> {
     entry.lastSeen = now
     const session = entry.state
 
-    const chunks: Buffer[] = []
-    let received = 0
-    let tooLarge = false
-    for await (const chunk of req) {
-      received += (chunk as Buffer).length
-      if (received > MAX_BODY_BYTES) {
-        tooLarge = true
-        req.destroy()
-        break
-      }
-      chunks.push(chunk as Buffer)
-    }
-    if (tooLarge) {
-      if (!res.headersSent) {
-        res.writeHead(413)
-        res.end(JSON.stringify({ error: 'PAYLOAD_TOO_LARGE' }))
-      }
-      return
-    }
-
-    let body: { tool?: string; arguments?: Record<string, unknown> }
-    try {
-      body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof body
-    } catch {
-      res.writeHead(400)
-      res.end(JSON.stringify({ error: 'INVALID_JSON' }))
-      return
-    }
-    const tool = body.tool
-    const args = body.arguments ?? {}
-
-    if (typeof tool !== 'string') {
-      res.writeHead(400)
-      res.end(JSON.stringify({ error: 'UNKNOWN_TOOL', tool }))
-      return
-    }
-
-    const invalid = validateArgs(tool, args)
-    if (invalid) {
-      res.writeHead(400)
-      res.end(JSON.stringify({ error: 'INVALID_ARGS', message: invalid }))
-      return
-    }
-
     let result: unknown
     try {
       switch (tool) {
@@ -159,7 +220,7 @@ export async function startHttpGateway(): Promise<void> {
         case 'batch_evaluate':
           result = adapter.batchEvaluate(
             session,
-            (args.policies as PolicyParams[]) ?? [],
+            args.policies as PolicyParams[],
             (args.objective as 'after_tax_estate') ?? 'after_tax_estate',
           )
           break
@@ -169,10 +230,6 @@ export async function startHttpGateway(): Promise<void> {
         case 'explain_modeled_result':
           result = adapter.explainModeledResult(session)
           break
-        default:
-          res.writeHead(400)
-          res.end(JSON.stringify({ error: 'UNKNOWN_TOOL', tool }))
-          return
       }
       res.writeHead(200)
       res.end(JSON.stringify(result))
@@ -184,9 +241,15 @@ export async function startHttpGateway(): Promise<void> {
 
   server.requestTimeout = 30_000
 
-  server.listen(PORT, HOST, () => {
-    console.error(
-      `RetireGolden MCP HTTP stub listening on ${HOST}:${PORT} (Phase 6 transport experiment)`,
-    )
+  await new Promise<void>((resolve) => {
+    server.listen(port, host, () => {
+      const addr = server.address()
+      const boundPort = addr && typeof addr === 'object' ? addr.port : port
+      console.error(
+        `RetireGolden MCP HTTP stub listening on ${host}:${boundPort} (Phase 6 transport experiment)`,
+      )
+      resolve()
+    })
   })
+  return server
 }

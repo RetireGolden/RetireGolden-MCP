@@ -112,9 +112,22 @@ export function batchEvaluate(
     caveats: string[]
   }> = []
 
+  const ssIncomeCount = session.plan.incomes.filter((inc) => inc.type === 'socialSecurity').length
+
   for (let i = 0; i < policies.length; i++) {
     const policy = policies[i]!
     try {
+      if (policy.claim_ages.length < ssIncomeCount) {
+        results.push({
+          index: i,
+          policy,
+          objective: null,
+          ok: false,
+          error: `claim_ages has ${policy.claim_ages.length} entries but the plan has ${ssIncomeCount} Social Security incomes`,
+          caveats: session.caveats,
+        })
+        continue
+      }
       const planJson = structuredClone(session.plan) as Plan
       const caveats = [...session.caveats]
 

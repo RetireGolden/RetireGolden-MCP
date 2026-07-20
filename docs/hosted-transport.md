@@ -25,11 +25,16 @@ matrix against this surface.
 ## Request contract
 
 - `POST /tool` with body `{ tool, arguments }`.
-- An `x-session-id` header is **required** on every `/tool` request; each id maps
-  to its own isolated in-memory session. Missing header → `400 MISSING_SESSION_ID`.
+- An `x-session-id` header (max 128 chars) is **required** on every `/tool` request;
+  each id maps to its own isolated in-memory session. Missing header →
+  `400 MISSING_SESSION_ID`; over-long id → `400 INVALID_SESSION_ID`.
 - Sessions expire after 30 min idle and are capped (excess → `429 TOO_MANY_SESSIONS`).
-- Request bodies are capped at 1 MiB → `413 PAYLOAD_TOO_LARGE`.
-- `batch_evaluate` policies are capped (max 500) to match the stdio zod caps.
+  A session slot is only allocated once a request fully validates — malformed
+  JSON, unknown tools, and invalid arguments never consume one.
+- Request bodies are capped at 1 MiB → `413 PAYLOAD_TOO_LARGE` (the 413 is written
+  before the connection is closed).
+- Tool arguments are validated with the same zod schemas as stdio (`household`/
+  `policy` shapes, `batch_evaluate` policies 1–500, objective enum) → `400 INVALID_ARGS`.
 - `GET /health` is unauthenticated and reports only `{ ok, transport, sessions }`
   (a session count, never another session's plan state).
 

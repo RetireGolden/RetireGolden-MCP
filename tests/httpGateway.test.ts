@@ -1,26 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { singleHousehold, singlePolicy } from './fixtures.js'
 
-// A fixed ephemeral-ish port for the stub; the gateway reads PORT at import time,
-// so it must be set before the dynamic import below.
-const PORT = 8794
-const BASE = `http://127.0.0.1:${PORT}`
-
-let server: Server | undefined
-
-async function waitForHealth(tries = 100): Promise<void> {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const r = await fetch(`${BASE}/health`)
-      if (r.ok) return
-    } catch {
-      // server not up yet
-    }
-    await new Promise((res) => setTimeout(res, 20))
-  }
-  throw new Error('http gateway did not become healthy')
-}
+let server: Server
+let BASE = ''
 
 function post(
   body: unknown,
@@ -40,29 +24,14 @@ const buildBody = {
 
 describe('HTTP gateway (Phase 6 stub) integration', () => {
   beforeAll(async () => {
-    process.env.PORT = String(PORT)
-    process.env.RETIREGOLDEN_HTTP_HOST = '127.0.0.1'
     const { startHttpGateway } = await import('../src/http/gateway.js')
-    await startHttpGateway()
-    await waitForHealth()
-    // Capture the listening http.Server so it can be closed in afterAll (the
-    // gateway does not return a handle). A listening server exposes both
-    // `.close()` and `.listening === true`, distinguishing it from the
-    // accepted connection sockets that share the same local port.
-    const handles = (process as unknown as { _getActiveHandles(): unknown[] })._getActiveHandles()
-    for (const h of handles) {
-      const s = h as Server & { listening?: boolean }
-      if (typeof s.close === 'function' && s.listening === true) {
-        const addr = s.address?.()
-        if (addr && typeof addr === 'object' && (addr as { port?: number }).port === PORT) {
-          server = s
-        }
-      }
-    }
+    server = await startHttpGateway({ port: 0, host: '127.0.0.1' })
+    const addr = server.address() as AddressInfo
+    BASE = `http://127.0.0.1:${addr.port}`
   })
 
   afterAll(async () => {
-    if (server) await new Promise<void>((res) => server!.close(() => res()))
+    await new Promise<void>((res) => server.close(() => res()))
   })
 
   it('serves /health', async () => {
@@ -80,23 +49,37 @@ describe('HTTP gateway (Phase 6 stub) integration', () => {
     expect(body.error).toBe('MISSING_SESSION_ID')
   })
 
-  it('rejects an oversized request body (413 or connection reset)', async () => {
-    // Well over the 1 MiB cap. The gateway destroys the socket on overflow, so
-    // the client may observe either a clean 413 or a connection reset — both
-    // prove the body was refused rather than processed.
+  it('rejects an over-long x-session-id (400)', async () => {
+    const r = await post(
+      { tool: 'explain_modeled_result' },
+      { 'x-session-id': 'x'.repeat(200) },
+    )
+    expect(r.status).toBe(400)
+    expect(((await r.json()) as { error: string }).error).toBe('INVALID_SESSION_ID')
+  })
+
+  it('rejects an oversized request body with a clean 413', async () => {
     const big = 'x'.repeat(2 * 1024 * 1024)
-    let outcome: number | 'threw' = 'threw'
-    try {
-      const r = await post(
-        { tool: 'explain_modeled_result', arguments: { pad: big } },
-        { 'x-session-id': 'oversize' },
-      )
-      outcome = r.status
-    } catch {
-      outcome = 'threw'
-    }
-    expect(outcome === 413 || outcome === 'threw').toBe(true)
-    expect(outcome).not.toBe(200)
+    const r = await post(
+      { tool: 'explain_modeled_result', arguments: { pad: big } },
+      { 'x-session-id': 'oversize' },
+    )
+    expect(r.status).toBe(413)
+    expect(((await r.json()) as { error: string }).error).toBe('PAYLOAD_TOO_LARGE')
+  })
+
+  it('does not burn a session slot on an invalid request', async () => {
+    const before = ((await (await fetch(`${BASE}/health`)).json()) as { sessions: number })
+      .sessions
+    await post('not json at all', { 'x-session-id': 'never-created-1' })
+    await post({ tool: 'no_such_tool' }, { 'x-session-id': 'never-created-2' })
+    await post(
+      { tool: 'batch_evaluate', arguments: { policies: [] } },
+      { 'x-session-id': 'never-created-3' },
+    )
+    const after = ((await (await fetch(`${BASE}/health`)).json()) as { sessions: number })
+      .sessions
+    expect(after).toBe(before)
   })
 
   it('isolates state between two different session ids', async () => {
@@ -127,6 +110,36 @@ describe('HTTP gateway (Phase 6 stub) integration', () => {
     const body = (await r.json()) as { error: string; message: string }
     expect(body.error).toBe('INVALID_ARGS')
     expect(body.message).toContain('500')
+  })
+
+  it('rejects an empty policies array and a bad ordering enum (400)', async () => {
+    const empty = await post(
+      { tool: 'batch_evaluate', arguments: { policies: [] } },
+      { 'x-session-id': 'A' },
+    )
+    expect(empty.status).toBe(400)
+    expect(((await empty.json()) as { error: string }).error).toBe('INVALID_ARGS')
+
+    const badEnum = await post(
+      {
+        tool: 'batch_evaluate',
+        arguments: { policies: [{ claim_ages: [67], ordering: 'roth-first' }] },
+      },
+      { 'x-session-id': 'A' },
+    )
+    expect(badEnum.status).toBe(400)
+    expect(((await badEnum.json()) as { error: string }).error).toBe('INVALID_ARGS')
+  })
+
+  it('requires policy alongside household on build_plan (400)', async () => {
+    const r = await post(
+      { tool: 'build_plan', arguments: { household: singleHousehold } },
+      { 'x-session-id': 'A' },
+    )
+    expect(r.status).toBe(400)
+    const body = (await r.json()) as { error: string; message: string }
+    expect(body.error).toBe('INVALID_ARGS')
+    expect(body.message).toContain('household')
   })
 
   it('routes unknown tools to a 400', async () => {

@@ -43,8 +43,9 @@ export type HouseholdParams = z.infer<typeof HouseholdParamsSchema>
 
 export const PolicyParamsSchema = z.object({
   claim_ages: z
-    .array(z.number().min(0).max(120))
-    .describe('Social Security claim age per person, aligned to household.persons order'),
+    .array(z.number().int().min(0).max(120))
+    .min(1)
+    .describe('Social Security claim age per person (whole years), aligned to household.persons order'),
   conversion_bracket: z
     .number()
     .min(0)
@@ -69,7 +70,7 @@ export type PolicyParams = z.infer<typeof PolicyParamsSchema>
 export const ConversionSchema = z
   .object({
     mode: z.literal('manual'),
-    conversions: z.array(z.object({ year: z.number().int(), amount: z.number() })),
+    conversions: z.array(z.object({ year: z.number().int(), amount: z.number().min(0) })),
   })
   .describe('Manual Roth conversion schedule: explicit dollar amounts per year')
 export type ConversionInput = z.infer<typeof ConversionSchema>
