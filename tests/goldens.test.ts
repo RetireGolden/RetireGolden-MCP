@@ -4,14 +4,17 @@
  * TWO golden sets:
  *
  *  1. LEGACY bench-convention goldens (`describe('golden numbers — … [legacy …]')`).
- *     The SAME exact literals captured from unmodified `main` under RetireBench
- *     conventions (0% inflation, state KY, zero state tax, June-15 dobs, sex
- *     'average', qualifiedRatio 0.85). After the WS1.3 default flip these no longer
- *     reproduce from a bare build — the typed-path defaults now follow the ENGINE
- *     (2.5% inflation, matchInflation SS COLA, etc.). To keep the literals frozen we
- *     now pass every bench convention EXPLICITLY through the `assumptions` block
- *     (`BENCH_ASSUMPTIONS`) plus the now-required `state: 'KY'`. That these unchanged
- *     numbers still reproduce PROVES the override path preserves legacy behavior.
+ *     The RetireBench conventions (0% inflation, state KY, zero state tax, June-15
+ *     DOBs, sex 'average', qualifiedRatio 0.85) built via the `assumptions` block,
+ *     NOT via bare typed-path defaults. After the WS1.3 default flip a bare build
+ *     no longer reproduces these — the typed-path defaults now follow the ENGINE
+ *     (2.5% inflation, matchInflation SS COLA, etc.) — so every bench convention is
+ *     passed EXPLICITLY through `BENCH_ASSUMPTIONS` plus the now-required
+ *     `state: 'KY'`. These literals are frozen RELATIVE TO THE PINNED ENGINE, not
+ *     bit-identical to the historical 0.1.1 numbers: they are regenerated whenever
+ *     the pinned engine bumps (they moved for engine 0.1.2's tax-solver fix). That
+ *     the SAME explicit conventions reproduce them under the pinned engine PROVES
+ *     the override path preserves legacy behavior across the default flip.
  *
  *  2. NEW-DEFAULT goldens (`describe('golden numbers — … [new defaults]')`). Built
  *     with NO `assumptions` block, so the engine defaults flow through (real
@@ -19,9 +22,10 @@
  *     actually changed the modeled outcome (inflation-adjusted, non-zero SS COLA).
  *
  * Both sets exist to catch engine/adapter NUMERIC DRIFT. Refresh DELIBERATELY on an
- * engine bump — never casually to make a red test go green. If a LEGACY golden fails
- * and the engine version has not changed, a feature agent altered how an explicit
- * override reaches the engine — a BLOCKING regression, not a golden to adjust.
+ * engine bump (as was done for engine 0.1.2) — never casually to make a red test go
+ * green. If a LEGACY golden fails and the pinned engine version has NOT changed, a
+ * feature agent altered how an explicit override reaches the engine — a BLOCKING
+ * regression, not a golden to adjust.
  *
  * Generation recipe (scratchpad/gen-goldens.mjs on this branch):
  *   session = createSession()
@@ -45,7 +49,8 @@ import type { AssumptionsInput, HouseholdParams, PolicyParams } from '../src/bui
 /**
  * Every RetireBench convention stated explicitly. Passing this reproduces the
  * pre-WS1.3 typed-path defaults exactly (the values the old hardcode forced), so
- * the legacy golden literals below stay frozen through the default flip.
+ * the legacy golden literals below hold through the default flip — frozen relative
+ * to the pinned engine and regenerated deliberately on an engine bump.
  */
 const BENCH_ASSUMPTIONS: AssumptionsInput = {
   inflationPct: 0,
