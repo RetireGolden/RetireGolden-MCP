@@ -45,14 +45,17 @@ Configure your MCP client to launch `retiregolden-mcp` (or
 }
 ```
 
-## Tools (v1, read-only)
+## Tools (v1)
+
+Read-only with respect to your finances and disk: no trades, no persistence.
+Session state (e.g. `build_plan`, `clear_session`) is held in memory only.
 
 | Tool | Purpose |
 |---|---|
 | `build_plan` | Build an in-memory plan from typed household/policy params or full plan JSON |
 | `validate_plan` | Validate the current session plan (or supplied JSON) |
 | `run_projection` | Deterministic year-by-year projection |
-| `run_monte_carlo` | Stochastic success / percentile summary |
+| `run_monte_carlo` | Stochastic success rate and required-floor success rate |
 | `batch_evaluate` | Evaluate many policies against one household (search-friendly) |
 | `run_optimizer` | Engine optimizer / conversion schedule search |
 | `solve_max_spending` | Sustainable-spending bisection |
@@ -67,18 +70,10 @@ and product runners should pin the skill file digest used for scored runs.
 
 ## npm publish
 
-```bash
-npm login   # RetireGolden org account with publish rights
-npm publish --access public
-```
+Releases are tag-driven: pushing a `mcp-v<version>` tag triggers the publish
+workflow (see [`.github/workflows/publish-mcp.yml`](.github/workflows/publish-mcp.yml)).
 
-Until published, consumers can install from git:
-
-```bash
-npm install github:RetireGolden/RetireGolden-MCP
-```
-
-Or run locally after `npm run build`:
+To run locally after `npm run build`:
 
 ```bash
 node bin/retiregolden-mcp.js

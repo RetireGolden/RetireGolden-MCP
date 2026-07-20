@@ -30,6 +30,7 @@
     "LICENSE",
     "DISCLAIMER.md",
     "README.md",
+    "TRADEMARKS.md",
     "NOTICE"
   ],
   "main": "./dist/index.js",

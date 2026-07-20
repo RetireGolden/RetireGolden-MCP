@@ -33,13 +33,12 @@ export function setPlanFromBuild(session: SessionState, input: BuildPlanInput) {
   return result
 }
 
-export function runProjection(session: SessionState, startYear?: number) {
+export function runProjection(session: SessionState) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
-  const year = startYear ?? session.startYear
   const result = simulatePlan(session.plan, {
-    startYear: year,
+    startYear: session.startYear,
     taxCalculator: taxCalc(),
   })
   const summary = summarizeProjection(session.plan, result)
@@ -66,21 +65,20 @@ export function runProjection(session: SessionState, startYear?: number) {
 
 export function runMonteCarlo(
   session: SessionState,
-  opts: { pathCount?: number; seed?: number; startYear?: number } = {},
+  opts: { pathCount?: number; seed?: number } = {},
 ) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
   const pathCount = opts.pathCount ?? 200
   const seed = opts.seed ?? 42
-  const startYear = opts.startYear ?? session.startYear
   const model = createLognormalModel({
     type: 'lognormal',
     inflationMeanPct: session.plan.assumptions.inflationPct,
     returnVolPct: 12,
   })
   const paths = runMonteCarloPaths(session.plan, {
-    startYear,
+    startYear: session.startYear,
     taxCalculator: taxCalc(),
     model,
     seed,

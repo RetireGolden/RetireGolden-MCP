@@ -3,45 +3,83 @@
  * or accept a full plan JSON object.
  */
 
+import { z } from 'zod'
 import type { Plan } from '@retiregolden/engine'
 import { createEmptyPlan, parsePlan } from '@retiregolden/engine/model/plan'
 import type { ConventionKnobs } from './session.js'
 
-export interface PersonParams {
-  birth_year: number
-  trad: number
-  roth: number
-  pia: number
-  pension?: number
-  wage?: number
-  fra_years?: number
-}
+export const PersonParamsSchema = z.object({
+  birth_year: z.number().int().min(1900).max(2100).describe('4-digit birth year, e.g. 1960'),
+  trad: z.number().min(0).describe('Traditional/pre-tax IRA+401k balance in dollars'),
+  roth: z.number().min(0).describe('Roth balance in dollars'),
+  pia: z.number().min(0).describe('Social Security primary insurance amount, monthly dollars at FRA'),
+  pension: z.number().min(0).optional().describe('Annual pension income in dollars (ordinary-taxed)'),
+  wage: z.number().min(0).optional().describe('Annual wage (not modeled; retired household assumed)'),
+  fra_years: z.number().min(0).max(120).optional().describe('Full retirement age in years'),
+})
+export type PersonParams = z.infer<typeof PersonParamsSchema>
 
-export interface HouseholdParams {
-  filing: 'single' | 'mfj'
-  persons: PersonParams[]
-  taxable: number
-  taxable_basis: number
-  spending: number
-  horizon: number
-  growth: { trad: number; roth: number; taxable: number }
-  pre_horizon_magi?: [number, number]
-  heir_ordinary_rate: number
-}
+export const HouseholdParamsSchema = z.object({
+  filing: z.enum(['single', 'mfj']).describe('Tax filing status: single or married-filing-jointly'),
+  persons: z.array(PersonParamsSchema).min(1).describe('One entry per household member'),
+  taxable: z.number().min(0).describe('Taxable brokerage balance in dollars'),
+  taxable_basis: z.number().min(0).describe('Cost basis of the taxable brokerage account in dollars'),
+  spending: z.number().min(0).describe('Base annual household spending in dollars'),
+  horizon: z.number().int().min(1).max(100).describe('Number of projection years (1-100)'),
+  growth: z
+    .object({
+      trad: z.number().describe('Traditional annual return as a fraction, e.g. 0.05'),
+      roth: z.number().describe('Roth annual return as a fraction, e.g. 0.05'),
+      taxable: z.number().describe('Taxable annual return as a fraction, e.g. 0.05'),
+    })
+    .describe('Per-bucket real annual return rates (fractions, not percents)'),
+  pre_horizon_magi: z
+    .tuple([z.number(), z.number()])
+    .optional()
+    .describe('IRMAA lookback MAGIs for [startYear-2, startYear-1]'),
+  heir_ordinary_rate: z.number().min(0).max(1).describe('Heir ordinary income tax rate as a fraction'),
+})
+export type HouseholdParams = z.infer<typeof HouseholdParamsSchema>
 
-export interface PolicyParams {
-  claim_ages: number[]
-  conversion_bracket?: number | null
-  conversion_years?: number | null
-  ordering: 'taxable-first' | 'traditional-first' | 'proportional'
-}
+export const PolicyParamsSchema = z.object({
+  claim_ages: z
+    .array(z.number().min(0).max(120))
+    .describe('Social Security claim age per person, aligned to household.persons order'),
+  conversion_bracket: z
+    .number()
+    .min(0)
+    .max(1)
+    .nullable()
+    .optional()
+    .describe('Top-of-bracket target for Roth conversions as a fraction (e.g. 0.24), or null'),
+  conversion_years: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .nullable()
+    .optional()
+    .describe('Number of years to run fill-to-bracket conversions from startYear, or null'),
+  ordering: z
+    .enum(['taxable-first', 'traditional-first', 'proportional'])
+    .describe('Withdrawal ordering; traditional-first is approximate under sequential drain'),
+})
+export type PolicyParams = z.infer<typeof PolicyParamsSchema>
+
+export const ConversionSchema = z
+  .object({
+    mode: z.literal('manual'),
+    conversions: z.array(z.object({ year: z.number().int(), amount: z.number() })),
+  })
+  .describe('Manual Roth conversion schedule: explicit dollar amounts per year')
+export type ConversionInput = z.infer<typeof ConversionSchema>
 
 export interface BuildPlanInput {
   /** Full engine plan JSON (takes precedence when both supplied). */
   plan?: unknown
   household?: HouseholdParams
   policy?: PolicyParams
-  conversion?: { mode: 'manual'; conversions: { year: number; amount: number }[] }
+  conversion?: ConversionInput
   startYear?: number
   conventions?: ConventionKnobs
 }
@@ -81,12 +119,43 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
     }
   }
 
+  const hh = input.household
+  const policy = input.policy
+
+  if (hh.horizon < 1) {
+    return { ok: false, startYear, caveats, issues: ['horizon must be >= 1'] }
+  }
+  if (hh.persons.length === 0) {
+    return { ok: false, startYear, caveats, issues: ['household.persons must not be empty'] }
+  }
+  if (policy.claim_ages.length < hh.persons.length) {
+    return {
+      ok: false,
+      startYear,
+      caveats,
+      issues: ['policy.claim_ages must have an entry for each person'],
+    }
+  }
+
+  try {
+    return buildTypedPlan(input, hh, policy, startYear, conventions, caveats)
+  } catch (e) {
+    return { ok: false, startYear, caveats, issues: [e instanceof Error ? e.message : String(e)] }
+  }
+}
+
+function buildTypedPlan(
+  input: BuildPlanInput,
+  hh: HouseholdParams,
+  policy: PolicyParams,
+  startYear: number,
+  conventions: ConventionKnobs,
+  caveats: string[],
+): BuildPlanResult {
   let n = 0
   const newId = () => `id-${++n}`
   const now = () => new Date('2026-01-01T00:00:00.000Z')
 
-  const hh = input.household
-  const policy = input.policy
   const endYear = startYear + hh.horizon - 1
   const filing = FILING[hh.filing]
   if (!filing) {
@@ -233,7 +302,7 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   a.recentAnnualMagi = pre[0] ?? 0
   if (pre.length >= 2 && pre[0] !== pre[1]) {
     caveats.push(
-      `IRMAA-lookback: engine uses one scalar recentAnnualMagi=${pre[0]} for both pre-horizon years; distinct MAGIs 2024=${pre[0]}, 2025=${pre[1]} may diverge`,
+      `IRMAA-lookback: engine uses one scalar recentAnnualMagi=${pre[0]} for both pre-horizon years; distinct MAGIs ${startYear - 2}=${pre[0]}, ${startYear - 1}=${pre[1]} may diverge`,
     )
   }
 
