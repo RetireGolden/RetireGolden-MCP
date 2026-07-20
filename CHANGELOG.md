@@ -3,6 +3,14 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.2.1
+
+No functional changes. This release validates the switch to npm Trusted
+Publishing (OIDC): the publish workflow now authenticates via GitHub OIDC
+instead of a long-lived `NPM_TOKEN`, and OIDC auth can only be exercised by a
+real publish (a dry-run never authenticates). The `package-lock.json` version
+fields, left at 0.1.1 through the 0.2.0 release, are also realigned to match.
+
 ## 0.2.0
 
 ### Breaking
