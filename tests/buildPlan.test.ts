@@ -143,6 +143,19 @@ describe('buildPlanFromParams — full plan JSON branch', () => {
     expect(res.caveats.some((c) => c.includes('full plan JSON was supplied'))).toBe(false)
   })
 
+  it('rejects a full plan when a convention makes its MAGI history invalid', () => {
+    const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy })
+    const planJson = JSON.parse(JSON.stringify(built.plan))
+    const res = buildPlanFromParams({
+      plan: planJson,
+      conventions: { irmaaLookbackMagis: [100_000, -1] },
+    })
+
+    expect(res.ok).toBe(false)
+    expect(res.plan).toBeUndefined()
+    expect(res.issues?.some((issue) => issue.includes('historicalAnnualMagiByYear'))).toBe(true)
+  })
+
   it('requires either plan JSON or both household and policy', () => {
     const res = buildPlanFromParams({ startYear: 2026 })
     expect(res.ok).toBe(false)

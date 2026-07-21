@@ -217,7 +217,11 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
       )
     }
     applyConventions(parsed.plan, conventions, caveats, startYear)
-    return { ok: true, plan: parsed.plan, startYear, caveats }
+    const conventionParsed = parsePlan(parsed.plan)
+    if (!conventionParsed.ok) {
+      return { ok: false, startYear, caveats, issues: conventionParsed.issues }
+    }
+    return { ok: true, plan: conventionParsed.plan, startYear, caveats }
   }
 
   if (!input.household || !input.policy) {
@@ -485,7 +489,7 @@ function buildTypedPlan(
   if (asmpt?.localIncomeTaxPct != null) a.localIncomeTaxPct = asmpt.localIncomeTaxPct
   a.heirTaxRatePct = hh.heir_ordinary_rate * 100
 
-  const pre = conventions.irmaaLookbackMagis ?? hh.pre_horizon_magi ?? ([0, 0] as [number, number])
+  const pre = hh.pre_horizon_magi ?? ([0, 0] as [number, number])
   a.recentAnnualMagi = pre[0] ?? 0
   a.historicalAnnualMagiByYear = {
     [String(startYear - 2)]: pre[0] ?? 0,

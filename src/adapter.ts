@@ -764,15 +764,14 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
   // Setting either historical MAGI representation directly also supersedes a
   // seeded irmaaLookbackMagis convention, which would otherwise clobber it on
   // the documented export_plan -> build_plan round-trip.
-  const explicitMagi = assumptionFieldsSet.has('recentAnnualMagi')
-    ? 'recentAnnualMagi'
-    : assumptionFieldsSet.has('historicalAnnualMagiByYear')
-      ? 'historicalAnnualMagiByYear'
-      : null
-  if (explicitMagi && session.conventions.irmaaLookbackMagis != null) {
+  const explicitMagiFields = ['recentAnnualMagi', 'historicalAnnualMagiByYear'].filter((field) =>
+    assumptionFieldsSet.has(field),
+  )
+  if (explicitMagiFields.length > 0 && session.conventions.irmaaLookbackMagis != null) {
     session.conventions = { ...session.conventions, irmaaLookbackMagis: null }
-    const magiCaveat =
-      `update_plan set ${explicitMagi} directly; cleared the prior irmaaLookbackMagis convention so the value survives export_plan/build_plan round-trip.`
+    const magiCaveat = `update_plan set ${explicitMagiFields.join(
+      ' and ',
+    )} directly; cleared the prior irmaaLookbackMagis convention so the values survive export_plan/build_plan round-trip.`
     if (!session.caveats.includes(magiCaveat)) session.caveats.push(magiCaveat)
   }
 

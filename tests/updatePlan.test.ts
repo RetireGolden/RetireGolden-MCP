@@ -305,6 +305,30 @@ describe('update_plan', () => {
     }
   })
 
+  it('names both MAGI fields when a batch sets both directly', () => {
+    const session = createSession(2026)
+    adapter.setPlanFromBuild(session, {
+      household: singleHousehold,
+      policy: singlePolicy,
+      conventions: { irmaaLookbackMagis: [50_000, 60_000] },
+    })
+
+    const res = adapter.updatePlan(session, [
+      { op: 'set_assumption', field: 'recentAnnualMagi', value: 90_000 },
+      {
+        op: 'set_assumption',
+        field: 'historicalAnnualMagiByYear',
+        value: { '2024': 90_000, '2025': 120_000 },
+      },
+    ])
+
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      const caveat = res.caveats.find((c) => c.includes('cleared the prior irmaaLookbackMagis'))
+      expect(caveat).toContain('recentAnnualMagi and historicalAnnualMagiByYear')
+    }
+  })
+
   it('prunes a superseded state-tax caveat when stateEffectiveTaxPct is set', () => {
     // The typed build records a caveat that state income tax is modeled at 0%
     // because stateEffectiveTaxPct was not supplied (singleHousehold names KY).
