@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createSession } from './session.js'
-import { registerTools } from './tools.js'
+import { registerTools, registerResources } from './tools.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -18,6 +18,7 @@ export async function startStdioServer(): Promise<void> {
   })
   const session = createSession()
   registerTools(server, session)
+  registerResources(server)
   const transport = new StdioServerTransport()
   await server.connect(transport)
 }

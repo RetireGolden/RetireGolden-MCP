@@ -7,6 +7,11 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { simulatePlan, summarizeProjection, type Plan } from '@retiregolden/engine'
 import { parsePlan } from '@retiregolden/engine/model/plan'
+import {
+  planJsonSchema,
+  PLAN_SCHEMA_VERSION,
+  PLAN_SCHEMA_ID,
+} from '@retiregolden/engine/schema'
 import { createFederalTaxCalculator } from '@retiregolden/engine/tax/federalTax'
 import { runMonteCarloPaths, aggregateMonteCarlo } from '@retiregolden/engine/montecarlo/run'
 import { createLognormalModel } from '@retiregolden/engine/montecarlo/marketModels'
@@ -17,6 +22,28 @@ import type { SessionState } from './session.js'
 
 function taxCalc() {
   return createFederalTaxCalculator()
+}
+
+/**
+ * Transient caveat that update_plan records to flag that any prior projection is
+ * now stale. It is genuinely transient — runProjection removes it once a fresh
+ * projection succeeds — so it is a named constant shared by both.
+ */
+const STALE_PROJECTION_CAVEAT =
+  'Plan mutated via update_plan; re-run run_projection to refresh results.'
+
+/**
+ * Build-time caveats that a later `set_assumption` renders obsolete, keyed by the
+ * assumption field. Each caveat asserts that a default/convention is in effect and
+ * embeds the old value; once the field is set directly the caveat is false and
+ * must be pruned so responses don't keep repeating a superseded number. This is a
+ * small explicit table (the handful of value-specific caveats buildPlan emits) —
+ * not an auto-derived taxonomy — so the mapping stays honest and reviewable.
+ */
+const SUPERSEDED_CAVEATS: Record<string, (caveat: string) => boolean> = {
+  recentAnnualMagi: (c) =>
+    c.startsWith('IRMAA-lookback:') || c.startsWith('convention irmaaLookbackMagis='),
+  stateEffectiveTaxPct: (c) => c.includes('stateEffectiveTaxPct is not'),
 }
 
 let cachedVersions: { mcpVersion: string | null; engineVersion: string | null } | null = null
@@ -97,6 +124,10 @@ export function runProjection(
   })
   const summary = summarizeProjection(session.plan, result)
   session.lastProjection = { result, summary }
+  // The projection is now current, so drop update_plan's transient "re-run
+  // run_projection" caveat — otherwise every fresh projection would keep telling
+  // the user their result is stale.
+  session.caveats = session.caveats.filter((c) => c !== STALE_PROJECTION_CAVEAT)
   const base = {
     ok: true as const,
     startYear: result.startYear,
@@ -409,5 +440,333 @@ export function compareScenarios(
     a: sa,
     b: sb,
     deltaEndingAfterTaxEstate: sb.endingAfterTaxEstate - sa.endingAfterTaxEstate,
+  }
+}
+
+/**
+ * Resolve a dotted-path or JSON-pointer segment list into the schema tree.
+ * A leading '/' selects JSON-pointer semantics (with ~1/~0 unescaping); anything
+ * else is treated as a dotted path. Numeric segments index into arrays (e.g. the
+ * `oneOf` discriminated-union branches on `accounts.items`). Returns the located
+ * node, or the UNRESOLVED sentinel when a segment does not exist.
+ */
+const UNRESOLVED = Symbol('unresolved')
+
+function resolveSchemaPath(root: unknown, schemaPath: string): unknown | typeof UNRESOLVED {
+  const trimmed = schemaPath.trim()
+  // Root is the empty string ('' per JSON Pointer) or '.' (the dotted-path
+  // convenience). NOT '/': per RFC 6901 that is a pointer with one empty-string
+  // reference token, so it must resolve an empty top-level key (which the schema
+  // lacks) → PATH_NOT_FOUND, consistent with how a trailing slash is handled.
+  if (trimmed === '' || trimmed === '.') return root
+  const segments = trimmed.startsWith('/')
+    ? trimmed
+        .slice(1)
+        .split('/')
+        .map((s) => s.replace(/~1/g, '/').replace(/~0/g, '~'))
+    : trimmed.split('.').filter((s) => s.length > 0)
+
+  let node: unknown = root
+  for (const seg of segments) {
+    if (Array.isArray(node)) {
+      // Require an explicit decimal index. Number('') is 0, so without this a
+      // JSON pointer with an empty segment (e.g. a trailing slash) would silently
+      // resolve to element 0 instead of failing.
+      if (!/^\d+$/.test(seg)) return UNRESOLVED
+      const idx = Number(seg)
+      if (idx >= node.length) return UNRESOLVED
+      node = node[idx]
+    } else if (node != null && typeof node === 'object') {
+      if (!Object.prototype.hasOwnProperty.call(node, seg)) return UNRESOLVED
+      node = (node as Record<string, unknown>)[seg]
+    } else {
+      return UNRESOLVED
+    }
+  }
+  return node
+}
+
+/**
+ * Serve the engine's versioned Plan JSON Schema (the source of truth for what a
+ * plan document contains), optionally sliced to a subtree so a caller can fetch
+ * just the part it is authoring against and keep token cost down. The engine
+ * owns the schema; this only reads and slices it.
+ */
+export function describePlanSchema(opts: { path?: string } = {}) {
+  const base = {
+    ok: true as const,
+    schemaVersion: PLAN_SCHEMA_VERSION,
+    schemaId: PLAN_SCHEMA_ID,
+  }
+  // Clone what we hand back: planJsonSchema (and its subtrees) is the engine's
+  // shared, process-lifetime constant, and it also backs the plan-schema MCP
+  // resource. A programmatic caller that mutated a direct reference would corrupt
+  // every later response — so this read-only API returns a copy, as exportPlan
+  // does for session-owned data.
+  if (opts.path == null || opts.path.trim() === '') {
+    return { ...base, path: null, schema: structuredClone(planJsonSchema) }
+  }
+  const node = resolveSchemaPath(planJsonSchema, opts.path)
+  if (node === UNRESOLVED) {
+    return {
+      ok: false as const,
+      error: 'PATH_NOT_FOUND',
+      path: opts.path,
+      schemaVersion: PLAN_SCHEMA_VERSION,
+      schemaId: PLAN_SCHEMA_ID,
+      message: `No schema node at '${opts.path}'. Use a dotted path (e.g. 'properties.accounts.items') or JSON pointer (e.g. '/properties/accounts/items').`,
+    }
+  }
+  return { ...base, path: opts.path, schema: structuredClone(node) }
+}
+
+/**
+ * Keys that pollute an object's prototype when written by name. update_plan
+ * fragments and set-field ops carry caller-supplied keys straight from tool
+ * input, so reject these at the boundary rather than risk prototype pollution.
+ */
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+function dangerousKeyIn(obj: Record<string, unknown>): string | null {
+  for (const k of Object.keys(obj)) {
+    if (DANGEROUS_KEYS.has(k)) return k
+  }
+  return null
+}
+
+/**
+ * Valid `set_assumption` / `set_expense` field names, derived from the engine's
+ * own Plan JSON Schema (the source of truth — not a hand-maintained list). An
+ * unknown field name (a typo like `inflatonPct`, or a hallucinated key) would
+ * otherwise be assigned, silently stripped by parsePlan, and reported as an
+ * applied operation while the modeled value never changed — a silent-wrong-result
+ * trap. Rejecting unknown fields also excludes the prototype-pollution keys.
+ */
+function schemaSectionKeys(section: 'assumptions' | 'expenses'): ReadonlySet<string> {
+  const props = (planJsonSchema as { properties?: Record<string, unknown> }).properties?.[section] as
+    | { properties?: Record<string, unknown> }
+    | undefined
+  return new Set(Object.keys(props?.properties ?? {}))
+}
+const ASSUMPTION_FIELDS = schemaSectionKeys('assumptions')
+const EXPENSE_FIELDS = schemaSectionKeys('expenses')
+
+/**
+ * Named domain operations for update_plan. They target engine-plan FRAGMENTS
+ * (what document extraction produces) rather than the typed household vocabulary,
+ * and are deliberately small and explicit — add/replace/remove by id, or set a
+ * single assumptions/expenses field — so there is no deep-merge magic where
+ * silent data loss lives.
+ */
+export type UpdatePlanOp =
+  | { op: 'add_account'; account: Record<string, unknown> }
+  | { op: 'replace_account'; id: string; account: Record<string, unknown> }
+  | { op: 'remove_account'; id: string }
+  | { op: 'add_income'; income: Record<string, unknown> }
+  | { op: 'replace_income'; id: string; income: Record<string, unknown> }
+  | { op: 'remove_income'; id: string }
+  | { op: 'set_assumption'; field: string; value: unknown }
+  | { op: 'set_expense'; field: string; value: unknown }
+
+type MutablePlan = {
+  accounts: Array<{ id?: unknown }>
+  incomes: Array<{ id?: unknown }>
+  assumptions: Record<string, unknown>
+  expenses: Record<string, unknown>
+  [key: string]: unknown
+}
+
+/**
+ * Coerce a replacement fragment's `id` to the operation's target id. A fragment
+ * whose own `id` names a DIFFERENT entry would silently delete `op.id` and
+ * introduce another — contradicting "replace by id" — so reject that; an omitted
+ * id is filled in. Returns the id-pinned fragment, or an error string.
+ */
+function pinReplacementId(
+  fragment: Record<string, unknown>,
+  targetId: string,
+  where: string,
+): { id?: unknown } | string {
+  const fragId = fragment.id
+  if (fragId != null && fragId !== targetId) {
+    return `${where}: fragment id '${String(fragId)}' does not match target id '${targetId}' (replace is by id)`
+  }
+  return { ...fragment, id: targetId } as { id?: unknown }
+}
+
+/** Apply one operation to a working plan clone. Returns an error string or null. */
+function applyUpdateOp(plan: MutablePlan, op: UpdatePlanOp, index: number): string | null {
+  const where = `operation[${index}] ${op.op}`
+  switch (op.op) {
+    case 'add_account': {
+      const bad = dangerousKeyIn(op.account)
+      if (bad) return `${where}: unsafe key '${bad}' in account fragment`
+      plan.accounts.push(op.account as { id?: unknown })
+      return null
+    }
+    case 'replace_account': {
+      const bad = dangerousKeyIn(op.account)
+      if (bad) return `${where}: unsafe key '${bad}' in account fragment`
+      const i = plan.accounts.findIndex((a) => a.id === op.id)
+      if (i === -1) return `${where}: no account with id '${op.id}'`
+      const pinned = pinReplacementId(op.account, op.id, where)
+      if (typeof pinned === 'string') return pinned
+      plan.accounts[i] = pinned
+      return null
+    }
+    case 'remove_account': {
+      const before = plan.accounts.length
+      plan.accounts = plan.accounts.filter((a) => a.id !== op.id)
+      if (plan.accounts.length === before) return `${where}: no account with id '${op.id}'`
+      return null
+    }
+    case 'add_income': {
+      const bad = dangerousKeyIn(op.income)
+      if (bad) return `${where}: unsafe key '${bad}' in income fragment`
+      plan.incomes.push(op.income as { id?: unknown })
+      return null
+    }
+    case 'replace_income': {
+      const bad = dangerousKeyIn(op.income)
+      if (bad) return `${where}: unsafe key '${bad}' in income fragment`
+      const i = plan.incomes.findIndex((inc) => inc.id === op.id)
+      if (i === -1) return `${where}: no income with id '${op.id}'`
+      const pinned = pinReplacementId(op.income, op.id, where)
+      if (typeof pinned === 'string') return pinned
+      plan.incomes[i] = pinned
+      return null
+    }
+    case 'remove_income': {
+      const before = plan.incomes.length
+      plan.incomes = plan.incomes.filter((inc) => inc.id !== op.id)
+      if (plan.incomes.length === before) return `${where}: no income with id '${op.id}'`
+      return null
+    }
+    case 'set_assumption':
+      if (!ASSUMPTION_FIELDS.has(op.field)) {
+        return `${where}: unknown assumption field '${op.field}' (see describe_plan_schema properties.assumptions)`
+      }
+      // Reject a missing/undefined value. A programmatic caller can reach this
+      // adapter directly (bypassing the tool's zod), and assigning undefined would
+      // otherwise be stripped by parsePlan — a silent no-op reported as applied.
+      // `null` is a legitimate supplied value; `undefined` is not.
+      if (op.value === undefined) return `${where}: 'value' is required (received undefined)`
+      plan.assumptions[op.field] = op.value
+      return null
+    case 'set_expense':
+      if (!EXPENSE_FIELDS.has(op.field)) {
+        return `${where}: unknown expense field '${op.field}' (see describe_plan_schema properties.expenses)`
+      }
+      if (op.value === undefined) return `${where}: 'value' is required (received undefined)`
+      plan.expenses[op.field] = op.value
+      return null
+    default: {
+      // Exhaustiveness guard: an unknown op shape reaches here only if the zod
+      // union and this switch drift apart.
+      const _never: never = op
+      return `unknown operation: ${JSON.stringify(_never)}`
+    }
+  }
+}
+
+/** Compact, low-token summary of a plan for update_plan/round-trip responses. */
+function planSummary(plan: Plan) {
+  return {
+    name: plan.name,
+    accounts: plan.accounts.map((a) => ({ id: a.id, name: a.name, type: a.type })),
+    incomes: plan.incomes.map((inc) => ({ id: inc.id, type: inc.type })),
+    expenseBaseAnnual: plan.expenses.baseAnnual,
+  }
+}
+
+/**
+ * Incrementally mutate the current session plan with merge semantics, so
+ * multi-document ingestion does not rebuild from scratch each turn. The mutated
+ * plan is validated through the engine's parsePlan BEFORE it is committed: on any
+ * failure the session plan is left UNCHANGED (never half-applied) and the issues
+ * are returned. Requires a seeded plan (build_plan first) — NO_PLAN otherwise.
+ */
+export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
+  if (!session.plan) {
+    return {
+      ok: false as const,
+      error: 'NO_PLAN',
+      message: 'Call build_plan first to seed a plan before update_plan',
+    }
+  }
+  // Guard the empty batch in the exported adapter (the MCP tool schema already
+  // requires min 1, but a programmatic caller can pass []). Without this an empty
+  // batch would reparse/commit the unchanged plan, drop the cached projection,
+  // and report success with zero operations applied.
+  if (ops.length === 0) {
+    return {
+      ok: false as const,
+      error: 'NO_OPERATIONS',
+      message: 'Provide at least one operation',
+    }
+  }
+  // Work on a clone: nothing touches the live session until validation passes.
+  const working = structuredClone(session.plan) as unknown as MutablePlan
+  for (let i = 0; i < ops.length; i++) {
+    const err = applyUpdateOp(working, ops[i]!, i)
+    if (err) {
+      return { ok: false as const, error: 'OPERATION_FAILED', issues: [err] }
+    }
+  }
+
+  // Stamp the modification time as part of the atomic commit, so an exported
+  // document reflects when the merge happened (consumers order / invalidate on
+  // updatedAtIso). Advance it MONOTONICALLY — strictly past the prior value — so
+  // two commits within the same millisecond, or a plan whose stored timestamp is
+  // ahead of this clock, still move the timestamp forward. Set on the clone before
+  // validation: on failure the clone is discarded and the live timestamp untouched.
+  const priorMs = Date.parse(session.plan.updatedAtIso)
+  const nextMs = Math.max(Date.now(), (Number.isNaN(priorMs) ? 0 : priorMs) + 1)
+  working.updatedAtIso = new Date(nextMs).toISOString()
+
+  const parsed = parsePlan(working)
+  if (!parsed.ok) {
+    // Leave session.plan untouched — the merge is all-or-nothing.
+    return { ok: false as const, error: 'INVALID_PLAN', issues: parsed.issues }
+  }
+
+  // Commit. Stale projection is dropped; record the transient caveat so a reader
+  // knows the plan moved and any prior projection/optimizer result no longer
+  // applies. run_projection removes it again once a fresh projection succeeds. The
+  // message is stable (no per-call operation count) so repeated update_plan calls
+  // cannot accumulate unbounded near-duplicate caveats.
+  session.plan = parsed.plan
+  session.lastProjection = null
+  if (!session.caveats.includes(STALE_PROJECTION_CAVEAT)) session.caveats.push(STALE_PROJECTION_CAVEAT)
+
+  // Drop build-time caveats a set_assumption has now superseded. These caveats
+  // assert that a specific default/convention is in effect and name the old value
+  // (e.g. "recentAnnualMagi=50000", "state income tax is modeled at 0%"); once the
+  // field is set directly they are false, so explain_modeled_result and every
+  // response would otherwise keep repeating a value the plan no longer uses.
+  const assumptionFieldsSet = new Set(
+    ops.filter((o) => o.op === 'set_assumption').map((o) => o.field),
+  )
+  for (const field of assumptionFieldsSet) {
+    const supersedes = SUPERSEDED_CAVEATS[field]
+    if (supersedes) session.caveats = session.caveats.filter((c) => !supersedes(c))
+  }
+
+  // Setting recentAnnualMagi directly also supersedes a seeded irmaaLookbackMagis
+  // convention, which would otherwise clobber the new value on the documented
+  // export_plan -> build_plan round-trip (applyConventions reseeds recentAnnualMagi
+  // from the convention). Drop the convention so the explicit value round-trips.
+  if (assumptionFieldsSet.has('recentAnnualMagi') && session.conventions.irmaaLookbackMagis != null) {
+    session.conventions = { ...session.conventions, irmaaLookbackMagis: null }
+    const magiCaveat =
+      'update_plan set recentAnnualMagi directly; cleared the prior irmaaLookbackMagis convention so the value survives export_plan/build_plan round-trip.'
+    if (!session.caveats.includes(magiCaveat)) session.caveats.push(magiCaveat)
+  }
+
+  return {
+    ok: true as const,
+    appliedOperations: ops.length,
+    plan: planSummary(parsed.plan),
+    caveats: session.caveats,
   }
 }

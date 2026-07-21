@@ -3,6 +3,52 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.4.0
+
+**Plan ingestion — an AI can now learn the plan format and build a plan up from
+the user's real documents.** Adds the schema-discovery and incremental-mutation
+half of the plan round-trip (`export_plan` shipped in 0.2.0). Governed by
+`enhancements/plan-ingestion-and-round-trip.md` (steps 3–5). Additive — no change
+to any existing tool's behavior or numeric output.
+
+### Engine
+
+- **Bumped `@retiregolden/engine` 0.1.2 → 0.1.3** (exact pin retained). Additive:
+  0.1.3 adds the `@retiregolden/engine/schema` export (a zod-free versioned Plan
+  JSON Schema + `PLAN_SCHEMA_VERSION`) and changes no calculation. All goldens
+  hold **byte-identically**.
+
+### Added
+
+- **`describe_plan_schema`** — returns the engine's versioned Plan JSON Schema
+  (the source of truth for authoring a full plan document) plus its
+  `schemaVersion`. Optional `path` arg (dotted, e.g. `properties.accounts.items`,
+  or JSON pointer, e.g. `/properties/accounts/items`) fetches a subtree to keep
+  token cost down. Read-only meta tool. The same schema is **also served as an MCP
+  resource** (`plan-schema`).
+- **`update_plan`** — incremental merge-semantics mutation of the session plan via
+  named domain operations (`add_account` / `replace_account` / `remove_account` by
+  id, `add_income` / `replace_income` / `remove_income` by id, `set_assumption`,
+  `set_expense`). The mutated plan is validated through the engine **before
+  commit**: on failure the session plan is left **unchanged** (never
+  half-applied), and `issues` are returned. Requires a seeded plan (`build_plan`
+  first; `NO_PLAN` otherwise). Enables multi-document ingestion without rebuilding
+  each turn.
+
+### Docs
+
+- New `skills/retiregolden/references/plan-ingestion.md` walking the ingestion
+  loop (`describe_plan_schema` → extract → `update_plan` → `validate_plan` →
+  repeat) with a worked brokerage-statement-to-account example and guidance on
+  asking the user for missing required fields. Pointer added from `SKILL.md`.
+
+### Notes
+
+- Both new tools are stdio-only (`httpExposed: false`), matching the existing
+  read-only/authoring tools (`validate_plan`, `export_plan`); the five-tool HTTP
+  gateway surface is unchanged. `schemas/tools.v1.json` is updated so the
+  three-surface registry-parity test stays green.
+
 ## 0.3.0
 
 **The typed `build_plan` path now defaults to real-world, end-user modeling
