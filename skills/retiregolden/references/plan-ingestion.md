@@ -85,9 +85,17 @@ On success `update_plan` returns `appliedOperations`, a compact plan summary
 back as successful MCP results with `ok: false`:
 
 - `NO_PLAN` — nothing seeded; call `build_plan` first.
-- `OPERATION_FAILED` — an operation referenced a missing id; `issues` says which.
-- `INVALID_PLAN` — the merged plan failed engine validation; `issues` lists the
-  problems and the session plan is untouched.
+- `NO_OPERATIONS` — the `operations` array was empty.
+- `OPERATION_FAILED` — an operation is malformed at the operation level; `issues`
+  says which and why. Causes: a `replace_*` / `remove_*` referenced a **missing
+  id**; a replacement fragment's own `id` **mismatched** the target id; a
+  `set_assumption` / `set_expense` named an **unknown field** (a typo or
+  hallucinated key — check it against `describe_plan_schema`) or omitted `value`;
+  or a fragment carried an **unsafe key** (`__proto__` / `constructor` /
+  `prototype`). Read `issues` and correct the specific operation.
+- `INVALID_PLAN` — the operations were well-formed but the **merged plan** failed
+  engine validation (`parsePlan`); `issues` lists the problems and the session
+  plan is left untouched.
 
 ## Worked example — a brokerage statement → an account
 

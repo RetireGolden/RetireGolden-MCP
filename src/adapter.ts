@@ -616,12 +616,17 @@ function applyUpdateOp(plan: MutablePlan, op: UpdatePlanOp, index: number): stri
       if (!ASSUMPTION_FIELDS.has(op.field)) {
         return `${where}: unknown assumption field '${op.field}' (see describe_plan_schema properties.assumptions)`
       }
+      // z.unknown() accepts an omitted key, so a set op with no `value` would
+      // otherwise assign undefined and surface later as INVALID_PLAN. Require the
+      // key explicitly (null is a valid supplied value; absent is not).
+      if (!('value' in op)) return `${where}: 'value' is required`
       plan.assumptions[op.field] = op.value
       return null
     case 'set_expense':
       if (!EXPENSE_FIELDS.has(op.field)) {
         return `${where}: unknown expense field '${op.field}' (see describe_plan_schema properties.expenses)`
       }
+      if (!('value' in op)) return `${where}: 'value' is required`
       plan.expenses[op.field] = op.value
       return null
     default: {
@@ -677,6 +682,12 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
       return { ok: false as const, error: 'OPERATION_FAILED', issues: [err] }
     }
   }
+
+  // Stamp the modification time as part of the atomic commit, so an exported
+  // document reflects when the merge happened (consumers order / invalidate on
+  // updatedAtIso). Set on the clone before validation: on failure the clone is
+  // discarded and the live plan's timestamp is left untouched.
+  working.updatedAtIso = new Date().toISOString()
 
   const parsed = parsePlan(working)
   if (!parsed.ok) {

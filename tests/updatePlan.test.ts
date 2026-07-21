@@ -170,6 +170,32 @@ describe('update_plan', () => {
     expect(session.plan).toEqual(snapshot)
   })
 
+  it('rejects a set-operation that omits value', () => {
+    const session = seededSession()
+    const snapshot = structuredClone(session.plan)
+    // A malformed op with no `value` key (z.unknown accepts the omission).
+    const res = adapter.updatePlan(session, [
+      { op: 'set_assumption', field: 'inflationPct' } as unknown as adapter.UpdatePlanOp,
+    ])
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBe('OPERATION_FAILED')
+    expect(session.plan).toEqual(snapshot)
+  })
+
+  it('refreshes updatedAtIso on a successful commit', () => {
+    const session = seededSession()
+    const createdAt = session.plan!.createdAtIso
+    const res = adapter.updatePlan(session, [
+      { op: 'set_expense', field: 'baseAnnual', value: 70_000 },
+    ])
+    expect(res.ok).toBe(true)
+    const updatedAt = session.plan!.updatedAtIso
+    // A valid ISO timestamp, not before the plan's creation time.
+    expect(Number.isNaN(Date.parse(updatedAt))).toBe(false)
+    expect(updatedAt >= createdAt).toBe(true)
+  })
+
   it('rejects an empty operations batch without touching the session', () => {
     const session = seededSession()
     adapter.runProjection(session)
