@@ -24,6 +24,28 @@ function taxCalc() {
   return createFederalTaxCalculator()
 }
 
+/**
+ * Transient caveat that update_plan records to flag that any prior projection is
+ * now stale. It is genuinely transient — runProjection removes it once a fresh
+ * projection succeeds — so it is a named constant shared by both.
+ */
+const STALE_PROJECTION_CAVEAT =
+  'Plan mutated via update_plan; re-run run_projection to refresh results.'
+
+/**
+ * Build-time caveats that a later `set_assumption` renders obsolete, keyed by the
+ * assumption field. Each caveat asserts that a default/convention is in effect and
+ * embeds the old value; once the field is set directly the caveat is false and
+ * must be pruned so responses don't keep repeating a superseded number. This is a
+ * small explicit table (the handful of value-specific caveats buildPlan emits) —
+ * not an auto-derived taxonomy — so the mapping stays honest and reviewable.
+ */
+const SUPERSEDED_CAVEATS: Record<string, (caveat: string) => boolean> = {
+  recentAnnualMagi: (c) =>
+    c.startsWith('IRMAA-lookback:') || c.startsWith('convention irmaaLookbackMagis='),
+  stateEffectiveTaxPct: (c) => c.includes('stateEffectiveTaxPct is not'),
+}
+
 let cachedVersions: { mcpVersion: string | null; engineVersion: string | null } | null = null
 
 /**
@@ -102,6 +124,10 @@ export function runProjection(
   })
   const summary = summarizeProjection(session.plan, result)
   session.lastProjection = { result, summary }
+  // The projection is now current, so drop update_plan's transient "re-run
+  // run_projection" caveat — otherwise every fresh projection would keep telling
+  // the user their result is stale.
+  session.caveats = session.caveats.filter((c) => c !== STALE_PROJECTION_CAVEAT)
   const base = {
     ok: true as const,
     startYear: result.startYear,
@@ -428,7 +454,11 @@ const UNRESOLVED = Symbol('unresolved')
 
 function resolveSchemaPath(root: unknown, schemaPath: string): unknown | typeof UNRESOLVED {
   const trimmed = schemaPath.trim()
-  if (trimmed === '' || trimmed === '/' || trimmed === '.') return root
+  // Root is the empty string ('' per JSON Pointer) or '.' (the dotted-path
+  // convenience). NOT '/': per RFC 6901 that is a pointer with one empty-string
+  // reference token, so it must resolve an empty top-level key (which the schema
+  // lacks) → PATH_NOT_FOUND, consistent with how a trailing slash is handled.
+  if (trimmed === '' || trimmed === '.') return root
   const segments = trimmed.startsWith('/')
     ? trimmed
         .slice(1)
@@ -686,9 +716,13 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
 
   // Stamp the modification time as part of the atomic commit, so an exported
   // document reflects when the merge happened (consumers order / invalidate on
-  // updatedAtIso). Set on the clone before validation: on failure the clone is
-  // discarded and the live plan's timestamp is left untouched.
-  working.updatedAtIso = new Date().toISOString()
+  // updatedAtIso). Advance it MONOTONICALLY — strictly past the prior value — so
+  // two commits within the same millisecond, or a plan whose stored timestamp is
+  // ahead of this clock, still move the timestamp forward. Set on the clone before
+  // validation: on failure the clone is discarded and the live timestamp untouched.
+  const priorMs = Date.parse(session.plan.updatedAtIso)
+  const nextMs = Math.max(Date.now(), (Number.isNaN(priorMs) ? 0 : priorMs) + 1)
+  working.updatedAtIso = new Date(nextMs).toISOString()
 
   const parsed = parsePlan(working)
   if (!parsed.ok) {
@@ -696,22 +730,33 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
     return { ok: false as const, error: 'INVALID_PLAN', issues: parsed.issues }
   }
 
-  // Commit. Stale projection is dropped; record a caveat so a reader knows the
-  // plan moved and any prior projection/optimizer result no longer applies. The
+  // Commit. Stale projection is dropped; record the transient caveat so a reader
+  // knows the plan moved and any prior projection/optimizer result no longer
+  // applies. run_projection removes it again once a fresh projection succeeds. The
   // message is stable (no per-call operation count) so repeated update_plan calls
   // cannot accumulate unbounded near-duplicate caveats.
   session.plan = parsed.plan
   session.lastProjection = null
-  const caveat = 'Plan mutated via update_plan; re-run run_projection to refresh results.'
-  if (!session.caveats.includes(caveat)) session.caveats.push(caveat)
+  if (!session.caveats.includes(STALE_PROJECTION_CAVEAT)) session.caveats.push(STALE_PROJECTION_CAVEAT)
 
-  // If the caller set recentAnnualMagi directly, a previously-seeded
-  // irmaaLookbackMagis convention would clobber it on the documented
-  // export_plan -> build_plan round-trip (applyConventions reseeds
-  // recentAnnualMagi from the convention). Drop the now-superseded convention so
-  // the explicit value round-trips faithfully.
-  const setRecentMagi = ops.some((o) => o.op === 'set_assumption' && o.field === 'recentAnnualMagi')
-  if (setRecentMagi && session.conventions.irmaaLookbackMagis != null) {
+  // Drop build-time caveats a set_assumption has now superseded. These caveats
+  // assert that a specific default/convention is in effect and name the old value
+  // (e.g. "recentAnnualMagi=50000", "state income tax is modeled at 0%"); once the
+  // field is set directly they are false, so explain_modeled_result and every
+  // response would otherwise keep repeating a value the plan no longer uses.
+  const assumptionFieldsSet = new Set(
+    ops.filter((o) => o.op === 'set_assumption').map((o) => o.field),
+  )
+  for (const field of assumptionFieldsSet) {
+    const supersedes = SUPERSEDED_CAVEATS[field]
+    if (supersedes) session.caveats = session.caveats.filter((c) => !supersedes(c))
+  }
+
+  // Setting recentAnnualMagi directly also supersedes a seeded irmaaLookbackMagis
+  // convention, which would otherwise clobber the new value on the documented
+  // export_plan -> build_plan round-trip (applyConventions reseeds recentAnnualMagi
+  // from the convention). Drop the convention so the explicit value round-trips.
+  if (assumptionFieldsSet.has('recentAnnualMagi') && session.conventions.irmaaLookbackMagis != null) {
     session.conventions = { ...session.conventions, irmaaLookbackMagis: null }
     const magiCaveat =
       'update_plan set recentAnnualMagi directly; cleared the prior irmaaLookbackMagis convention so the value survives export_plan/build_plan round-trip.'

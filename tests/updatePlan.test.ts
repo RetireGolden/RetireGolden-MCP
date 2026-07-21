@@ -268,6 +268,8 @@ describe('update_plan', () => {
       conventions: { irmaaLookbackMagis: [50_000, 60_000] },
     })
     expect(session.conventions.irmaaLookbackMagis).toEqual([50_000, 60_000])
+    // The build recorded a convention-derived caveat naming the old MAGI.
+    expect(session.caveats.some((c) => c.startsWith('convention irmaaLookbackMagis='))).toBe(true)
     const res = adapter.updatePlan(session, [
       { op: 'set_assumption', field: 'recentAnnualMagi', value: 90_000 },
     ])
@@ -275,7 +277,48 @@ describe('update_plan', () => {
     // The superseded convention is cleared so the explicit MAGI round-trips.
     expect(session.conventions.irmaaLookbackMagis).toBeNull()
     expect(session.plan!.assumptions.recentAnnualMagi).toBe(90_000)
+    // Its now-obsolete caveats (which named the old MAGI) are dropped too, so no
+    // response keeps asserting the superseded value.
+    expect(session.caveats.some((c) => c.startsWith('IRMAA-lookback:'))).toBe(false)
+    expect(session.caveats.some((c) => c.startsWith('convention irmaaLookbackMagis='))).toBe(false)
     if (res.ok) expect(res.caveats.some((c) => c.includes('recentAnnualMagi'))).toBe(true)
+  })
+
+  it('prunes a superseded state-tax caveat when stateEffectiveTaxPct is set', () => {
+    // The typed build records a caveat that state income tax is modeled at 0%
+    // because stateEffectiveTaxPct was not supplied (singleHousehold names KY).
+    const session = seededSession()
+    expect(session.caveats.some((c) => c.includes('stateEffectiveTaxPct is not'))).toBe(true)
+    const res = adapter.updatePlan(session, [
+      { op: 'set_assumption', field: 'stateEffectiveTaxPct', value: 5 },
+    ])
+    expect(res.ok).toBe(true)
+    // The now-false "modeled at 0%" caveat is dropped.
+    expect(session.caveats.some((c) => c.includes('stateEffectiveTaxPct is not'))).toBe(false)
+    expect(session.plan!.assumptions.stateEffectiveTaxPct).toBe(5)
+  })
+
+  it('drops the transient stale-projection caveat once a projection is re-run', () => {
+    const session = seededSession()
+    const up = adapter.updatePlan(session, [
+      { op: 'set_expense', field: 'baseAnnual', value: 71_000 },
+    ])
+    expect(up.ok).toBe(true)
+    expect(session.caveats.some((c) => c.includes('re-run run_projection'))).toBe(true)
+    const proj = adapter.runProjection(session)
+    expect(proj.ok).toBe(true)
+    // The projection is now current — the "re-run" nudge must not persist.
+    expect(session.caveats.some((c) => c.includes('re-run run_projection'))).toBe(false)
+  })
+
+  it('advances updatedAtIso monotonically across same-instant commits', () => {
+    const session = seededSession()
+    adapter.updatePlan(session, [{ op: 'set_expense', field: 'baseAnnual', value: 60_001 }])
+    const first = session.plan!.updatedAtIso
+    adapter.updatePlan(session, [{ op: 'set_expense', field: 'baseAnnual', value: 60_002 }])
+    const second = session.plan!.updatedAtIso
+    // Strictly increasing even if both commits land in the same millisecond.
+    expect(second > first).toBe(true)
   })
 
   it('records a caveat and clears the stale projection on commit', () => {

@@ -68,6 +68,15 @@ describe('describe_plan_schema tool', () => {
     )
   })
 
+  it('treats "/" as a JSON pointer to an empty-string key, not the root', () => {
+    // Per RFC 6901, '/' is a pointer with one empty reference token; the root
+    // pointer is the empty string. The schema has no empty top-level key.
+    const res = adapter.describePlanSchema({ path: '/' })
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBe('PATH_NOT_FOUND')
+  })
+
   it('does not treat an empty array segment (trailing slash) as index 0', () => {
     // Number('') === 0, so a naive resolver would return the first oneOf branch.
     const res = adapter.describePlanSchema({ path: '/properties/accounts/items/oneOf/' })
