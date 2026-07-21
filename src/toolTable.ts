@@ -22,11 +22,27 @@ export const EDUCATIONAL =
 
 /**
  * A plan fragment (account/income object) passed through update_plan verbatim.
- * Kept as a loose object: it targets the engine-plan shape, which the engine's
- * parsePlan — not this zod — is the authority on. The whole mutated plan is
- * validated there before commit, so structural checks live in one place.
+ * Kept structurally loose — it targets the engine-plan shape, which the engine's
+ * parsePlan (not this zod) is the authority on, so the whole mutated plan is
+ * validated there before commit. But the boundary still rejects two things a bare
+ * record would wave through: an ARRAY (`z.record` treats an array as an object of
+ * numeric keys, so `account: []` would pass here and only fail later as a
+ * confusing INVALID_PLAN) and prototype-pollution keys. The adapter re-checks the
+ * latter too, defending programmatic callers that bypass this schema.
  */
-const PlanFragment = z.record(z.string(), z.unknown())
+const PROTO_KEYS = ['__proto__', 'constructor', 'prototype']
+// Reject pollution keys at the KEY level. (zod v4 already silently drops a
+// '__proto__' key during record parse, so it can never pollute — but it passes
+// 'constructor' / 'prototype' through as ordinary keys, so refine them out here
+// for a clear boundary error rather than a downstream parsePlan failure.) The
+// adapter's dangerousKeyIn re-checks all three for programmatic callers that
+// bypass this schema.
+const fragmentKey = z
+  .string()
+  .refine((k) => !PROTO_KEYS.includes(k), { message: 'unsafe key (__proto__/constructor/prototype)' })
+const PlanFragment = z
+  .record(fragmentKey, z.unknown())
+  .refine((v) => !Array.isArray(v), { message: 'must be a plain object, not an array' })
 
 /** Named domain operations for update_plan (see adapter.UpdatePlanOp). */
 const UpdatePlanOpSchema = z.discriminatedUnion('op', [

@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import { createSession, type SessionState } from '../src/session.js'
 import * as adapter from '../src/adapter.js'
+import { getTool, validateToolArgs } from '../src/toolTable.js'
 import { singleHousehold, singlePolicy } from './fixtures.js'
 
 function seededSession(): SessionState {
@@ -173,7 +174,9 @@ describe('update_plan', () => {
   it('rejects a set-operation that omits value', () => {
     const session = seededSession()
     const snapshot = structuredClone(session.plan)
-    // A malformed op with no `value` key (z.unknown accepts the omission).
+    // Simulate a programmatic adapter caller (bypassing the tool's zod schema)
+    // passing a set-op with no `value`; the adapter must reject it, not assign
+    // undefined. The cast forces the malformed shape past the type system.
     const res = adapter.updatePlan(session, [
       { op: 'set_assumption', field: 'inflationPct' } as unknown as adapter.UpdatePlanOp,
     ])
@@ -286,6 +289,28 @@ describe('update_plan', () => {
     if (!res.ok) return
     expect(session.lastProjection).toBeNull()
     expect(res.caveats.some((c) => c.includes('update_plan'))).toBe(true)
+  })
+
+  it('tool-arg schema rejects a non-object (array) or proto-key fragment', () => {
+    const entry = getTool('update_plan')!
+    // A valid object fragment passes arg validation.
+    expect(
+      validateToolArgs(entry, {
+        operations: [{ op: 'add_account', account: brokerageFragment() }],
+      }),
+    ).toBeNull()
+    // An array is not a plain object fragment.
+    expect(
+      validateToolArgs(entry, { operations: [{ op: 'add_account', account: [] }] }),
+    ).not.toBeNull()
+    // A prototype-pollution key is rejected at the boundary. (zod silently drops
+    // '__proto__' itself; 'constructor'/'prototype' pass through and the fragment
+    // key-refine rejects them.)
+    expect(
+      validateToolArgs(entry, {
+        operations: [{ op: 'add_account', account: { constructor: {}, id: 'x' } }],
+      }),
+    ).not.toBeNull()
   })
 
   it('round-trips: build minimal -> update ops -> export -> validate ok', () => {

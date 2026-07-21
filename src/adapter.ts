@@ -616,17 +616,18 @@ function applyUpdateOp(plan: MutablePlan, op: UpdatePlanOp, index: number): stri
       if (!ASSUMPTION_FIELDS.has(op.field)) {
         return `${where}: unknown assumption field '${op.field}' (see describe_plan_schema properties.assumptions)`
       }
-      // z.unknown() accepts an omitted key, so a set op with no `value` would
-      // otherwise assign undefined and surface later as INVALID_PLAN. Require the
-      // key explicitly (null is a valid supplied value; absent is not).
-      if (!('value' in op)) return `${where}: 'value' is required`
+      // Reject a missing/undefined value. A programmatic caller can reach this
+      // adapter directly (bypassing the tool's zod), and assigning undefined would
+      // otherwise be stripped by parsePlan — a silent no-op reported as applied.
+      // `null` is a legitimate supplied value; `undefined` is not.
+      if (op.value === undefined) return `${where}: 'value' is required (received undefined)`
       plan.assumptions[op.field] = op.value
       return null
     case 'set_expense':
       if (!EXPENSE_FIELDS.has(op.field)) {
         return `${where}: unknown expense field '${op.field}' (see describe_plan_schema properties.expenses)`
       }
-      if (!('value' in op)) return `${where}: 'value' is required`
+      if (op.value === undefined) return `${where}: 'value' is required (received undefined)`
       plan.expenses[op.field] = op.value
       return null
     default: {
