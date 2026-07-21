@@ -25,6 +25,7 @@ node_modules/@retiregolden/mcp/skills/retiregolden/
 ├── SKILL.md
 └── references/
     ├── examples.md
+    ├── plan-ingestion.md
     └── plan-json.md
 ```
 
@@ -124,6 +125,7 @@ The result looks like:
 ├── SKILL.md
 └── references/
     ├── examples.md
+    ├── plan-ingestion.md
     └── plan-json.md
 ```
 

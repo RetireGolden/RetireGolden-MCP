@@ -147,4 +147,66 @@ describe('HTTP gateway (Phase 6 stub) integration', () => {
     expect(r.status).toBe(400)
     expect(((await r.json()) as { error: string }).error).toBe('UNKNOWN_TOOL')
   })
+
+  /** A current-schema exported document, produced through the adapter directly. */
+  async function exportedFixture() {
+    const adapter = await import('../src/adapter.js')
+    const { createSession } = await import('../src/session.js')
+    const session = createSession(2026)
+    adapter.setPlanFromBuild(session, {
+      household: singleHousehold,
+      policy: singlePolicy,
+      startYear: 2026,
+    })
+    const exported = adapter.exportPlan(session)
+    if (!exported.ok) throw new Error('fixture export failed')
+    return exported
+  }
+
+  it('carries build_plan provenance skew caveats over HTTP', async () => {
+    // Re-import an exported document over the wire with mismatched provenance
+    // siblings. Pins the HTTP contract: the gateway forwards the extra args and
+    // the caveats reach the JSON response body.
+    const { PLAN_SCHEMA_VERSION } = await import('@retiregolden/engine/schema')
+    const exported = await exportedFixture()
+
+    const r = await post(
+      {
+        tool: 'build_plan',
+        arguments: {
+          plan: JSON.parse(JSON.stringify(exported.plan)),
+          startYear: 2026,
+          schemaVersion: PLAN_SCHEMA_VERSION + 1,
+          engineVersion: '0.0.0-not-this-one',
+        },
+      },
+      { 'x-session-id': 'provenance' },
+    )
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { ok: boolean; caveats: string[] }
+    expect(body.ok).toBe(true)
+    expect(body.caveats.filter((c) => c.startsWith('schemaVersion skew:'))).toHaveLength(1)
+    expect(body.caveats.filter((c) => c.startsWith('engineVersion skew:'))).toHaveLength(1)
+  })
+
+  it('refuses a cross-plan-schema document over HTTP with an explanation, not a bare zod issue', async () => {
+    const { PLAN_SCHEMA_VERSION } = await import('@retiregolden/engine/schema')
+    const exported = await exportedFixture()
+    const doc = {
+      ...JSON.parse(JSON.stringify(exported.plan)),
+      schemaVersion: PLAN_SCHEMA_VERSION + 1,
+    }
+
+    const r = await post(
+      { tool: 'build_plan', arguments: { plan: doc, startYear: 2026 } },
+      { 'x-session-id': 'cross-schema' },
+    )
+    // The gateway's own arg validation passes (the document is opaque `unknown`);
+    // the engine refuses it, and the explanation leads the issue list.
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { ok: boolean; issues: string[] }
+    expect(body.ok).toBe(false)
+    expect(body.issues[0]).toContain('plan-schema skew:')
+    expect(body.issues[0]).toContain(`v${PLAN_SCHEMA_VERSION + 1}`)
+  })
 })

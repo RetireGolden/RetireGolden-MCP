@@ -3,6 +3,115 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.4.2
+
+**An exported plan document now says which build wrote it, and a re-import warns
+on version skew.** Delivers the `schemaVersion` stamp named in step 1 of
+`enhancements/plan-ingestion-and-round-trip.md`. Additive — no engine bump, no
+change to any calculation. All goldens hold **byte-identically**.
+
+On that plan's open decision 3 (skew policy), this release implements **warn,
+never refuse for everything the MCP controls**, and makes the one case it does
+not control explicit rather than silent — see *Skew policy, precisely* below. The
+decision is **not** fully closed: accepting a document written against a *newer*
+plan schema needs engine-side work, so that half stays with the owner.
+
+### Added
+
+- **`export_plan` stamps the emitting build's identity.** Alongside the existing
+  `plan` / `startYear` / `conventions` / `caveats`, the response now carries
+  `schemaVersion` (the engine's `PLAN_SCHEMA_VERSION`, the same source
+  `describe_plan_schema` reports — not a duplicated literal), plus `engineVersion`
+  and `mcpVersion` from the shared `getVersions()` helper with the same
+  best-effort semantics as `get_session` (either degrades to `null` rather than
+  throwing). Every previously returned field is unchanged, and the clone-on-export
+  contract now covers the **whole** response: `conventions` and `caveats` were
+  returned by reference, so a programmatic consumer (Pro's `save_library_plan`
+  calls this helper directly) could mutate live session state through the exported
+  object. Both are now cloned.
+- **`build_plan` accepts the provenance siblings `schemaVersion`,
+  `engineVersion` and `mcpVersion`.** Pass an `export_plan` response's siblings
+  straight back. Both version checks **warn and import anyway**; neither ever
+  refuses:
+  - `engineVersion` differing from the running engine adds a caveat. This is the
+    skew that can genuinely occur between two shipped builds that can exchange
+    documents at all — same plan schema, moved defaults and semantics (the
+    0.1.3 → 0.1.4 adoption in 0.4.1 is exactly such a step).
+  - `schemaVersion` differing from the installed `PLAN_SCHEMA_VERSION` adds a
+    caveat attributed to the **caller**, because a document that reaches the
+    accept path has already validated at the installed version — the label, not
+    the document, is what disagreed.
+  - `mcpVersion` is accepted and recorded but never warned on: for a full plan
+    document, the document is the model.
+  - `engineVersion` and `mcpVersion` accept **`null`** — the value `export_plan`
+    itself emits when a package version cannot be resolved — so a whole export
+    response spreads back in verbatim. A null is treated as "unknown" and warns on
+    nothing.
+  - Omitting all three — every document written before this release — imports
+    exactly as it did, with no new caveat and no error.
+  - Caveat wording tracks what actually happened to the document: when the caller
+    also passed `conventions` (which rewrite IRMAA lookback MAGIs or withdrawal
+    ordering before the caveat is emitted), the message says the document was
+    accepted *with those conventions applied on top* rather than claiming it was
+    imported unchanged.
+- **A cross-plan-schema document is now explained instead of leaking a zod
+  issue.** A document written by a build on a different plan schema declares that
+  version *inside itself*, and the engine's `parsePlan` pins that field to
+  `z.literal(PLAN_SCHEMA_VERSION)`. Previously such an import failed with a bare
+  `schemaVersion: Invalid input: expected 1`. It now leads with a message naming
+  both versions, the direction of the skew and the remedy, with the engine's own
+  issues kept underneath. For a document written by a *newer* build the remedy
+  named is to upgrade (or to supply an export produced under this build's schema) —
+  not to re-export at the older version, which the newer build may have no way to
+  do. Older-schema documents are first offered to the engine's
+  `migratePlanToCurrent` (its documented pre-`parsePlan` step) and are imported
+  with a migration caveat when it can upgrade them; the caller's `schemaVersion`
+  sibling is still checked independently in that case, against the version the
+  document itself declared, so a migration cannot mask a mismatched label.
+
+### Notes
+
+- **Skew policy, precisely.** Three distinct situations, deliberately handled
+  differently:
+  1. *Provenance label disagrees with an otherwise-valid document* (`schemaVersion`
+     sibling) → **caveat, imported**.
+  2. *Different engine build, same plan schema* (`engineVersion` sibling) →
+     **caveat, imported**. This is the reachable, real-world case.
+  3. *Document written against a different plan schema* → **refused by the
+     engine's validator**, with an explanatory message. This is not a policy
+     refusal the MCP could waive: the installed engine has no definition for
+     another schema's shape, and accepting it would mean guessing at fields. For
+     an older schema the engine's migration registry is consulted first; it is
+     empty at plan-schema v1, so today only "newer than this build" reaches the
+     refusal. Removing that limit is engine work (a v1→v2 migration step), which
+     is why decision 3 is recorded above as partially open.
+- Provenance siblings are honored only on the full-plan-JSON branch; the typed
+  `household`/`policy` path builds a document from scratch at the current version
+  and ignores them.
+- `getVersions()` moved from `src/adapter.ts` into `src/versions.ts` so
+  `buildPlan.ts` can compare engine versions without an import cycle.
+  `adapter.getVersions` re-exports it — the import path every consumer
+  (`get_session`, `export_plan`, `explain_modeled_result`, Pro) uses is unchanged.
+- Tool-surface names and arm groupings are unchanged, so `schemas/tools.v1.json`
+  needs no edit and the registry-parity / gateway-parity tests stay green.
+- **Follow-up owed in RetireGolden-Docs (not this repo):**
+  `enhancements/plan-ingestion-and-round-trip.md` still lists decision 3 as open
+  with a "likely:" hedge and does not record the step-1 stamp shipping. Update it
+  to say the warn-never-refuse half is resolved and shipped in
+  `@retiregolden/mcp` 0.4.2, and that the newer-schema half remains open pending
+  an engine migration path. Do this before tagging the release.
+
+### Docs
+
+- `docs/clients.md` skill-folder trees now list `references/plan-ingestion.md`
+  (shipped in 0.4.0) alongside `examples.md` and `plan-json.md`, so a reader
+  copying the folder knows to expect all three.
+- `docs/hosted-transport.md` said the HTTP stub exposes "5 of the 11" tools; the
+  stdio surface has been 14 since 0.4.0. Corrected to 5 of 14, with the 9
+  unreachable tools named (`describe_plan_schema` and `update_plan` were missing
+  from the list), and pointed at `schemas/tools.v1.json` as the count of record.
+  `docs/` ships in the npm tarball, so this text reached readers.
+
 ## 0.4.1
 
 ### Engine
