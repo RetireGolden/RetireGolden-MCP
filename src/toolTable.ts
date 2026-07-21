@@ -110,7 +110,19 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         .int()
         .optional()
         .describe(
-          "Provenance only: the `schemaVersion` sibling from an export_plan response, i.e. the plan-schema version the supplied `plan` was written by. A value differing from this build's version adds a caveat and NOTHING else — the plan is still imported. Omit it and no caveat is emitted.",
+          "Provenance only: the `schemaVersion` sibling from an export_plan response. A value differing from this build's version adds a caveat and NOTHING else — the document is still imported. Note this is your CLAIM about the document; the version the engine actually gates on is the `schemaVersion` field inside the document itself. Omit it and no caveat is emitted.",
+        ),
+      engineVersion: z
+        .string()
+        .optional()
+        .describe(
+          "Provenance only: the `engineVersion` sibling from an export_plan response, i.e. the @retiregolden/engine build that exported the supplied `plan`. Differing from the running engine adds a caveat (defaults and modeling semantics can move between engine versions) and NOTHING else — the document is still imported. This is the version skew that can actually occur between two builds that can exchange documents at all.",
+        ),
+      mcpVersion: z
+        .string()
+        .optional()
+        .describe(
+          'Provenance only: the `mcpVersion` sibling from an export_plan response, accepted so a whole export can be spread straight back into build_plan. Recorded, never warned on — for a full plan document the document itself is the model.',
         ),
       conventions: z
         .object({
@@ -266,7 +278,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'export_plan',
-    description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear, conventions and caveats, and the identity of the build that emitted it: schemaVersion (the engine's plan-schema version), engineVersion and mcpVersion (null if not resolvable). Round-trips via build_plan({ plan, startYear, conventions, schemaVersion }) — pass the exported startYear back or a non-2026 session's projection will diverge, and pass schemaVersion back so a different build can warn (never refuse) on version skew. Returns a clone; mutating it does not affect the live session.`,
+    description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear, conventions and caveats, and the identity of the build that emitted it: schemaVersion (the engine's plan-schema version), engineVersion and mcpVersion (null if not resolvable). Round-trips via build_plan({ plan, startYear, conventions, schemaVersion, engineVersion }) — pass the exported startYear back or a non-2026 session's projection will diverge, and pass the version siblings back so a different build can warn on skew (a differing engineVersion, or a schemaVersion that disagrees with the document, is a caveat only — never a refusal). A document written against a DIFFERENT plan schema is a separate matter: the engine's validator can only read its own schema version, so such a document is rejected with an explanatory message rather than silently mis-read. Returns a clone; mutating it does not affect the live session.`,
     inputShape: {},
     handler: (session) => adapter.exportPlan(session),
     httpExposed: false,

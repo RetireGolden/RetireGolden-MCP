@@ -6,7 +6,9 @@
 import { z } from 'zod'
 import type { Plan } from '@retiregolden/engine'
 import { createEmptyPlan, parsePlan } from '@retiregolden/engine/model/plan'
+import { migratePlanToCurrent } from '@retiregolden/engine/model/migrations'
 import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema'
+import { getVersions } from './versions.js'
 import type { ConventionKnobs } from './session.js'
 
 export const PersonParamsSchema = z.object({
@@ -184,8 +186,27 @@ export interface BuildPlanInput {
    * `schemaVersion` sibling that export_plan stamps. Purely a provenance signal:
    * a value differing from the installed PLAN_SCHEMA_VERSION adds a caveat and
    * nothing else. Omitted => no caveat (pre-0.4.2 documents import unchanged).
+   *
+   * Note this is the CALLER's claim about the document. The document's own
+   * embedded `plan.schemaVersion` is read separately (see `embeddedSchemaVersion`)
+   * because that is the field the engine's validator actually gates on.
    */
   schemaVersion?: number
+  /**
+   * @retiregolden/engine version that exported the supplied `plan` — the
+   * `engineVersion` sibling export_plan stamps. Provenance only: a value differing
+   * from the running engine adds a caveat and nothing else. This is the skew that
+   * can actually occur between shipped builds (same plan schema, different engine
+   * semantics/defaults), which is why it is warned about.
+   */
+  engineVersion?: string
+  /**
+   * @retiregolden/mcp version that exported the supplied `plan` — recorded so a
+   * whole export_plan response can be spread straight back into build_plan. It
+   * carries no modeling semantics of its own for a full plan document (the
+   * document IS the model), so unlike engineVersion it never raises a caveat.
+   */
+  mcpVersion?: string
 }
 
 export interface BuildPlanResult {
@@ -201,24 +222,69 @@ export interface BuildPlanResult {
 const FILING = { single: 'single', mfj: 'marriedFilingJointly' } as const
 
 /**
- * Warn when a re-imported document was written against a DIFFERENT plan-schema
- * version than this build speaks. Never refuses — a mismatch is a caveat only.
- *
- * The signal is read from the caller-supplied `schemaVersion` SIBLING of `plan`
- * (what export_plan stamps and what a caller passes straight back as
- * `build_plan({ plan, startYear, conventions, schemaVersion })`), deliberately NOT
- * from `plan.schemaVersion` inside the document. The engine's own parsePlan pins
- * that field to a literal equal to the installed PLAN_SCHEMA_VERSION, so any
- * in-document skew is hard-rejected by the engine before this code could see it —
- * a caveat derived from the embedded field could never coexist with an accepted
- * import, which is exactly the behavior this warning has to provide. Reading the
- * sibling keeps provenance on a channel the engine does not gate.
+ * The plan-schema version a DOCUMENT declares about itself, or null when the
+ * field is absent or not an integer. This is the field the engine's parsePlan
+ * pins to `z.literal(PLAN_SCHEMA_VERSION)`, so it — not the caller's sibling
+ * argument — decides whether a real cross-build document validates here.
  */
-function pushSchemaSkewCaveat(declared: number | undefined | null, caveats: string[]): void {
+function embeddedSchemaVersion(plan: unknown): number | null {
+  if (typeof plan !== 'object' || plan === null || Array.isArray(plan)) return null
+  const v = (plan as { schemaVersion?: unknown }).schemaVersion
+  return typeof v === 'number' && Number.isInteger(v) ? v : null
+}
+
+/**
+ * Warn when the CALLER's `schemaVersion` sibling disagrees with this build, on a
+ * document that nonetheless validated here. Never refuses — a mismatch is a
+ * caveat only.
+ *
+ * Attribution matters: to reach this the document has already passed parsePlan,
+ * which pins the embedded `schemaVersion` to the installed PLAN_SCHEMA_VERSION.
+ * So the document itself does NOT declare the skewed version — the sibling
+ * argument does (a stale constant, a value copied from an unrelated response, or
+ * a hand-edited export). Saying otherwise would tell a caller to re-export a
+ * document that is already current.
+ */
+function pushCallerSchemaSkewCaveat(declared: number | undefined | null, caveats: string[]): void {
   if (declared == null || declared === PLAN_SCHEMA_VERSION) return
   caveats.push(
-    `schemaVersion skew: the supplied plan document declares plan-schema v${declared} but this build speaks v${PLAN_SCHEMA_VERSION}; the plan was accepted anyway — re-export it from this build if any field looks missing or misread.`,
+    `schemaVersion skew: caller-declared plan-schema v${declared} does not match this build's v${PLAN_SCHEMA_VERSION}; the supplied document itself validated as v${PLAN_SCHEMA_VERSION} and was accepted unchanged — check that the schemaVersion argument came from the same export_plan response as the plan.`,
   )
+}
+
+/**
+ * Warn when the document was exported by a DIFFERENT @retiregolden/engine build
+ * than the one running. This is the skew that can genuinely occur between shipped
+ * builds: the plan schema is gated by the engine (see `explainSchemaRefusal`), so
+ * two builds that can exchange documents at all share a schema version — but their
+ * defaults, parameter packs and semantics may differ. Warn only; the document is
+ * imported unchanged.
+ */
+function pushEngineSkewCaveat(declared: string | undefined | null, caveats: string[]): void {
+  if (declared == null || declared === '') return
+  const installed = getVersions().engineVersion
+  // Unresolvable installed version => nothing to compare against; stay silent
+  // rather than warn on an unknown.
+  if (installed == null || installed === declared) return
+  caveats.push(
+    `engineVersion skew: the supplied plan document was exported under @retiregolden/engine ${declared} but this build runs ${installed}; the document was imported unchanged, but engine defaults and modeling semantics can differ between versions — re-run the projection here rather than comparing against numbers produced by the exporting build.`,
+  )
+}
+
+/**
+ * Explain a parse failure that is really a plan-schema mismatch.
+ *
+ * The engine's parsePlan reports it as a bare `schemaVersion: Invalid input:
+ * expected N`, which tells an agent nothing about the cause or the remedy. This
+ * is the ONE refusal the warn-never-refuse policy does not cover, and it is the
+ * engine's validator refusing a shape it cannot read — not an MCP policy choice.
+ */
+function explainSchemaRefusal(declared: number, reason: string): string {
+  const direction =
+    declared > PLAN_SCHEMA_VERSION
+      ? `the document was written by a NEWER build; this one cannot safely read it. Re-export it from a build on plan-schema v${PLAN_SCHEMA_VERSION}, or open it with a build that speaks v${declared}`
+      : `the installed engine could not upgrade it to v${PLAN_SCHEMA_VERSION}. Re-export the document from a build on plan-schema v${PLAN_SCHEMA_VERSION}`
+  return `plan-schema skew: the supplied document declares plan-schema v${declared} but this build validates v${PLAN_SCHEMA_VERSION} — ${direction}. (Engine migratePlanToCurrent: ${reason}.)`
 }
 
 export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
@@ -227,9 +293,41 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   const conventions = input.conventions ?? {}
 
   if (input.plan != null) {
-    const parsed = parsePlan(input.plan)
-    if (!parsed.ok) {
-      return { ok: false, startYear, caveats, issues: parsed.issues }
+    const firstParse = parsePlan(input.plan)
+    let accepted: Plan
+    /** Set when the document arrived on an older schema and the engine upgraded it. */
+    let migratedFrom: number | null = null
+    if (firstParse.ok) {
+      accepted = firstParse.plan
+    } else {
+      // The document did not validate. Before surfacing raw zod issues, work out
+      // whether the cause is a plan-schema mismatch — the case this whole feature
+      // exists for. A genuine cross-build export carries its OWN schemaVersion, and
+      // the engine pins that field to a literal, so a skewed document never reaches
+      // the accept path below; without this branch it would be refused with an
+      // unexplained `schemaVersion: Invalid input: expected N`.
+      const declaredInDoc = embeddedSchemaVersion(input.plan)
+      if (declaredInDoc == null || declaredInDoc === PLAN_SCHEMA_VERSION) {
+        // Not a version problem (or an unversioned pre-schema document): behave
+        // exactly as before.
+        return { ok: false, startYear, caveats, issues: firstParse.issues }
+      }
+      // Real skew. Try the engine's own documented import path — migratePlanToCurrent
+      // upgrades an older-schema document and re-validates it. It is only consulted
+      // HERE, on a document this build already failed to parse AND that declares a
+      // different schema, so it can never alter how a currently-valid document is
+      // read (in particular its account-owner normalization cannot reach one).
+      const migrated = migratePlanToCurrent(input.plan)
+      if (!migrated.ok) {
+        return {
+          ok: false,
+          startYear,
+          caveats,
+          issues: [explainSchemaRefusal(declaredInDoc, migrated.reason), ...firstParse.issues],
+        }
+      }
+      accepted = migrated.plan
+      migratedFrom = declaredInDoc
     }
     // Mixed-mode is allowed for compatibility, but full plan JSON takes precedence:
     // any typed household/policy/conversion/assumptions supplied alongside it are
@@ -245,14 +343,21 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
         `${ignored.join(', ')} ignored: full plan JSON was supplied and takes precedence`,
       )
     }
-    applyConventions(parsed.plan, conventions, caveats, startYear)
-    const conventionParsed = parsePlan(parsed.plan)
+    applyConventions(accepted, conventions, caveats, startYear)
+    const conventionParsed = parsePlan(accepted)
     if (!conventionParsed.ok) {
       return { ok: false, startYear, caveats, issues: conventionParsed.issues }
     }
     // Provenance skew — WARN, never refuse. Emitted only after the document has
-    // actually been accepted, so "accepted anyway" is always literally true.
-    pushSchemaSkewCaveat(input.schemaVersion, caveats)
+    // actually been accepted, so every "was accepted" phrasing is literally true.
+    if (migratedFrom != null) {
+      caveats.push(
+        `plan-schema migration: the supplied document declares plan-schema v${migratedFrom} and was upgraded to this build's v${PLAN_SCHEMA_VERSION} by the engine before import; re-export it from this build to persist the upgrade.`,
+      )
+    } else {
+      pushCallerSchemaSkewCaveat(input.schemaVersion, caveats)
+    }
+    pushEngineSkewCaveat(input.engineVersion, caveats)
     return { ok: true, plan: conventionParsed.plan, startYear, caveats }
   }
 

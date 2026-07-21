@@ -9,7 +9,7 @@ after proving bit-identical tool results vs stdio for a fixture matrix.
 
 ## Stub surface (partial)
 
-The stub is **not** at parity with stdio: it exposes only **5 of the 11** tools,
+The stub is **not** at parity with stdio: it exposes only **5 of the 14** tools,
 each mapped onto the same adapter handlers:
 
 - `build_plan`
@@ -18,9 +18,11 @@ each mapped onto the same adapter handlers:
 - `run_optimizer`
 - `explain_modeled_result`
 
-The remaining stdio tools (Monte Carlo, spending solver, scenario compare, plan
-validation, etc.) are not reachable over HTTP yet. Do not build a full parity
-matrix against this surface.
+The remaining 9 stdio tools (Monte Carlo, spending solver, scenario compare, plan
+validation, `describe_plan_schema`, `update_plan`, `export_plan`, session
+inspect/clear) are not reachable over HTTP yet. Do not build a full parity matrix
+against this surface. The count of record is `schemas/tools.v1.json`, which the
+registry-parity test holds equal to `TOOL_TABLE`.
 
 ## Request contract
 
