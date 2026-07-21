@@ -39,7 +39,7 @@ describe('session helpers', () => {
     expect(session.startYear).toBe(2026)
   })
 
-  it('setPlanFromBuild records caveats and the built start year on the session', () => {
+  it('setPlanFromBuild records the built start year and exact MAGI history', () => {
     const session = createSession(2026)
     adapter.setPlanFromBuild(session, {
       household: singleHousehold,
@@ -47,7 +47,10 @@ describe('session helpers', () => {
       startYear: 2030,
     })
     expect(session.startYear).toBe(2030)
-    // distinct pre-horizon MAGIs produce the IRMAA-lookback caveat
-    expect(session.caveats.some((c) => c.startsWith('IRMAA-lookback'))).toBe(true)
+    expect(session.plan!.assumptions.historicalAnnualMagiByYear).toEqual({
+      '2028': 50_000,
+      '2029': 52_000,
+    })
+    expect(session.caveats.some((c) => c.startsWith('IRMAA-lookback'))).toBe(false)
   })
 })

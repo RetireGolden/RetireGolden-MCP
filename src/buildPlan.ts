@@ -216,8 +216,12 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
         `${ignored.join(', ')} ignored: full plan JSON was supplied and takes precedence`,
       )
     }
-    applyConventions(parsed.plan, conventions, caveats)
-    return { ok: true, plan: parsed.plan, startYear, caveats }
+    applyConventions(parsed.plan, conventions, caveats, startYear)
+    const conventionParsed = parsePlan(parsed.plan)
+    if (!conventionParsed.ok) {
+      return { ok: false, startYear, caveats, issues: conventionParsed.issues }
+    }
+    return { ok: true, plan: conventionParsed.plan, startYear, caveats }
   }
 
   if (!input.household || !input.policy) {
@@ -485,12 +489,11 @@ function buildTypedPlan(
   if (asmpt?.localIncomeTaxPct != null) a.localIncomeTaxPct = asmpt.localIncomeTaxPct
   a.heirTaxRatePct = hh.heir_ordinary_rate * 100
 
-  const pre = conventions.irmaaLookbackMagis ?? hh.pre_horizon_magi ?? ([0, 0] as [number, number])
+  const pre = hh.pre_horizon_magi ?? ([0, 0] as [number, number])
   a.recentAnnualMagi = pre[0] ?? 0
-  if (pre.length >= 2 && pre[0] !== pre[1]) {
-    caveats.push(
-      `IRMAA-lookback: engine uses one scalar recentAnnualMagi=${pre[0]} for both pre-horizon years; distinct MAGIs ${startYear - 2}=${pre[0]}, ${startYear - 1}=${pre[1]} may diverge`,
-    )
+  a.historicalAnnualMagiByYear = {
+    [String(startYear - 2)]: pre[0] ?? 0,
+    [String(startYear - 1)]: pre[1] ?? pre[0] ?? 0,
   }
 
   if (conventions.lawSunsetFreezeYear != null) {
@@ -499,7 +502,7 @@ function buildTypedPlan(
     )
   }
 
-  applyConventions(plan, conventions, caveats)
+  applyConventions(plan, conventions, caveats, startYear)
 
   const parsed = parsePlan(plan)
   if (!parsed.ok) {
@@ -516,14 +519,18 @@ function buildTypedPlan(
   }
 }
 
-function applyConventions(plan: Plan, conventions: ConventionKnobs, caveats: string[]): void {
+function applyConventions(
+  plan: Plan,
+  conventions: ConventionKnobs,
+  caveats: string[],
+  startYear: number,
+): void {
   if (conventions.irmaaLookbackMagis) {
     const [a, b] = conventions.irmaaLookbackMagis
     plan.assumptions.recentAnnualMagi = a
-    if (a !== b) {
-      caveats.push(
-        `convention irmaaLookbackMagis=[${a},${b}]: seeded recentAnnualMagi=${a} (engine single scalar)`,
-      )
+    plan.assumptions.historicalAnnualMagiByYear = {
+      [String(startYear - 2)]: a,
+      [String(startYear - 1)]: b,
     }
   }
   if (conventions.withdrawalOrdering === 'proportional') {

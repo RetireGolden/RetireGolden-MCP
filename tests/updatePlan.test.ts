@@ -268,8 +268,10 @@ describe('update_plan', () => {
       conventions: { irmaaLookbackMagis: [50_000, 60_000] },
     })
     expect(session.conventions.irmaaLookbackMagis).toEqual([50_000, 60_000])
-    // The build recorded a convention-derived caveat naming the old MAGI.
-    expect(session.caveats.some((c) => c.startsWith('convention irmaaLookbackMagis='))).toBe(true)
+    expect(session.plan!.assumptions.historicalAnnualMagiByYear).toEqual({
+      '2024': 50_000,
+      '2025': 60_000,
+    })
     const res = adapter.updatePlan(session, [
       { op: 'set_assumption', field: 'recentAnnualMagi', value: 90_000 },
     ])
@@ -277,11 +279,54 @@ describe('update_plan', () => {
     // The superseded convention is cleared so the explicit MAGI round-trips.
     expect(session.conventions.irmaaLookbackMagis).toBeNull()
     expect(session.plan!.assumptions.recentAnnualMagi).toBe(90_000)
-    // Its now-obsolete caveats (which named the old MAGI) are dropped too, so no
-    // response keeps asserting the superseded value.
-    expect(session.caveats.some((c) => c.startsWith('IRMAA-lookback:'))).toBe(false)
-    expect(session.caveats.some((c) => c.startsWith('convention irmaaLookbackMagis='))).toBe(false)
+    expect(session.plan!.assumptions.historicalAnnualMagiByYear).toBeUndefined()
     if (res.ok) expect(res.caveats.some((c) => c.includes('recentAnnualMagi'))).toBe(true)
+  })
+
+  it('accepts exact historical MAGI years and clears the stale convention', () => {
+    const session = createSession(2026)
+    adapter.setPlanFromBuild(session, {
+      household: singleHousehold,
+      policy: singlePolicy,
+      startYear: 2026,
+      conventions: { irmaaLookbackMagis: [50_000, 60_000] },
+    })
+
+    const history = { '2024': 90_000, '2025': 120_000 }
+    const res = adapter.updatePlan(session, [
+      { op: 'set_assumption', field: 'historicalAnnualMagiByYear', value: history },
+    ])
+
+    expect(res.ok).toBe(true)
+    expect(session.conventions.irmaaLookbackMagis).toBeNull()
+    expect(session.plan!.assumptions.historicalAnnualMagiByYear).toEqual(history)
+    if (res.ok) {
+      expect(res.caveats.some((c) => c.includes('historicalAnnualMagiByYear'))).toBe(true)
+    }
+  })
+
+  it('names both MAGI fields when a batch sets both directly', () => {
+    const session = createSession(2026)
+    adapter.setPlanFromBuild(session, {
+      household: singleHousehold,
+      policy: singlePolicy,
+      conventions: { irmaaLookbackMagis: [50_000, 60_000] },
+    })
+
+    const res = adapter.updatePlan(session, [
+      { op: 'set_assumption', field: 'recentAnnualMagi', value: 90_000 },
+      {
+        op: 'set_assumption',
+        field: 'historicalAnnualMagiByYear',
+        value: { '2024': 90_000, '2025': 120_000 },
+      },
+    ])
+
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      const caveat = res.caveats.find((c) => c.includes('cleared the prior irmaaLookbackMagis'))
+      expect(caveat).toContain('recentAnnualMagi and historicalAnnualMagiByYear')
+    }
   })
 
   it('prunes a superseded state-tax caveat when stateEffectiveTaxPct is set', () => {

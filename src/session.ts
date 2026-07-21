@@ -10,8 +10,8 @@ export interface ConventionKnobs {
   lawSunsetFreezeYear?: number | null
   /**
    * Two distinct pre-projection IRMAA lookback MAGIs [Y-2, Y-1].
-   * Engine currently exposes one scalar; we seed recentAnnualMagi from the
-   * first value and record a caveat when they differ.
+   * These are mapped to the engine's year-keyed historical MAGI assumptions;
+   * recentAnnualMagi retains the first value as a compatibility fallback.
    */
   irmaaLookbackMagis?: [number, number] | null
   /**
