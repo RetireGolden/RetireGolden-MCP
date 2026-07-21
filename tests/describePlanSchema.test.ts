@@ -48,13 +48,28 @@ describe('describe_plan_schema tool', () => {
     expect(pointer.schema).toEqual(dotted.schema)
   })
 
-  it('errors with PATH_NOT_FOUND on an unknown path (still stamping the version)', () => {
+  it('errors with PATH_NOT_FOUND on an unknown path (still stamping version + id)', () => {
     const res = adapter.describePlanSchema({ path: 'properties.nope.missing' })
     expect(res.ok).toBe(false)
     if (res.ok) return
     expect(res.error).toBe('PATH_NOT_FOUND')
     expect(res.path).toBe('properties.nope.missing')
     expect(res.schemaVersion).toBe(PLAN_SCHEMA_VERSION)
+    expect(res.schemaId).toBe(PLAN_SCHEMA_ID)
+  })
+
+  it('returns a clone: mutating the response does not corrupt later responses', () => {
+    const first = adapter.describePlanSchema()
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    // A programmatic consumer mutates the returned schema in place.
+    ;(first.schema as { properties: Record<string, unknown> }).properties.__hacked = true
+    const second = adapter.describePlanSchema()
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    expect((second.schema as { properties: Record<string, unknown> }).properties.__hacked).toBeUndefined()
+    // The engine's shared constant is likewise untouched.
+    expect((planJsonSchema as { properties: Record<string, unknown> }).properties.__hacked).toBeUndefined()
   })
 })
 

@@ -10,5 +10,5 @@ export {
   type AssumptionsInput,
 } from './buildPlan.js'
 export * as adapter from './adapter.js'
-export { registerTools, EDUCATIONAL, jsonResult } from './tools.js'
+export { registerTools, registerResources, EDUCATIONAL, jsonResult } from './tools.js'
 export { startStdioServer } from './server.js'

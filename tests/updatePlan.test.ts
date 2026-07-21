@@ -9,7 +9,6 @@
 import { describe, expect, it } from 'vitest'
 import { createSession, type SessionState } from '../src/session.js'
 import * as adapter from '../src/adapter.js'
-import { buildPlanFromParams } from '../src/buildPlan.js'
 import { singleHousehold, singlePolicy } from './fixtures.js'
 
 function seededSession(): SessionState {
@@ -154,6 +153,73 @@ describe('update_plan', () => {
     // The first (valid) add is discarded because the batch failed validation.
     expect(session.plan!.accounts.length).toBe(before)
     expect(session.plan!.accounts.some((a) => a.id === 'good-1')).toBe(false)
+  })
+
+  it('rejects a replacement fragment whose id does not match the target id', () => {
+    const session = seededSession()
+    const targetId = session.plan!.accounts[0]!.id
+    const snapshot = structuredClone(session.plan)
+    const res = adapter.updatePlan(session, [
+      { op: 'replace_account', id: targetId, account: brokerageFragment('some-other-id') },
+    ])
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBe('OPERATION_FAILED')
+    expect(session.plan).toEqual(snapshot)
+  })
+
+  it('fills in an omitted id on a replacement fragment from the target id', () => {
+    const session = seededSession()
+    const targetId = session.plan!.accounts[0]!.id
+    const fragment = brokerageFragment(targetId)
+    delete (fragment as { id?: unknown }).id
+    const res = adapter.updatePlan(session, [
+      { op: 'replace_account', id: targetId, account: fragment },
+    ])
+    expect(res.ok).toBe(true)
+    expect(session.plan!.accounts.some((a) => a.id === targetId)).toBe(true)
+  })
+
+  it('rejects a prototype-polluting key in a fragment or set field', () => {
+    const session = seededSession()
+    const snapshot = structuredClone(session.plan)
+    // Computed-key form creates an OWN "__proto__" property (as JSON.parse does),
+    // rather than the literal `{ __proto__: ... }` form which sets the prototype.
+    const poisonAccount: Record<string, unknown> = {
+      ...brokerageFragment('poison'),
+      ['__proto__']: { polluted: true },
+    }
+    const poison = adapter.updatePlan(session, [{ op: 'add_account', account: poisonAccount }])
+    expect(poison.ok).toBe(false)
+    if (!poison.ok) expect(poison.error).toBe('OPERATION_FAILED')
+    expect(session.plan).toEqual(snapshot)
+
+    const badField = adapter.updatePlan(session, [
+      { op: 'set_assumption', field: '__proto__', value: { polluted: true } },
+    ])
+    expect(badField.ok).toBe(false)
+    expect(session.plan).toEqual(snapshot)
+    // The prototype of a fresh object was not polluted.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  it('clears a stale irmaaLookbackMagis convention when recentAnnualMagi is set directly', () => {
+    const session = createSession(2026)
+    adapter.setPlanFromBuild(session, {
+      household: singleHousehold,
+      policy: singlePolicy,
+      startYear: 2026,
+      conventions: { irmaaLookbackMagis: [50_000, 60_000] },
+    })
+    expect(session.conventions.irmaaLookbackMagis).toEqual([50_000, 60_000])
+    const res = adapter.updatePlan(session, [
+      { op: 'set_assumption', field: 'recentAnnualMagi', value: 90_000 },
+    ])
+    expect(res.ok).toBe(true)
+    // The superseded convention is cleared so the explicit MAGI round-trips.
+    expect(session.conventions.irmaaLookbackMagis).toBeNull()
+    expect(session.plan!.assumptions.recentAnnualMagi).toBe(90_000)
+    if (res.ok) expect(res.caveats.some((c) => c.includes('recentAnnualMagi'))).toBe(true)
   })
 
   it('records a caveat and clears the stale projection on commit', () => {

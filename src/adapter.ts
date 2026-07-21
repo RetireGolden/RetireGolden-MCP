@@ -464,8 +464,13 @@ export function describePlanSchema(opts: { path?: string } = {}) {
     schemaVersion: PLAN_SCHEMA_VERSION,
     schemaId: PLAN_SCHEMA_ID,
   }
+  // Clone what we hand back: planJsonSchema (and its subtrees) is the engine's
+  // shared, process-lifetime constant, and it also backs the plan-schema MCP
+  // resource. A programmatic caller that mutated a direct reference would corrupt
+  // every later response — so this read-only API returns a copy, as exportPlan
+  // does for session-owned data.
   if (opts.path == null || opts.path.trim() === '') {
-    return { ...base, path: null, schema: planJsonSchema }
+    return { ...base, path: null, schema: structuredClone(planJsonSchema) }
   }
   const node = resolveSchemaPath(planJsonSchema, opts.path)
   if (node === UNRESOLVED) {
@@ -474,10 +479,25 @@ export function describePlanSchema(opts: { path?: string } = {}) {
       error: 'PATH_NOT_FOUND',
       path: opts.path,
       schemaVersion: PLAN_SCHEMA_VERSION,
+      schemaId: PLAN_SCHEMA_ID,
       message: `No schema node at '${opts.path}'. Use a dotted path (e.g. 'properties.accounts.items') or JSON pointer (e.g. '/properties/accounts/items').`,
     }
   }
-  return { ...base, path: opts.path, schema: node }
+  return { ...base, path: opts.path, schema: structuredClone(node) }
+}
+
+/**
+ * Keys that pollute an object's prototype when written by name. update_plan
+ * fragments and set-field ops carry caller-supplied keys straight from tool
+ * input, so reject these at the boundary rather than risk prototype pollution.
+ */
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+function dangerousKeyIn(obj: Record<string, unknown>): string | null {
+  for (const k of Object.keys(obj)) {
+    if (DANGEROUS_KEYS.has(k)) return k
+  }
+  return null
 }
 
 /**
@@ -505,17 +525,42 @@ type MutablePlan = {
   [key: string]: unknown
 }
 
+/**
+ * Coerce a replacement fragment's `id` to the operation's target id. A fragment
+ * whose own `id` names a DIFFERENT entry would silently delete `op.id` and
+ * introduce another — contradicting "replace by id" — so reject that; an omitted
+ * id is filled in. Returns the id-pinned fragment, or an error string.
+ */
+function pinReplacementId(
+  fragment: Record<string, unknown>,
+  targetId: string,
+  where: string,
+): { id?: unknown } | string {
+  const fragId = fragment.id
+  if (fragId != null && fragId !== targetId) {
+    return `${where}: fragment id '${String(fragId)}' does not match target id '${targetId}' (replace is by id)`
+  }
+  return { ...fragment, id: targetId } as { id?: unknown }
+}
+
 /** Apply one operation to a working plan clone. Returns an error string or null. */
 function applyUpdateOp(plan: MutablePlan, op: UpdatePlanOp, index: number): string | null {
   const where = `operation[${index}] ${op.op}`
   switch (op.op) {
-    case 'add_account':
+    case 'add_account': {
+      const bad = dangerousKeyIn(op.account)
+      if (bad) return `${where}: unsafe key '${bad}' in account fragment`
       plan.accounts.push(op.account as { id?: unknown })
       return null
+    }
     case 'replace_account': {
+      const bad = dangerousKeyIn(op.account)
+      if (bad) return `${where}: unsafe key '${bad}' in account fragment`
       const i = plan.accounts.findIndex((a) => a.id === op.id)
       if (i === -1) return `${where}: no account with id '${op.id}'`
-      plan.accounts[i] = op.account as { id?: unknown }
+      const pinned = pinReplacementId(op.account, op.id, where)
+      if (typeof pinned === 'string') return pinned
+      plan.accounts[i] = pinned
       return null
     }
     case 'remove_account': {
@@ -524,13 +569,20 @@ function applyUpdateOp(plan: MutablePlan, op: UpdatePlanOp, index: number): stri
       if (plan.accounts.length === before) return `${where}: no account with id '${op.id}'`
       return null
     }
-    case 'add_income':
+    case 'add_income': {
+      const bad = dangerousKeyIn(op.income)
+      if (bad) return `${where}: unsafe key '${bad}' in income fragment`
       plan.incomes.push(op.income as { id?: unknown })
       return null
+    }
     case 'replace_income': {
+      const bad = dangerousKeyIn(op.income)
+      if (bad) return `${where}: unsafe key '${bad}' in income fragment`
       const i = plan.incomes.findIndex((inc) => inc.id === op.id)
       if (i === -1) return `${where}: no income with id '${op.id}'`
-      plan.incomes[i] = op.income as { id?: unknown }
+      const pinned = pinReplacementId(op.income, op.id, where)
+      if (typeof pinned === 'string') return pinned
+      plan.incomes[i] = pinned
       return null
     }
     case 'remove_income': {
@@ -540,9 +592,11 @@ function applyUpdateOp(plan: MutablePlan, op: UpdatePlanOp, index: number): stri
       return null
     }
     case 'set_assumption':
+      if (DANGEROUS_KEYS.has(op.field)) return `${where}: unsafe field name '${op.field}'`
       plan.assumptions[op.field] = op.value
       return null
     case 'set_expense':
+      if (DANGEROUS_KEYS.has(op.field)) return `${where}: unsafe field name '${op.field}'`
       plan.expenses[op.field] = op.value
       return null
     default: {
@@ -595,11 +649,26 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
   }
 
   // Commit. Stale projection is dropped; record a caveat so a reader knows the
-  // plan moved and any prior projection/optimizer result no longer applies.
+  // plan moved and any prior projection/optimizer result no longer applies. The
+  // message is stable (no per-call operation count) so repeated update_plan calls
+  // cannot accumulate unbounded near-duplicate caveats.
   session.plan = parsed.plan
   session.lastProjection = null
-  const caveat = `Plan mutated via update_plan (${ops.length} operation${ops.length === 1 ? '' : 's'}); re-run run_projection to refresh results.`
+  const caveat = 'Plan mutated via update_plan; re-run run_projection to refresh results.'
   if (!session.caveats.includes(caveat)) session.caveats.push(caveat)
+
+  // If the caller set recentAnnualMagi directly, a previously-seeded
+  // irmaaLookbackMagis convention would clobber it on the documented
+  // export_plan -> build_plan round-trip (applyConventions reseeds
+  // recentAnnualMagi from the convention). Drop the now-superseded convention so
+  // the explicit value round-trips faithfully.
+  const setRecentMagi = ops.some((o) => o.op === 'set_assumption' && o.field === 'recentAnnualMagi')
+  if (setRecentMagi && session.conventions.irmaaLookbackMagis != null) {
+    session.conventions = { ...session.conventions, irmaaLookbackMagis: null }
+    const magiCaveat =
+      'update_plan set recentAnnualMagi directly; cleared the prior irmaaLookbackMagis convention so the value survives export_plan/build_plan round-trip.'
+    if (!session.caveats.includes(magiCaveat)) session.caveats.push(magiCaveat)
+  }
 
   return {
     ok: true as const,
