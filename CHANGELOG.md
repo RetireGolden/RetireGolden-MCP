@@ -24,8 +24,11 @@ plan schema needs engine-side work, so that half stays with the owner.
   `describe_plan_schema` reports — not a duplicated literal), plus `engineVersion`
   and `mcpVersion` from the shared `getVersions()` helper with the same
   best-effort semantics as `get_session` (either degrades to `null` rather than
-  throwing). Every previously returned field, and the clone-on-export behavior,
-  is unchanged.
+  throwing). Every previously returned field is unchanged, and the clone-on-export
+  contract now covers the **whole** response: `conventions` and `caveats` were
+  returned by reference, so a programmatic consumer (Pro's `save_library_plan`
+  calls this helper directly) could mutate live session state through the exported
+  object. Both are now cloned.
 - **`build_plan` accepts the provenance siblings `schemaVersion`,
   `engineVersion` and `mcpVersion`.** Pass an `export_plan` response's siblings
   straight back. Both version checks **warn and import anyway**; neither ever
@@ -40,17 +43,31 @@ plan schema needs engine-side work, so that half stays with the owner.
     the document, is what disagreed.
   - `mcpVersion` is accepted and recorded but never warned on: for a full plan
     document, the document is the model.
+  - `engineVersion` and `mcpVersion` accept **`null`** — the value `export_plan`
+    itself emits when a package version cannot be resolved — so a whole export
+    response spreads back in verbatim. A null is treated as "unknown" and warns on
+    nothing.
   - Omitting all three — every document written before this release — imports
     exactly as it did, with no new caveat and no error.
+  - Caveat wording tracks what actually happened to the document: when the caller
+    also passed `conventions` (which rewrite IRMAA lookback MAGIs or withdrawal
+    ordering before the caveat is emitted), the message says the document was
+    accepted *with those conventions applied on top* rather than claiming it was
+    imported unchanged.
 - **A cross-plan-schema document is now explained instead of leaking a zod
   issue.** A document written by a build on a different plan schema declares that
   version *inside itself*, and the engine's `parsePlan` pins that field to
   `z.literal(PLAN_SCHEMA_VERSION)`. Previously such an import failed with a bare
   `schemaVersion: Invalid input: expected 1`. It now leads with a message naming
   both versions, the direction of the skew and the remedy, with the engine's own
-  issues kept underneath. Older-schema documents are first offered to the
-  engine's `migratePlanToCurrent` (its documented pre-`parsePlan` step) and are
-  imported with a migration caveat when it can upgrade them.
+  issues kept underneath. For a document written by a *newer* build the remedy
+  named is to upgrade (or to supply an export produced under this build's schema) —
+  not to re-export at the older version, which the newer build may have no way to
+  do. Older-schema documents are first offered to the engine's
+  `migratePlanToCurrent` (its documented pre-`parsePlan` step) and are imported
+  with a migration caveat when it can upgrade them; the caller's `schemaVersion`
+  sibling is still checked independently in that case, against the version the
+  document itself declared, so a migration cannot mask a mismatched label.
 
 ### Notes
 

@@ -109,6 +109,35 @@ describe('export_plan round-trip', () => {
     expect(session.plan!.expenses.baseAnnual).toBe(before)
     expect(exported.plan).not.toBe(session.plan)
   })
+
+  it('clones conventions and caveats too — the whole response, not just the plan', () => {
+    // The tool description promises "returns a clone; mutating it does not affect
+    // the live session". Pro's save_library_plan calls this helper directly, so a
+    // shared reference would let a consumer corrupt live session state.
+    const session = createSession(2026)
+    adapter.setPlanFromBuild(session, {
+      household: mfjHousehold,
+      policy: mfjPolicy,
+      startYear: 2026,
+      conventions: { irmaaLookbackMagis: [120_000, 130_000] },
+    })
+    const caveatsBefore = [...session.caveats]
+    const magisBefore = session.conventions.irmaaLookbackMagis?.[0]
+
+    const exported = adapter.exportPlan(session)
+    expect(exported.ok).toBe(true)
+    if (!exported.ok) return
+
+    exported.caveats.push('injected by a consumer')
+    if (exported.conventions.irmaaLookbackMagis) {
+      exported.conventions.irmaaLookbackMagis[0] = 1
+    }
+
+    expect(session.caveats).toEqual(caveatsBefore)
+    expect(session.conventions.irmaaLookbackMagis?.[0]).toBe(magisBefore)
+    expect(exported.caveats).not.toBe(session.caveats)
+    expect(exported.conventions).not.toBe(session.conventions)
+  })
 })
 
 describe('export_plan provenance stamp', () => {
@@ -287,11 +316,37 @@ describe('build_plan provenance skew (sibling labels warn, never refuse)', () =>
       startYear: exported.startYear,
       conventions: exported.conventions,
       schemaVersion: exported.schemaVersion,
-      engineVersion: exported.engineVersion ?? undefined,
-      mcpVersion: exported.mcpVersion ?? undefined,
+      // Passed through verbatim — NOT normalized to undefined. export_plan emits
+      // null when a package version cannot be resolved, and the documented
+      // round-trip is spreading the response straight back in.
+      engineVersion: exported.engineVersion,
+      mcpVersion: exported.mcpVersion,
     })
     expect(res.ok).toBe(true)
     expect(res.caveats).toEqual([])
+  })
+
+  it('accepts null provenance siblings (unresolvable versions still round-trip)', () => {
+    // If the build_plan schema rejected null, spreading an export whose versions
+    // could not be resolved would fail tool-arg validation before the handler ran.
+    expect(
+      validateToolArgs(getTool('build_plan')!, {
+        plan: exportedDocument().plan,
+        startYear: 2026,
+        schemaVersion: PLAN_SCHEMA_VERSION,
+        engineVersion: null,
+        mcpVersion: null,
+      }),
+    ).toBeNull()
+
+    const res = buildPlanFromParams({
+      plan: JSON.parse(JSON.stringify(exportedDocument().plan)),
+      startYear: 2026,
+      engineVersion: null,
+      mcpVersion: null,
+    })
+    expect(res.ok).toBe(true)
+    expect(skew(res.caveats)).toEqual([])
   })
 
   it('ignores provenance siblings on the typed path (no document was supplied)', () => {
@@ -337,6 +392,37 @@ describe('build_plan engineVersion skew (the skew that can really happen)', () =
         'and modeling semantics can differ between versions — re-run the projection here rather than ' +
         'comparing against numbers produced by the exporting build.',
     ])
+  })
+
+  it('does not claim "unchanged" when conventions rewrote the document', () => {
+    // applyConventions runs before the caveat is emitted and genuinely rewrites
+    // fields (here the IRMAA lookback MAGIs). Saying "imported unchanged" would
+    // misdirect anyone investigating why the projection moved.
+    const installed = adapter.getVersions().engineVersion
+    const res = buildPlanFromParams({
+      plan: currentDocument(),
+      startYear: 2026,
+      engineVersion: '0.1.3',
+      conventions: { irmaaLookbackMagis: [120_000, 130_000] },
+    })
+    expect(res.ok).toBe(true)
+    const caveat = res.caveats.find((c) => c.startsWith('engineVersion skew:'))!
+    expect(caveat).toContain('with the `conventions` you supplied applied on top of it')
+    expect(caveat).not.toContain('imported unchanged')
+    expect(caveat).toContain(`this build runs ${installed}`)
+
+    // …and the wording still says "unchanged" when no knob actually fired.
+    const noKnobs = buildPlanFromParams({
+      plan: currentDocument(),
+      startYear: 2026,
+      engineVersion: '0.1.3',
+      // lawSunsetFreezeYear has no engine knob yet: it mutates nothing, so the
+      // document really is unchanged.
+      conventions: { lawSunsetFreezeYear: 2030 },
+    })
+    expect(noKnobs.caveats.find((c) => c.startsWith('engineVersion skew:'))).toContain(
+      'imported unchanged',
+    )
   })
 
   it('is silent when the engineVersion matches, and when it is absent', () => {

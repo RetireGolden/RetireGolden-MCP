@@ -336,8 +336,12 @@ export function exportPlan(session: SessionState) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
-  // Return a CLONE of the parsed Plan — programmatic consumers (e.g. Pro importing
-  // these adapter helpers) must not be able to mutate the live session plan in place.
+  // Return a CLONE of every mutable piece of session state — the plan, and the
+  // conventions/caveats siblings. Programmatic consumers (e.g. Pro's
+  // save_library_plan, which calls this helper directly) must not be able to reach
+  // back into the live session through the exported object; the tool description
+  // promises "returns a clone; mutating it does not affect the live session", and
+  // that promise has to cover the whole response, not just `plan`.
   // startYear + conventions are surfaced so the exported document round-trips faithfully
   // via build_plan({ plan, startYear, conventions }); without startYear the re-imported
   // projection would default to 2026 and diverge from any non-2026 session.
@@ -362,8 +366,8 @@ export function exportPlan(session: SessionState) {
     ok: true as const,
     plan: structuredClone(session.plan),
     startYear: session.startYear,
-    conventions: session.conventions,
-    caveats: session.caveats,
+    conventions: structuredClone(session.conventions),
+    caveats: [...session.caveats],
     schemaVersion: PLAN_SCHEMA_VERSION,
     engineVersion,
     mcpVersion,

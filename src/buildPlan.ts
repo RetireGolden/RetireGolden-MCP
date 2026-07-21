@@ -198,15 +198,19 @@ export interface BuildPlanInput {
    * from the running engine adds a caveat and nothing else. This is the skew that
    * can actually occur between shipped builds (same plan schema, different engine
    * semantics/defaults), which is why it is warned about.
+   *
+   * Nullable because export_plan emits `null` when the installed package version
+   * cannot be resolved; a whole export response must spread straight back in.
    */
-  engineVersion?: string
+  engineVersion?: string | null
   /**
    * @retiregolden/mcp version that exported the supplied `plan` — recorded so a
    * whole export_plan response can be spread straight back into build_plan. It
    * carries no modeling semantics of its own for a full plan document (the
    * document IS the model), so unlike engineVersion it never raises a caveat.
+   * Nullable for the same reason as engineVersion.
    */
-  mcpVersion?: string
+  mcpVersion?: string | null
 }
 
 export interface BuildPlanResult {
@@ -245,11 +249,47 @@ function embeddedSchemaVersion(plan: unknown): number | null {
  * a hand-edited export). Saying otherwise would tell a caller to re-export a
  * document that is already current.
  */
-function pushCallerSchemaSkewCaveat(declared: number | undefined | null, caveats: string[]): void {
+function pushCallerSchemaSkewCaveat(
+  declared: number | undefined | null,
+  caveats: string[],
+  conventionsApplied: boolean,
+): void {
   if (declared == null || declared === PLAN_SCHEMA_VERSION) return
   caveats.push(
-    `schemaVersion skew: caller-declared plan-schema v${declared} does not match this build's v${PLAN_SCHEMA_VERSION}; the supplied document itself validated as v${PLAN_SCHEMA_VERSION} and was accepted unchanged — check that the schemaVersion argument came from the same export_plan response as the plan.`,
+    `schemaVersion skew: caller-declared plan-schema v${declared} does not match this build's v${PLAN_SCHEMA_VERSION}; the supplied document itself validated as v${PLAN_SCHEMA_VERSION} and was accepted ${acceptedHow(conventionsApplied)} — check that the schemaVersion argument came from the same export_plan response as the plan.`,
   )
+}
+
+/**
+ * Warn when the caller's `schemaVersion` sibling disagrees with the version the
+ * MIGRATED document actually declared. The migration caveat alone would hide this:
+ * an embedded v1 document carrying an unrelated sibling label v3, imported into a
+ * v2 build, migrates cleanly and would otherwise report only v1 -> v2, silently
+ * dropping the provenance mismatch this feature exists to surface.
+ */
+function pushMigratedSiblingSkewCaveat(
+  declared: number | undefined | null,
+  documentVersion: number,
+  caveats: string[],
+): void {
+  if (declared == null || declared === documentVersion) return
+  caveats.push(
+    `schemaVersion skew: caller-declared plan-schema v${declared} does not match the v${documentVersion} the supplied document itself declared (which was migrated to this build's v${PLAN_SCHEMA_VERSION}) — check that the schemaVersion argument came from the same export_plan response as the plan.`,
+  )
+}
+
+/**
+ * How truthfully to describe what happened to an accepted document. Conventions
+ * are applied to the parsed plan BEFORE these caveats are emitted, and they
+ * genuinely rewrite fields (IRMAA lookback MAGIs, withdrawal ordering) — so
+ * claiming the document was imported "unchanged" would be false whenever the
+ * caller passed conventions, and would misdirect anyone investigating why the
+ * projection moved.
+ */
+function acceptedHow(conventionsApplied: boolean): string {
+  return conventionsApplied
+    ? 'with the `conventions` you supplied applied on top of it'
+    : 'unchanged'
 }
 
 /**
@@ -258,16 +298,20 @@ function pushCallerSchemaSkewCaveat(declared: number | undefined | null, caveats
  * builds: the plan schema is gated by the engine (see `explainSchemaRefusal`), so
  * two builds that can exchange documents at all share a schema version — but their
  * defaults, parameter packs and semantics may differ. Warn only; the document is
- * imported unchanged.
+ * imported as supplied (modulo any conventions the caller passed).
  */
-function pushEngineSkewCaveat(declared: string | undefined | null, caveats: string[]): void {
+function pushEngineSkewCaveat(
+  declared: string | undefined | null,
+  caveats: string[],
+  conventionsApplied: boolean,
+): void {
   if (declared == null || declared === '') return
   const installed = getVersions().engineVersion
   // Unresolvable installed version => nothing to compare against; stay silent
   // rather than warn on an unknown.
   if (installed == null || installed === declared) return
   caveats.push(
-    `engineVersion skew: the supplied plan document was exported under @retiregolden/engine ${declared} but this build runs ${installed}; the document was imported unchanged, but engine defaults and modeling semantics can differ between versions — re-run the projection here rather than comparing against numbers produced by the exporting build.`,
+    `engineVersion skew: the supplied plan document was exported under @retiregolden/engine ${declared} but this build runs ${installed}; the document was imported ${acceptedHow(conventionsApplied)}, but engine defaults and modeling semantics can differ between versions — re-run the projection here rather than comparing against numbers produced by the exporting build.`,
   )
 }
 
@@ -282,7 +326,10 @@ function pushEngineSkewCaveat(declared: string | undefined | null, caveats: stri
 function explainSchemaRefusal(declared: number, reason: string): string {
   const direction =
     declared > PLAN_SCHEMA_VERSION
-      ? `the document was written by a NEWER build; this one cannot safely read it. Re-export it from a build on plan-schema v${PLAN_SCHEMA_VERSION}, or open it with a build that speaks v${declared}`
+      ? // Do NOT lead with "re-export at v${PLAN_SCHEMA_VERSION}": the build that
+        // wrote this document is newer and may have no way to emit the older
+        // schema, so that remedy can be impossible. Upgrading is the real fix.
+        `the document was written by a NEWER build; this one cannot safely read it. Upgrade to a build that speaks plan-schema v${declared} (newer @retiregolden/mcp, or the app that produced the document), or supply an export that was produced under v${PLAN_SCHEMA_VERSION}`
       : `the installed engine could not upgrade it to v${PLAN_SCHEMA_VERSION}. Re-export the document from a build on plan-schema v${PLAN_SCHEMA_VERSION}`
   return `plan-schema skew: the supplied document declares plan-schema v${declared} but this build validates v${PLAN_SCHEMA_VERSION} — ${direction}. (Engine migratePlanToCurrent: ${reason}.)`
 }
@@ -343,7 +390,7 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
         `${ignored.join(', ')} ignored: full plan JSON was supplied and takes precedence`,
       )
     }
-    applyConventions(accepted, conventions, caveats, startYear)
+    const conventionsApplied = applyConventions(accepted, conventions, caveats, startYear)
     const conventionParsed = parsePlan(accepted)
     if (!conventionParsed.ok) {
       return { ok: false, startYear, caveats, issues: conventionParsed.issues }
@@ -354,10 +401,15 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
       caveats.push(
         `plan-schema migration: the supplied document declares plan-schema v${migratedFrom} and was upgraded to this build's v${PLAN_SCHEMA_VERSION} by the engine before import; re-export it from this build to persist the upgrade.`,
       )
+      // The migration caveat describes the DOCUMENT. The caller's sibling label is
+      // a separate claim and can disagree with the document independently, so it
+      // still has to be checked — against what the document declared, not against
+      // this build's version.
+      pushMigratedSiblingSkewCaveat(input.schemaVersion, migratedFrom, caveats)
     } else {
-      pushCallerSchemaSkewCaveat(input.schemaVersion, caveats)
+      pushCallerSchemaSkewCaveat(input.schemaVersion, caveats, conventionsApplied)
     }
-    pushEngineSkewCaveat(input.engineVersion, caveats)
+    pushEngineSkewCaveat(input.engineVersion, caveats, conventionsApplied)
     return { ok: true, plan: conventionParsed.plan, startYear, caveats }
   }
 
@@ -656,12 +708,19 @@ function buildTypedPlan(
   }
 }
 
+/**
+ * @returns whether any knob actually rewrote a field of `plan`. Callers use this
+ * to describe an imported document honestly — see `acceptedHow`. Note
+ * `lawSunsetFreezeYear` is deliberately not counted: it has no engine knob yet and
+ * mutates nothing.
+ */
 function applyConventions(
   plan: Plan,
   conventions: ConventionKnobs,
   caveats: string[],
   startYear: number,
-): void {
+): boolean {
+  let mutated = false
   if (conventions.irmaaLookbackMagis) {
     const [a, b] = conventions.irmaaLookbackMagis
     plan.assumptions.recentAnnualMagi = a
@@ -669,13 +728,18 @@ function applyConventions(
       [String(startYear - 2)]: a,
       [String(startYear - 1)]: b,
     }
+    mutated = true
   }
   if (conventions.withdrawalOrdering === 'proportional') {
     plan.strategies.withdrawalOrder = { mode: 'proportional' }
+    mutated = true
   } else if (conventions.withdrawalOrdering === 'taxable-first') {
     plan.strategies.withdrawalOrder = { mode: 'sequential' }
+    mutated = true
   } else if (conventions.withdrawalOrdering === 'traditional-first') {
     plan.strategies.withdrawalOrder = { mode: 'sequential' }
+    mutated = true
     caveats.push('convention withdrawalOrdering=traditional-first: approximate under sequential')
   }
+  return mutated
 }

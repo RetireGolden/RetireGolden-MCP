@@ -114,15 +114,17 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         ),
       engineVersion: z
         .string()
+        .nullable()
         .optional()
         .describe(
-          "Provenance only: the `engineVersion` sibling from an export_plan response, i.e. the @retiregolden/engine build that exported the supplied `plan`. Differing from the running engine adds a caveat (defaults and modeling semantics can move between engine versions) and NOTHING else — the document is still imported. This is the version skew that can actually occur between two builds that can exchange documents at all.",
+          "Provenance only: the `engineVersion` sibling from an export_plan response, i.e. the @retiregolden/engine build that exported the supplied `plan`. Differing from the running engine adds a caveat (defaults and modeling semantics can move between engine versions) and NOTHING else — the document is still imported. This is the version skew that can actually occur between two builds that can exchange documents at all. Accepts null, which is what export_plan emits when it cannot resolve the installed version; null is treated as 'unknown' and warns on nothing.",
         ),
       mcpVersion: z
         .string()
+        .nullable()
         .optional()
         .describe(
-          'Provenance only: the `mcpVersion` sibling from an export_plan response, accepted so a whole export can be spread straight back into build_plan. Recorded, never warned on — for a full plan document the document itself is the model.',
+          'Provenance only: the `mcpVersion` sibling from an export_plan response, accepted so a whole export can be spread straight back into build_plan (including the null export_plan emits when the version is unresolvable). Recorded, never warned on — for a full plan document the document itself is the model.',
         ),
       conventions: z
         .object({
