@@ -426,8 +426,8 @@ export function compareScenarios(
  */
 const UNRESOLVED = Symbol('unresolved')
 
-function resolveSchemaPath(root: unknown, path: string): unknown | typeof UNRESOLVED {
-  const trimmed = path.trim()
+function resolveSchemaPath(root: unknown, schemaPath: string): unknown | typeof UNRESOLVED {
+  const trimmed = schemaPath.trim()
   if (trimmed === '' || trimmed === '/' || trimmed === '.') return root
   const segments = trimmed.startsWith('/')
     ? trimmed
@@ -439,8 +439,12 @@ function resolveSchemaPath(root: unknown, path: string): unknown | typeof UNRESO
   let node: unknown = root
   for (const seg of segments) {
     if (Array.isArray(node)) {
+      // Require an explicit decimal index. Number('') is 0, so without this a
+      // JSON pointer with an empty segment (e.g. a trailing slash) would silently
+      // resolve to element 0 instead of failing.
+      if (!/^\d+$/.test(seg)) return UNRESOLVED
       const idx = Number(seg)
-      if (!Number.isInteger(idx) || idx < 0 || idx >= node.length) return UNRESOLVED
+      if (idx >= node.length) return UNRESOLVED
       node = node[idx]
     } else if (node != null && typeof node === 'object') {
       if (!Object.prototype.hasOwnProperty.call(node, seg)) return UNRESOLVED
@@ -499,6 +503,23 @@ function dangerousKeyIn(obj: Record<string, unknown>): string | null {
   }
   return null
 }
+
+/**
+ * Valid `set_assumption` / `set_expense` field names, derived from the engine's
+ * own Plan JSON Schema (the source of truth — not a hand-maintained list). An
+ * unknown field name (a typo like `inflatonPct`, or a hallucinated key) would
+ * otherwise be assigned, silently stripped by parsePlan, and reported as an
+ * applied operation while the modeled value never changed — a silent-wrong-result
+ * trap. Rejecting unknown fields also excludes the prototype-pollution keys.
+ */
+function schemaSectionKeys(section: 'assumptions' | 'expenses'): ReadonlySet<string> {
+  const props = (planJsonSchema as { properties?: Record<string, unknown> }).properties?.[section] as
+    | { properties?: Record<string, unknown> }
+    | undefined
+  return new Set(Object.keys(props?.properties ?? {}))
+}
+const ASSUMPTION_FIELDS = schemaSectionKeys('assumptions')
+const EXPENSE_FIELDS = schemaSectionKeys('expenses')
 
 /**
  * Named domain operations for update_plan. They target engine-plan FRAGMENTS
@@ -592,11 +613,15 @@ function applyUpdateOp(plan: MutablePlan, op: UpdatePlanOp, index: number): stri
       return null
     }
     case 'set_assumption':
-      if (DANGEROUS_KEYS.has(op.field)) return `${where}: unsafe field name '${op.field}'`
+      if (!ASSUMPTION_FIELDS.has(op.field)) {
+        return `${where}: unknown assumption field '${op.field}' (see describe_plan_schema properties.assumptions)`
+      }
       plan.assumptions[op.field] = op.value
       return null
     case 'set_expense':
-      if (DANGEROUS_KEYS.has(op.field)) return `${where}: unsafe field name '${op.field}'`
+      if (!EXPENSE_FIELDS.has(op.field)) {
+        return `${where}: unknown expense field '${op.field}' (see describe_plan_schema properties.expenses)`
+      }
       plan.expenses[op.field] = op.value
       return null
     default: {
@@ -631,6 +656,17 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
       ok: false as const,
       error: 'NO_PLAN',
       message: 'Call build_plan first to seed a plan before update_plan',
+    }
+  }
+  // Guard the empty batch in the exported adapter (the MCP tool schema already
+  // requires min 1, but a programmatic caller can pass []). Without this an empty
+  // batch would reparse/commit the unchanged plan, drop the cached projection,
+  // and report success with zero operations applied.
+  if (ops.length === 0) {
+    return {
+      ok: false as const,
+      error: 'NO_OPERATIONS',
+      message: 'Provide at least one operation',
     }
   }
   // Work on a clone: nothing touches the live session until validation passes.

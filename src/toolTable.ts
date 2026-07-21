@@ -266,7 +266,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'update_plan',
-    description: `${EDUCATIONAL} Incrementally mutate the current session plan with named merge operations (add/replace/remove accounts or incomes by id; set an assumptions or expenses field) — for building a plan up from extracted document fragments without rebuilding each turn. Requires a seeded plan (build_plan first; NO_PLAN otherwise). The mutated plan is validated via the engine BEFORE commit: on failure the session plan is left UNCHANGED and issues are returned. Returns the updated plan summary + caveats on success.`,
+    description: `${EDUCATIONAL} Incrementally mutate the current session plan with named merge operations (add/replace/remove accounts or incomes by id; set an assumption or expense field) — for building a plan up from extracted document fragments without rebuilding each turn. Requires a seeded plan (build_plan first; NO_PLAN otherwise). The mutated plan is validated via the engine BEFORE commit: on failure the session plan is left UNCHANGED and issues are returned. Returns the updated plan summary + caveats on success.`,
     inputShape: {
       operations: z
         .array(UpdatePlanOpSchema)

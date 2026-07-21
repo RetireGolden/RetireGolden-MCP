@@ -58,6 +58,24 @@ describe('describe_plan_schema tool', () => {
     expect(res.schemaId).toBe(PLAN_SCHEMA_ID)
   })
 
+  it('indexes into an array subtree by a numeric segment', () => {
+    const res = adapter.describePlanSchema({ path: 'properties.accounts.items.oneOf.0' })
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.schema).toEqual(
+      (planJsonSchema as unknown as { properties: { accounts: { items: { oneOf: unknown[] } } } })
+        .properties.accounts.items.oneOf[0],
+    )
+  })
+
+  it('does not treat an empty array segment (trailing slash) as index 0', () => {
+    // Number('') === 0, so a naive resolver would return the first oneOf branch.
+    const res = adapter.describePlanSchema({ path: '/properties/accounts/items/oneOf/' })
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBe('PATH_NOT_FOUND')
+  })
+
   it('returns a clone: mutating the response does not corrupt later responses', () => {
     const first = adapter.describePlanSchema()
     expect(first.ok).toBe(true)

@@ -155,6 +155,33 @@ describe('update_plan', () => {
     expect(session.plan!.accounts.some((a) => a.id === 'good-1')).toBe(false)
   })
 
+  it('rejects an unknown set-field (a typo) instead of silently no-op-ing', () => {
+    const session = seededSession()
+    const snapshot = structuredClone(session.plan)
+    const res = adapter.updatePlan(session, [
+      // 'inflatonPct' is a typo for 'inflationPct'; without validation it would be
+      // assigned, stripped by parsePlan, and reported as applied while inflation
+      // never changed.
+      { op: 'set_assumption', field: 'inflatonPct', value: 3 },
+    ])
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBe('OPERATION_FAILED')
+    expect(session.plan).toEqual(snapshot)
+  })
+
+  it('rejects an empty operations batch without touching the session', () => {
+    const session = seededSession()
+    adapter.runProjection(session)
+    expect(session.lastProjection).not.toBeNull()
+    const res = adapter.updatePlan(session, [])
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBe('NO_OPERATIONS')
+    // The cached projection is preserved — an empty batch is a no-op, not a commit.
+    expect(session.lastProjection).not.toBeNull()
+  })
+
   it('rejects a replacement fragment whose id does not match the target id', () => {
     const session = seededSession()
     const targetId = session.plan!.accounts[0]!.id
