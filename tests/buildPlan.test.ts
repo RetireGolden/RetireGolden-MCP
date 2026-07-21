@@ -271,18 +271,19 @@ describe('build_plan gateway arg validation (state format deferred to typed path
 })
 
 describe('buildPlanFromParams — conventions and caveats', () => {
-  it('interpolates the real IRMAA lookback years for a non-2026 startYear', () => {
+  it('maps distinct MAGIs to the exact IRMAA lookback years', () => {
     const res = buildPlanFromParams({
       household: mfjHousehold, // pre_horizon_magi [80000, 82000], distinct
       policy: mfjPolicy,
       startYear: 2030,
     })
     expect(res.ok).toBe(true)
-    const caveat = res.caveats.find((c) => c.startsWith('IRMAA-lookback'))
-    expect(caveat).toBeTruthy()
-    // startYear-2 = 2028, startYear-1 = 2029
-    expect(caveat).toContain('2028=80000')
-    expect(caveat).toContain('2029=82000')
+    expect(res.plan!.assumptions.historicalAnnualMagiByYear).toEqual({
+      '2028': 80_000,
+      '2029': 82_000,
+    })
+    expect(res.plan!.assumptions.recentAnnualMagi).toBe(80_000)
+    expect(res.caveats.some((c) => c.startsWith('IRMAA-lookback'))).toBe(false)
   })
 
   it('applies a withdrawalOrdering convention that overrides policy.ordering', () => {
@@ -319,7 +320,7 @@ describe('buildPlanFromParams — conventions and caveats', () => {
     expect(res.caveats.some((c) => c.includes('lawSunsetFreezeYear=2031'))).toBe(true)
   })
 
-  it('records a convention irmaaLookbackMagis caveat when the two MAGIs differ', () => {
+  it('maps a convention irmaaLookbackMagis pair without a lossy caveat', () => {
     const res = buildPlanFromParams({
       household: singleHousehold,
       policy: singlePolicy,
@@ -327,8 +328,10 @@ describe('buildPlanFromParams — conventions and caveats', () => {
     })
     expect(res.ok).toBe(true)
     expect(res.plan!.assumptions.recentAnnualMagi).toBe(111_000)
-    expect(
-      res.caveats.some((c) => c.includes('convention irmaaLookbackMagis=[111000,222000]')),
-    ).toBe(true)
+    expect(res.plan!.assumptions.historicalAnnualMagiByYear).toEqual({
+      '2024': 111_000,
+      '2025': 222_000,
+    })
+    expect(res.caveats.some((c) => c.includes('convention irmaaLookbackMagis='))).toBe(false)
   })
 })

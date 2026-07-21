@@ -3,6 +3,18 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.4.1
+
+### Engine
+
+- **Bumped `@retiregolden/engine` 0.1.3 → 0.1.4** (exact pin retained). The
+  engine Plan schema now accepts year-keyed historical MAGI values so IRMAA
+  lookbacks can preserve distinct pre-horizon tax years. The existing scalar
+  historical-MAGI input remains a backward-compatible fallback. The typed
+  `pre_horizon_magi` pair and `irmaaLookbackMagis` convention now populate those
+  exact years instead of collapsing them to one scalar, and `update_plan` can set
+  the year-keyed history directly.
+
 ## 0.4.0
 
 **Plan ingestion — an AI can now learn the plan format and build a plan up from

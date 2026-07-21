@@ -14,7 +14,7 @@ The example below is minimal but parseable (it round-trips through `parsePlan`),
 - **incomes** — a union by `type`: `socialSecurity` (with `piaMonthly` and `claimAge`), `recurring` (pensions/other, with `taxTreatment`), `wages`, and `oneTime`.
 - **expenses** — `baseAnnual` spending plus phases, one-time goals, and the `healthcare` premium/Medicare block.
 - **strategies** — `withdrawalOrder`, `rothConversion` (here `fillToTarget` at top of the 24% bracket for 2026–2030), and `qcdAnnual`.
-- **assumptions** — economic knobs: inflation, SS COLA, state/local tax, `recentAnnualMagi` (IRMAA lookback), heir tax rate, safe-withdrawal rate. This sample sets explicit growth-neutral zeros; a real plan supplies real values (the typed path fills unset fields from the engine defaults).
+- **assumptions** — economic knobs: inflation, SS COLA, state/local tax, `historicalAnnualMagiByYear` (exact IRMAA lookback tax years; `recentAnnualMagi` is the scalar fallback), heir tax rate, safe-withdrawal rate. This sample sets explicit growth-neutral zeros; a real plan supplies real values (the typed path fills unset fields from the engine defaults).
 - **scenarios** — named `patch` overlays for comparison; empty here.
 
 ## Example
@@ -90,6 +90,7 @@ The example below is minimal but parseable (it round-trips through `parsePlan`),
     "stateEffectiveTaxPct": 0,
     "localIncomeTaxPct": 0,
     "recentAnnualMagi": 0,
+    "historicalAnnualMagiByYear": { "2024": 0, "2025": 0 },
     "heirTaxRatePct": 24,
     "safeWithdrawalRatePct": 4
   },

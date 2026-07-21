@@ -40,6 +40,19 @@ describe('describe_plan_schema tool', () => {
     expect(JSON.stringify(res.schema).length).toBeLessThan(JSON.stringify(planJsonSchema).length)
   })
 
+  it('exposes year-keyed historical MAGI assumptions for exact IRMAA lookbacks', () => {
+    const res = adapter.describePlanSchema({
+      path: 'properties.assumptions.properties.historicalAnnualMagiByYear',
+    })
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.schema).toMatchObject({
+      type: 'object',
+      propertyNames: { type: 'string', pattern: '^\\d{4}$' },
+      additionalProperties: { type: 'number', minimum: 0 },
+    })
+  })
+
   it('slices the same subtree via an equivalent JSON pointer', () => {
     const dotted = adapter.describePlanSchema({ path: 'properties.accounts.items' })
     const pointer = adapter.describePlanSchema({ path: '/properties/accounts/items' })

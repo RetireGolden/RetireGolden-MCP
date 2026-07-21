@@ -43,6 +43,8 @@ const STALE_PROJECTION_CAVEAT =
 const SUPERSEDED_CAVEATS: Record<string, (caveat: string) => boolean> = {
   recentAnnualMagi: (c) =>
     c.startsWith('IRMAA-lookback:') || c.startsWith('convention irmaaLookbackMagis='),
+  historicalAnnualMagiByYear: (c) =>
+    c.startsWith('IRMAA-lookback:') || c.startsWith('convention irmaaLookbackMagis='),
   stateEffectiveTaxPct: (c) => c.includes('stateEffectiveTaxPct is not'),
 }
 
@@ -652,6 +654,13 @@ function applyUpdateOp(plan: MutablePlan, op: UpdatePlanOp, index: number): stri
       // `null` is a legitimate supplied value; `undefined` is not.
       if (op.value === undefined) return `${where}: 'value' is required (received undefined)`
       plan.assumptions[op.field] = op.value
+      // The engine prefers exact year-keyed history over the scalar fallback.
+      // Treat an explicit scalar update as replacing prior history; otherwise a
+      // successful operation would be reported while the modeled lookback stayed
+      // unchanged for every year still present in the map.
+      if (op.field === 'recentAnnualMagi') {
+        delete plan.assumptions.historicalAnnualMagiByYear
+      }
       return null
     case 'set_expense':
       if (!EXPENSE_FIELDS.has(op.field)) {
@@ -752,14 +761,18 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
     if (supersedes) session.caveats = session.caveats.filter((c) => !supersedes(c))
   }
 
-  // Setting recentAnnualMagi directly also supersedes a seeded irmaaLookbackMagis
-  // convention, which would otherwise clobber the new value on the documented
-  // export_plan -> build_plan round-trip (applyConventions reseeds recentAnnualMagi
-  // from the convention). Drop the convention so the explicit value round-trips.
-  if (assumptionFieldsSet.has('recentAnnualMagi') && session.conventions.irmaaLookbackMagis != null) {
+  // Setting either historical MAGI representation directly also supersedes a
+  // seeded irmaaLookbackMagis convention, which would otherwise clobber it on
+  // the documented export_plan -> build_plan round-trip.
+  const explicitMagi = assumptionFieldsSet.has('recentAnnualMagi')
+    ? 'recentAnnualMagi'
+    : assumptionFieldsSet.has('historicalAnnualMagiByYear')
+      ? 'historicalAnnualMagiByYear'
+      : null
+  if (explicitMagi && session.conventions.irmaaLookbackMagis != null) {
     session.conventions = { ...session.conventions, irmaaLookbackMagis: null }
     const magiCaveat =
-      'update_plan set recentAnnualMagi directly; cleared the prior irmaaLookbackMagis convention so the value survives export_plan/build_plan round-trip.'
+      `update_plan set ${explicitMagi} directly; cleared the prior irmaaLookbackMagis convention so the value survives export_plan/build_plan round-trip.`
     if (!session.caveats.includes(magiCaveat)) session.caveats.push(magiCaveat)
   }
 
