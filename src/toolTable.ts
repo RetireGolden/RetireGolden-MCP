@@ -105,6 +105,13 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         'Optional manual Roth conversion schedule (overrides bracket-fill conversions)',
       ),
       startYear: z.number().int().optional(),
+      schemaVersion: z
+        .number()
+        .int()
+        .optional()
+        .describe(
+          "Provenance only: the `schemaVersion` sibling from an export_plan response, i.e. the plan-schema version the supplied `plan` was written by. A value differing from this build's version adds a caveat and NOTHING else — the plan is still imported. Omit it and no caveat is emitted.",
+        ),
       conventions: z
         .object({
           lawSunsetFreezeYear: z.number().int().nullable().optional(),
@@ -259,7 +266,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'export_plan',
-    description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear and conventions. Round-trips via build_plan({ plan, startYear, conventions }) — pass the exported startYear back or a non-2026 session's projection will diverge. Returns a clone; mutating it does not affect the live session.`,
+    description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear, conventions and caveats, and the identity of the build that emitted it: schemaVersion (the engine's plan-schema version), engineVersion and mcpVersion (null if not resolvable). Round-trips via build_plan({ plan, startYear, conventions, schemaVersion }) — pass the exported startYear back or a non-2026 session's projection will diverge, and pass schemaVersion back so a different build can warn (never refuse) on version skew. Returns a clone; mutating it does not affect the live session.`,
     inputShape: {},
     handler: (session) => adapter.exportPlan(session),
     httpExposed: false,

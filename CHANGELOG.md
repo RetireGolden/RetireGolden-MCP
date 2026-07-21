@@ -3,6 +3,58 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.4.2
+
+**An exported plan document now says which build wrote it, and a re-import warns
+on version skew.** Closes the `schemaVersion` acceptance criterion of step 1 of
+`enhancements/plan-ingestion-and-round-trip.md` and settles its open decision 3
+(skew policy) as **warn, never refuse**. Additive — no engine bump, no change to
+any calculation. All goldens hold **byte-identically**.
+
+### Added
+
+- **`export_plan` stamps the emitting build's identity.** Alongside the existing
+  `plan` / `startYear` / `conventions` / `caveats`, the response now carries
+  `schemaVersion` (the engine's `PLAN_SCHEMA_VERSION`, the same source
+  `describe_plan_schema` reports — not a duplicated literal), plus `engineVersion`
+  and `mcpVersion` from the shared `getVersions()` helper with the same
+  best-effort semantics as `get_session` (either degrades to `null` rather than
+  throwing). Every previously returned field, and the clone-on-export behavior,
+  is unchanged.
+- **`build_plan` accepts an optional top-level `schemaVersion` and warns on
+  skew.** When a full `plan` document is supplied together with a `schemaVersion`
+  that differs from the installed `PLAN_SCHEMA_VERSION`, the build **succeeds**
+  and appends a caveat naming both versions and stating the plan was accepted
+  anyway. The plan is never refused on skew. Omitting `schemaVersion` — every
+  document written before this release — imports exactly as it did, with no new
+  caveat and no error.
+
+### Notes
+
+- **Where the skew signal is read from, and why.** The check reads the
+  **top-level `build_plan` argument only**, not `plan.schemaVersion` inside the
+  document. Two reasons. (1) It matches how a caller actually round-trips an
+  export: `export_plan` returns `schemaVersion` as a *sibling* of `plan`, exactly
+  as `startYear` and `conventions` are siblings, so the round-trip is the natural
+  `build_plan({ plan, startYear, conventions, schemaVersion })`. (2) The engine's
+  own `parsePlan` pins the in-document `schemaVersion` to a literal equal to the
+  installed version, so an embedded mismatch is **hard-rejected by the engine**
+  before this code could ever see it — a caveat derived from the embedded field
+  could never coexist with an accepted import, which is precisely the behavior
+  the warn-not-refuse policy requires. Keeping provenance on the sibling channel
+  keeps it out of the engine's gate.
+- `schemaVersion` is honored only on the full-plan-JSON branch; the typed
+  `household`/`policy` path builds a document from scratch at the current version
+  and ignores it.
+- Tool-surface names and arm groupings are unchanged, so `schemas/tools.v1.json`
+  needs no edit and the registry-parity / gateway-parity tests stay green.
+
+### Docs
+
+- `docs/clients.md` skill-folder trees now list `references/plan-ingestion.md`
+  (shipped in 0.4.0) alongside `examples.md` and `plan-json.md`, so a reader
+  copying the folder knows to expect all three.
+
 ## 0.4.1
 
 ### Engine

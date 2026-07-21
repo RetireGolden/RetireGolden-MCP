@@ -6,6 +6,7 @@
 import { z } from 'zod'
 import type { Plan } from '@retiregolden/engine'
 import { createEmptyPlan, parsePlan } from '@retiregolden/engine/model/plan'
+import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema'
 import type { ConventionKnobs } from './session.js'
 
 export const PersonParamsSchema = z.object({
@@ -178,6 +179,13 @@ export interface BuildPlanInput {
   startYear?: number
   conventions?: ConventionKnobs
   assumptions?: AssumptionsInput
+  /**
+   * Plan-schema version the supplied `plan` document was WRITTEN by — the
+   * `schemaVersion` sibling that export_plan stamps. Purely a provenance signal:
+   * a value differing from the installed PLAN_SCHEMA_VERSION adds a caveat and
+   * nothing else. Omitted => no caveat (pre-0.4.2 documents import unchanged).
+   */
+  schemaVersion?: number
 }
 
 export interface BuildPlanResult {
@@ -191,6 +199,27 @@ export interface BuildPlanResult {
 }
 
 const FILING = { single: 'single', mfj: 'marriedFilingJointly' } as const
+
+/**
+ * Warn when a re-imported document was written against a DIFFERENT plan-schema
+ * version than this build speaks. Never refuses — a mismatch is a caveat only.
+ *
+ * The signal is read from the caller-supplied `schemaVersion` SIBLING of `plan`
+ * (what export_plan stamps and what a caller passes straight back as
+ * `build_plan({ plan, startYear, conventions, schemaVersion })`), deliberately NOT
+ * from `plan.schemaVersion` inside the document. The engine's own parsePlan pins
+ * that field to a literal equal to the installed PLAN_SCHEMA_VERSION, so any
+ * in-document skew is hard-rejected by the engine before this code could see it —
+ * a caveat derived from the embedded field could never coexist with an accepted
+ * import, which is exactly the behavior this warning has to provide. Reading the
+ * sibling keeps provenance on a channel the engine does not gate.
+ */
+function pushSchemaSkewCaveat(declared: number | undefined | null, caveats: string[]): void {
+  if (declared == null || declared === PLAN_SCHEMA_VERSION) return
+  caveats.push(
+    `schemaVersion skew: the supplied plan document declares plan-schema v${declared} but this build speaks v${PLAN_SCHEMA_VERSION}; the plan was accepted anyway — re-export it from this build if any field looks missing or misread.`,
+  )
+}
 
 export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   const caveats: string[] = []
@@ -221,6 +250,9 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
     if (!conventionParsed.ok) {
       return { ok: false, startYear, caveats, issues: conventionParsed.issues }
     }
+    // Provenance skew — WARN, never refuse. Emitted only after the document has
+    // actually been accepted, so "accepted anyway" is always literally true.
+    pushSchemaSkewCaveat(input.schemaVersion, caveats)
     return { ok: true, plan: conventionParsed.plan, startYear, caveats }
   }
 

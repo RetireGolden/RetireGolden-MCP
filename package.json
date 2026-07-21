@@ -1,6 +1,6 @@
 {
   "name": "@retiregolden/mcp",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Model Context Protocol server for the RetireGolden retirement-planning engine: headless, in-memory sessions over stdio (and optional HTTP).",
   "license": "AGPL-3.0-only",
   "type": "module",

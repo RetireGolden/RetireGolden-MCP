@@ -386,12 +386,24 @@ export function exportPlan(session: SessionState) {
   // startYear + conventions are surfaced so the exported document round-trips faithfully
   // via build_plan({ plan, startYear, conventions }); without startYear the re-imported
   // projection would default to 2026 and diverge from any non-2026 session.
+  //
+  // schemaVersion / engineVersion / mcpVersion stamp the IDENTITY of the build that
+  // emitted this document, as siblings of `plan` (the same shape startYear and
+  // conventions already use). Without them a document re-imported into a different
+  // build is anonymous and skew is undetectable. schemaVersion comes from the
+  // engine's PLAN_SCHEMA_VERSION — the same source describe_plan_schema reports, not
+  // a duplicated literal — and build_plan takes it back as a sibling arg to warn on
+  // skew. The two package versions degrade to null exactly as get_session's do.
+  const { mcpVersion, engineVersion } = getVersions()
   return {
     ok: true as const,
     plan: structuredClone(session.plan),
     startYear: session.startYear,
     conventions: session.conventions,
     caveats: session.caveats,
+    schemaVersion: PLAN_SCHEMA_VERSION,
+    engineVersion,
+    mcpVersion,
   }
 }
 
