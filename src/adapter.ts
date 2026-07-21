@@ -7,6 +7,11 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { simulatePlan, summarizeProjection, type Plan } from '@retiregolden/engine'
 import { parsePlan } from '@retiregolden/engine/model/plan'
+import {
+  planJsonSchema,
+  PLAN_SCHEMA_VERSION,
+  PLAN_SCHEMA_ID,
+} from '@retiregolden/engine/schema'
 import { createFederalTaxCalculator } from '@retiregolden/engine/tax/federalTax'
 import { runMonteCarloPaths, aggregateMonteCarlo } from '@retiregolden/engine/montecarlo/run'
 import { createLognormalModel } from '@retiregolden/engine/montecarlo/marketModels'
@@ -409,5 +414,197 @@ export function compareScenarios(
     a: sa,
     b: sb,
     deltaEndingAfterTaxEstate: sb.endingAfterTaxEstate - sa.endingAfterTaxEstate,
+  }
+}
+
+/**
+ * Resolve a dotted-path or JSON-pointer segment list into the schema tree.
+ * A leading '/' selects JSON-pointer semantics (with ~1/~0 unescaping); anything
+ * else is treated as a dotted path. Numeric segments index into arrays (e.g. the
+ * `oneOf` discriminated-union branches on `accounts.items`). Returns the located
+ * node, or the UNRESOLVED sentinel when a segment does not exist.
+ */
+const UNRESOLVED = Symbol('unresolved')
+
+function resolveSchemaPath(root: unknown, path: string): unknown | typeof UNRESOLVED {
+  const trimmed = path.trim()
+  if (trimmed === '' || trimmed === '/' || trimmed === '.') return root
+  const segments = trimmed.startsWith('/')
+    ? trimmed
+        .slice(1)
+        .split('/')
+        .map((s) => s.replace(/~1/g, '/').replace(/~0/g, '~'))
+    : trimmed.split('.').filter((s) => s.length > 0)
+
+  let node: unknown = root
+  for (const seg of segments) {
+    if (Array.isArray(node)) {
+      const idx = Number(seg)
+      if (!Number.isInteger(idx) || idx < 0 || idx >= node.length) return UNRESOLVED
+      node = node[idx]
+    } else if (node != null && typeof node === 'object') {
+      if (!Object.prototype.hasOwnProperty.call(node, seg)) return UNRESOLVED
+      node = (node as Record<string, unknown>)[seg]
+    } else {
+      return UNRESOLVED
+    }
+  }
+  return node
+}
+
+/**
+ * Serve the engine's versioned Plan JSON Schema (the source of truth for what a
+ * plan document contains), optionally sliced to a subtree so a caller can fetch
+ * just the part it is authoring against and keep token cost down. The engine
+ * owns the schema; this only reads and slices it.
+ */
+export function describePlanSchema(opts: { path?: string } = {}) {
+  const base = {
+    ok: true as const,
+    schemaVersion: PLAN_SCHEMA_VERSION,
+    schemaId: PLAN_SCHEMA_ID,
+  }
+  if (opts.path == null || opts.path.trim() === '') {
+    return { ...base, path: null, schema: planJsonSchema }
+  }
+  const node = resolveSchemaPath(planJsonSchema, opts.path)
+  if (node === UNRESOLVED) {
+    return {
+      ok: false as const,
+      error: 'PATH_NOT_FOUND',
+      path: opts.path,
+      schemaVersion: PLAN_SCHEMA_VERSION,
+      message: `No schema node at '${opts.path}'. Use a dotted path (e.g. 'properties.accounts.items') or JSON pointer (e.g. '/properties/accounts/items').`,
+    }
+  }
+  return { ...base, path: opts.path, schema: node }
+}
+
+/**
+ * Named domain operations for update_plan. They target engine-plan FRAGMENTS
+ * (what document extraction produces) rather than the typed household vocabulary,
+ * and are deliberately small and explicit — add/replace/remove by id, or set a
+ * single assumptions/expenses field — so there is no deep-merge magic where
+ * silent data loss lives.
+ */
+export type UpdatePlanOp =
+  | { op: 'add_account'; account: Record<string, unknown> }
+  | { op: 'replace_account'; id: string; account: Record<string, unknown> }
+  | { op: 'remove_account'; id: string }
+  | { op: 'add_income'; income: Record<string, unknown> }
+  | { op: 'replace_income'; id: string; income: Record<string, unknown> }
+  | { op: 'remove_income'; id: string }
+  | { op: 'set_assumption'; field: string; value: unknown }
+  | { op: 'set_expense'; field: string; value: unknown }
+
+type MutablePlan = {
+  accounts: Array<{ id?: unknown }>
+  incomes: Array<{ id?: unknown }>
+  assumptions: Record<string, unknown>
+  expenses: Record<string, unknown>
+  [key: string]: unknown
+}
+
+/** Apply one operation to a working plan clone. Returns an error string or null. */
+function applyUpdateOp(plan: MutablePlan, op: UpdatePlanOp, index: number): string | null {
+  const where = `operation[${index}] ${op.op}`
+  switch (op.op) {
+    case 'add_account':
+      plan.accounts.push(op.account as { id?: unknown })
+      return null
+    case 'replace_account': {
+      const i = plan.accounts.findIndex((a) => a.id === op.id)
+      if (i === -1) return `${where}: no account with id '${op.id}'`
+      plan.accounts[i] = op.account as { id?: unknown }
+      return null
+    }
+    case 'remove_account': {
+      const before = plan.accounts.length
+      plan.accounts = plan.accounts.filter((a) => a.id !== op.id)
+      if (plan.accounts.length === before) return `${where}: no account with id '${op.id}'`
+      return null
+    }
+    case 'add_income':
+      plan.incomes.push(op.income as { id?: unknown })
+      return null
+    case 'replace_income': {
+      const i = plan.incomes.findIndex((inc) => inc.id === op.id)
+      if (i === -1) return `${where}: no income with id '${op.id}'`
+      plan.incomes[i] = op.income as { id?: unknown }
+      return null
+    }
+    case 'remove_income': {
+      const before = plan.incomes.length
+      plan.incomes = plan.incomes.filter((inc) => inc.id !== op.id)
+      if (plan.incomes.length === before) return `${where}: no income with id '${op.id}'`
+      return null
+    }
+    case 'set_assumption':
+      plan.assumptions[op.field] = op.value
+      return null
+    case 'set_expense':
+      plan.expenses[op.field] = op.value
+      return null
+    default: {
+      // Exhaustiveness guard: an unknown op shape reaches here only if the zod
+      // union and this switch drift apart.
+      const _never: never = op
+      return `unknown operation: ${JSON.stringify(_never)}`
+    }
+  }
+}
+
+/** Compact, low-token summary of a plan for update_plan/round-trip responses. */
+function planSummary(plan: Plan) {
+  return {
+    name: plan.name,
+    accounts: plan.accounts.map((a) => ({ id: a.id, name: a.name, type: a.type })),
+    incomes: plan.incomes.map((inc) => ({ id: inc.id, type: inc.type })),
+    expenseBaseAnnual: plan.expenses.baseAnnual,
+  }
+}
+
+/**
+ * Incrementally mutate the current session plan with merge semantics, so
+ * multi-document ingestion does not rebuild from scratch each turn. The mutated
+ * plan is validated through the engine's parsePlan BEFORE it is committed: on any
+ * failure the session plan is left UNCHANGED (never half-applied) and the issues
+ * are returned. Requires a seeded plan (build_plan first) — NO_PLAN otherwise.
+ */
+export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
+  if (!session.plan) {
+    return {
+      ok: false as const,
+      error: 'NO_PLAN',
+      message: 'Call build_plan first to seed a plan before update_plan',
+    }
+  }
+  // Work on a clone: nothing touches the live session until validation passes.
+  const working = structuredClone(session.plan) as unknown as MutablePlan
+  for (let i = 0; i < ops.length; i++) {
+    const err = applyUpdateOp(working, ops[i]!, i)
+    if (err) {
+      return { ok: false as const, error: 'OPERATION_FAILED', issues: [err] }
+    }
+  }
+
+  const parsed = parsePlan(working)
+  if (!parsed.ok) {
+    // Leave session.plan untouched — the merge is all-or-nothing.
+    return { ok: false as const, error: 'INVALID_PLAN', issues: parsed.issues }
+  }
+
+  // Commit. Stale projection is dropped; record a caveat so a reader knows the
+  // plan moved and any prior projection/optimizer result no longer applies.
+  session.plan = parsed.plan
+  session.lastProjection = null
+  const caveat = `Plan mutated via update_plan (${ops.length} operation${ops.length === 1 ? '' : 's'}); re-run run_projection to refresh results.`
+  if (!session.caveats.includes(caveat)) session.caveats.push(caveat)
+
+  return {
+    ok: true as const,
+    appliedOperations: ops.length,
+    plan: planSummary(parsed.plan),
+    caveats: session.caveats,
   }
 }

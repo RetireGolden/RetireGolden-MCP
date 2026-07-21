@@ -20,6 +20,26 @@ import {
 export const EDUCATIONAL =
   'Educational decision-support only — not tax, legal, or financial advice. Do not prescribe securities actions.'
 
+/**
+ * A plan fragment (account/income object) passed through update_plan verbatim.
+ * Kept as a loose object: it targets the engine-plan shape, which the engine's
+ * parsePlan — not this zod — is the authority on. The whole mutated plan is
+ * validated there before commit, so structural checks live in one place.
+ */
+const PlanFragment = z.record(z.string(), z.unknown())
+
+/** Named domain operations for update_plan (see adapter.UpdatePlanOp). */
+const UpdatePlanOpSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('add_account'), account: PlanFragment }),
+  z.object({ op: z.literal('replace_account'), id: z.string().min(1), account: PlanFragment }),
+  z.object({ op: z.literal('remove_account'), id: z.string().min(1) }),
+  z.object({ op: z.literal('add_income'), income: PlanFragment }),
+  z.object({ op: z.literal('replace_income'), id: z.string().min(1), income: PlanFragment }),
+  z.object({ op: z.literal('remove_income'), id: z.string().min(1) }),
+  z.object({ op: z.literal('set_assumption'), field: z.string().min(1), value: z.unknown() }),
+  z.object({ op: z.literal('set_expense'), field: z.string().min(1), value: z.unknown() }),
+])
+
 export function jsonResult(data: unknown) {
   return {
     content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
@@ -226,6 +246,34 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear and conventions. Round-trips via build_plan({ plan, startYear, conventions }) — pass the exported startYear back or a non-2026 session's projection will diverge. Returns a clone; mutating it does not affect the live session.`,
     inputShape: {},
     handler: (session) => adapter.exportPlan(session),
+    httpExposed: false,
+    arms: [],
+  },
+  {
+    name: 'describe_plan_schema',
+    description: `${EDUCATIONAL} Return the engine's versioned Plan JSON Schema (the source of truth for authoring a full plan document) plus its schemaVersion. Pass an optional \`path\` (dotted, e.g. 'properties.accounts.items', or JSON pointer, e.g. '/properties/accounts/items') to fetch just a subtree and keep token cost down. Read-only meta tool; also exposed as the MCP resource of the same schema. Feed a document's extracted fields into update_plan, then validate_plan.`,
+    inputShape: {
+      path: z
+        .string()
+        .optional()
+        .describe(
+          'Optional dotted path or JSON pointer into the schema; omit for the full document',
+        ),
+    },
+    handler: (_session, args) => adapter.describePlanSchema({ path: args.path as string | undefined }),
+    httpExposed: false,
+    arms: [],
+  },
+  {
+    name: 'update_plan',
+    description: `${EDUCATIONAL} Incrementally mutate the current session plan with named merge operations (add/replace/remove accounts or incomes by id; set an assumptions or expenses field) — for building a plan up from extracted document fragments without rebuilding each turn. Requires a seeded plan (build_plan first; NO_PLAN otherwise). The mutated plan is validated via the engine BEFORE commit: on failure the session plan is left UNCHANGED and issues are returned. Returns the updated plan summary + caveats on success.`,
+    inputShape: {
+      operations: z
+        .array(UpdatePlanOpSchema)
+        .min(1)
+        .describe('Ordered list of merge operations applied atomically (all-or-nothing).'),
+    },
+    handler: (session, args) => adapter.updatePlan(session, args.operations as adapter.UpdatePlanOp[]),
     httpExposed: false,
     arms: [],
   },

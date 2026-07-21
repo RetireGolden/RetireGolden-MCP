@@ -66,6 +66,9 @@ Session state (e.g. `build_plan`, `clear_session`) is held in memory only.
 | `solve_max_spending` | Sustainable-spending bisection |
 | `compare_scenarios` | Diff two projection summaries |
 | `explain_modeled_result` | Compact evidence / assumptions / limitations payload |
+| `export_plan` | Return the session plan as full plan JSON (round-trips via `build_plan`) |
+| `describe_plan_schema` | Return the engine's versioned Plan JSON Schema (full or a `path` subtree); also served as the `plan-schema` MCP resource |
+| `update_plan` | Incrementally merge account/income/assumption/expense fragments into the session plan (validate-before-commit) |
 | `get_session` / `clear_session` | Inspect or reset in-memory session |
 
 ## Agent skill

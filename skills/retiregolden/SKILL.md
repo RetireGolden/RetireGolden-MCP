@@ -77,7 +77,12 @@ See `references/examples.md` for a real-household MFJ call with overrides.
 
 Pass `conventions` on `build_plan` for law-sunset freeze, dual IRMAA lookback MAGIs, or a withdrawal-ordering override. Read returned `caveats` — some engine knobs are best-effort.
 
+## Building a plan from the user's documents (ingestion loop)
+
+To assemble a plan from real statements (401k/brokerage/IRA exports), use the ingestion loop: **`describe_plan_schema`** (learn the plan format, or a subtree via `path`) → seed a minimal plan with `build_plan` → **`update_plan`** (merge each extracted fragment with named ops: `add_account`, `replace_income`, `set_assumption`, …) → `validate_plan` → repeat → `export_plan`. `update_plan` validates the mutated plan **before commit** and leaves the session plan untouched on failure. Extraction (reading the document) is **your** job — the MCP does no OCR/PDF parsing. Ask the user for required fields a statement omits (especially the account **type** and any inferred dollar figure). The same schema is also served as an MCP **resource** (`plan-schema`). **Full loop + a worked brokerage-statement→account example: `references/plan-ingestion.md`.**
+
 ## References
 
 - `references/examples.md` — complete `build_plan` calls (single, MFJ + pension + assumptions, batch sweep).
 - `references/plan-json.md` — one full engine-plan JSON with a note per section, for the `plan` JSON path.
+- `references/plan-ingestion.md` — the document-ingestion loop (`describe_plan_schema` → `update_plan` → `validate_plan`) with a worked statement-to-account example.
