@@ -192,12 +192,16 @@ Units & assumptions (easy to get wrong):
   and `policy.conversion_bracket` are FRACTIONS (0.05 = 5%); everything under
   `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them. `growth.*` is a
   NOMINAL return (not inflation-adjusted); real return ≈ growth − inflation.
-- Typed-path defaults (v0.3.0) follow the engine's real-world defaults: ~2.5%
-  inflation, SS COLA tracking inflation, +3% healthcare inflation, 0% state/local
-  tax (not modeled until you set it), June-15 DOBs, sex 'average'. `household.state`
-  is REQUIRED (2-letter code); a non-zero `wage` is a hard error (retired household).
-  To model real state income tax pass `stateEffectiveTaxPct`; override any default
-  via the `assumptions` block (e.g. `inflationPct`, `ssColaPct`, `dobMonthDay`).
+- Typed-path defaults follow the engine's real-world defaults: ~2.5% inflation,
+  SS COLA tracking inflation, +3% healthcare inflation, June-15 DOBs, sex
+  'average'. `household.state` is REQUIRED (2-letter code); a non-zero `wage` is a
+  hard error (retired household). Override any default via the `assumptions` block
+  (e.g. `inflationPct`, `ssColaPct`, `dobMonthDay`).
+- State income tax IS modeled, from `household.state` — every US jurisdiction has
+  a pack. `stateEffectiveTaxPct` is an OVERRIDE that applies only above 0; passing
+  `0` means "use the modeled pack", not "no state tax" (v0.5.0 corrected this —
+  before it, projections here were federal-only and disagreed with the web app).
+  `localIncomeTaxPct` is 0 unless set.
 - `run_projection` returns summary-only by default; pass `detail: 'years'` when
   you need the per-year ledger (taxes, conversions, withdrawals, IRMAA by year).
 ```
@@ -287,12 +291,16 @@ Units & assumptions (easy to get wrong):
   and `policy.conversion_bracket` are FRACTIONS (0.05 = 5%); everything under
   `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them. `growth.*` is a
   NOMINAL return (not inflation-adjusted); real return ≈ growth − inflation.
-- Typed-path defaults (v0.3.0) follow the engine's real-world defaults: ~2.5%
-  inflation, SS COLA tracking inflation, +3% healthcare inflation, 0% state/local
-  tax (not modeled until you set it), June-15 DOBs, sex 'average'. `household.state`
-  is REQUIRED (2-letter code); a non-zero `wage` is a hard error (retired household).
-  To model real state income tax pass `stateEffectiveTaxPct`; override any default
-  via the `assumptions` block (e.g. `inflationPct`, `ssColaPct`, `dobMonthDay`).
+- Typed-path defaults follow the engine's real-world defaults: ~2.5% inflation,
+  SS COLA tracking inflation, +3% healthcare inflation, June-15 DOBs, sex
+  'average'. `household.state` is REQUIRED (2-letter code); a non-zero `wage` is a
+  hard error (retired household). Override any default via the `assumptions` block
+  (e.g. `inflationPct`, `ssColaPct`, `dobMonthDay`).
+- State income tax IS modeled, from `household.state` — every US jurisdiction has
+  a pack. `stateEffectiveTaxPct` is an OVERRIDE that applies only above 0; passing
+  `0` means "use the modeled pack", not "no state tax" (v0.5.0 corrected this —
+  before it, projections here were federal-only and disagreed with the web app).
+  `localIncomeTaxPct` is 0 unless set.
 - `run_projection` returns summary-only by default; pass `detail: 'years'` when
   you need the per-year ledger.
 ```

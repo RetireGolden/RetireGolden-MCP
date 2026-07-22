@@ -9,17 +9,46 @@ import {
   PLAN_SCHEMA_VERSION,
   PLAN_SCHEMA_ID,
 } from '@retiregolden/engine/schema'
-import { createFederalTaxCalculator } from '@retiregolden/engine/tax/federalTax'
+import { combineTaxCalculators, createFederalTaxCalculator } from '@retiregolden/engine/tax/federalTax'
+import { createStateTaxCalculator } from '@retiregolden/engine/tax/stateTax'
 import { runMonteCarloPaths, aggregateMonteCarlo } from '@retiregolden/engine/montecarlo/run'
 import { createLognormalModel } from '@retiregolden/engine/montecarlo/marketModels'
 import { optimizePlan } from '@retiregolden/engine/projection/optimizePlan'
 import { solveMaxSustainableSpending } from '@retiregolden/engine/decisions/spendingSolver'
-import { buildPlanFromParams, type BuildPlanInput, type PolicyParams } from './buildPlan.js'
+import {
+  buildPlanFromParams,
+  stateTaxCaveat,
+  type BuildPlanInput,
+  type PolicyParams,
+} from './buildPlan.js'
 import { getVersions } from './versions.js'
 import type { SessionState } from './session.js'
 
-function taxCalc() {
-  return createFederalTaxCalculator()
+/**
+ * The tax stack EVERY simulating path runs. Deliberately identical to the
+ * browser planner's `taxCalculatorFor` (planner-ui/src/planner/useProjection.ts):
+ * federal COMBINED WITH state+local, configured from the plan's own assumptions.
+ *
+ * It was federal-only through 0.4.2, which silently answered a different question
+ * than the app the plan came from. `createStateTaxCalculator` treats
+ * `overridePct: 0` (the parsed-plan default) as "use the engine's modeled pack for
+ * this state" — NOT as "no state income tax" — so a federal-only stack did not
+ * merely miss an override, it modeled zero state tax for residents of all 42
+ * income-tax jurisdictions. On the RetireGolden example couple (KY) that was ~13%
+ * of ending net worth. See CHANGELOG 0.5.0.
+ *
+ * Takes the plan rather than reading session state because the batch and compare
+ * paths price CANDIDATE plans: each must be taxed at its own rates, not the
+ * session plan's.
+ */
+function taxCalc(plan: Plan) {
+  return combineTaxCalculators(
+    createFederalTaxCalculator(),
+    createStateTaxCalculator({
+      overridePct: plan.assumptions.stateEffectiveTaxPct,
+      localPct: plan.assumptions.localIncomeTaxPct,
+    }),
+  )
 }
 
 /**
@@ -30,6 +59,10 @@ function taxCalc() {
 const STALE_PROJECTION_CAVEAT =
   'Plan mutated via update_plan; re-run run_projection to refresh results.'
 
+/** Stable marker on every buildPlan state-income-tax caveat, so the matcher below
+ * keys on one token rather than on prose that gets reworded. */
+const STATE_TAX_CAVEAT_MARKER = 'stateEffectiveTaxPct'
+
 /**
  * Build-time caveats that a later `set_assumption` renders obsolete, keyed by the
  * assumption field. Each caveat asserts that a default/convention is in effect and
@@ -37,13 +70,20 @@ const STALE_PROJECTION_CAVEAT =
  * must be pruned so responses don't keep repeating a superseded number. This is a
  * small explicit table (the handful of value-specific caveats buildPlan emits) —
  * not an auto-derived taxonomy — so the mapping stays honest and reviewable.
+ *
+ * `stateEffectiveTaxPct` drops EVERY state-tax caveat unconditionally, because an
+ * explicit set falsifies whichever one the build recorded ("no override given" /
+ * "0 does not disable"). What replaces it depends on the new value, so updatePlan
+ * re-derives it from `stateTaxCaveat` afterwards rather than deciding here: one
+ * function owns what is true of a (state, override) pair, and the build path and
+ * the update path cannot drift apart.
  */
 const SUPERSEDED_CAVEATS: Record<string, (caveat: string) => boolean> = {
   recentAnnualMagi: (c) =>
     c.startsWith('IRMAA-lookback:') || c.startsWith('convention irmaaLookbackMagis='),
   historicalAnnualMagiByYear: (c) =>
     c.startsWith('IRMAA-lookback:') || c.startsWith('convention irmaaLookbackMagis='),
-  stateEffectiveTaxPct: (c) => c.includes('stateEffectiveTaxPct is not'),
+  stateEffectiveTaxPct: (c) => c.includes(STATE_TAX_CAVEAT_MARKER),
 }
 
 // Package identity lives in ./versions.js so buildPlan.ts can read it without a
@@ -77,7 +117,7 @@ export function runProjection(
   }
   const result = simulatePlan(session.plan, {
     startYear: session.startYear,
-    taxCalculator: taxCalc(),
+    taxCalculator: taxCalc(session.plan),
   })
   const summary = summarizeProjection(session.plan, result)
   session.lastProjection = { result, summary }
@@ -128,7 +168,7 @@ export function runMonteCarlo(
   })
   const paths = runMonteCarloPaths(session.plan, {
     startYear: session.startYear,
-    taxCalculator: taxCalc(),
+    taxCalculator: taxCalc(session.plan),
     model,
     seed,
     pathCount,
@@ -236,7 +276,7 @@ export function batchEvaluate(
 
       const proj = simulatePlan(parsed.plan, {
         startYear: session.startYear,
-        taxCalculator: taxCalc(),
+        taxCalculator: taxCalc(parsed.plan),
       })
       const summary = summarizeProjection(parsed.plan, proj)
       let obj: number
@@ -274,7 +314,7 @@ export async function runOptimizer(session: SessionState) {
   try {
     const result = await optimizePlan(session.plan, {
       startYear: session.startYear,
-      taxCalculator: taxCalc(),
+      taxCalculator: taxCalc(session.plan),
     })
     return {
       ok: true as const,
@@ -304,7 +344,7 @@ export function solveMaxSpending(session: SessionState) {
   try {
     const simulateOptions = {
       startYear: session.startYear,
-      taxCalculator: taxCalc(),
+      taxCalculator: taxCalc(session.plan),
     }
     const baselineResult = simulatePlan(session.plan, simulateOptions)
     const baselineSummary = summarizeProjection(session.plan, baselineResult)
@@ -383,6 +423,12 @@ export function explainModeledResult(session: SessionState) {
     framing:
       'Educational decision-support only — not tax, legal, or financial advice. Results are modeled under stated assumptions.',
     objective: 'User-selected or tool-default objective; tools do not prescribe securities actions.',
+    // State what the numbers were actually computed with. Before 0.5.0 this
+    // response described assumptions and caveats but never named the tax stack, so
+    // nothing here revealed that projections were federal-only and disagreed with
+    // the app the plan came from. tests/browserParity.test.ts pins the claim.
+    taxStack:
+      "Federal brackets combined with the resident state's modeled income tax, plus any flat stateEffectiveTaxPct / localIncomeTaxPct override. This is the same stack the RetireGolden web app runs, so a projection here agrees with what the app shows for the same plan and start year.",
     assumptions: session.plan?.assumptions ?? null,
     conventions: session.conventions,
     caveats: session.caveats,
@@ -397,6 +443,7 @@ export function explainModeledResult(session: SessionState) {
       'Engine may use a single IRMAA lookback MAGI scalar.',
       'traditional-first withdrawal ordering is approximate under sequential drain.',
       'Law-sunset freeze is best-effort pending engine knobs.',
+      'stateEffectiveTaxPct overrides the modeled state pack only when ABOVE 0; 0 means "use the modeled pack", not "no state income tax".',
     ],
   }
 }
@@ -412,8 +459,11 @@ export function compareScenarios(
   if (!a.ok) return { ok: false as const, error: 'INVALID_PLAN_A', issues: a.issues }
   if (!b.ok) return { ok: false as const, error: 'INVALID_PLAN_B', issues: b.issues }
   const year = startYear ?? session.startYear
-  const ra = simulatePlan(a.plan, { startYear: year, taxCalculator: taxCalc() })
-  const rb = simulatePlan(b.plan, { startYear: year, taxCalculator: taxCalc() })
+  // Each side gets ITS OWN calculator: the two documents can name different states
+  // or different flat overrides, and a "compare" that priced B at A's state rates
+  // would attribute a tax difference to whatever else changed between them.
+  const ra = simulatePlan(a.plan, { startYear: year, taxCalculator: taxCalc(a.plan) })
+  const rb = simulatePlan(b.plan, { startYear: year, taxCalculator: taxCalc(b.plan) })
   const sa = summarizeProjection(a.plan, ra)
   const sb = summarizeProjection(b.plan, rb)
   return {
@@ -729,15 +779,37 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
 
   // Drop build-time caveats a set_assumption has now superseded. These caveats
   // assert that a specific default/convention is in effect and name the old value
-  // (e.g. "recentAnnualMagi=50000", "state income tax is modeled at 0%"); once the
+  // (e.g. "recentAnnualMagi=50000", "the modeled KY income tax applies"); once the
   // field is set directly they are false, so explain_modeled_result and every
   // response would otherwise keep repeating a value the plan no longer uses.
-  const assumptionFieldsSet = new Set(
-    ops.filter((o) => o.op === 'set_assumption').map((o) => o.field),
-  )
-  for (const field of assumptionFieldsSet) {
+  // Keep the LAST value set for each field — the predicate may need it, and a batch
+  // may legitimately set the same field twice.
+  const assumptionValues = new Map<string, unknown>()
+  for (const o of ops) {
+    if (o.op === 'set_assumption') assumptionValues.set(o.field, o.value)
+  }
+  for (const field of assumptionValues.keys()) {
     const supersedes = SUPERSEDED_CAVEATS[field]
     if (supersedes) session.caveats = session.caveats.filter((c) => !supersedes(c))
+  }
+  const assumptionFieldsSet = new Set(assumptionValues.keys())
+
+  // Re-derive the state-tax caveat for the value just set (the loop above dropped
+  // whatever the build recorded). Above 0 this is silent — a real override applies
+  // and there is nothing surprising left to say. At 0 it is emphatically not:
+  // that changes NOTHING about how the plan is taxed, because the engine reads 0 as
+  // "use the modeled pack for this state", while the caller almost certainly meant
+  // "no state income tax" — what the field name and every pre-0.5.0 doc implied.
+  // Saying nothing there would be the federal-only bug all over again: a plan taxed
+  // at its state's rates with nothing in the response admitting it.
+  if (assumptionValues.has('stateEffectiveTaxPct')) {
+    const value = assumptionValues.get('stateEffectiveTaxPct')
+    const caveat = stateTaxCaveat(
+      parsed.plan.household.state,
+      session.startYear,
+      typeof value === 'number' ? value : null,
+    )
+    if (caveat && !session.caveats.includes(caveat)) session.caveats.push(caveat)
   }
 
   // Setting either historical MAGI representation directly also supersedes a

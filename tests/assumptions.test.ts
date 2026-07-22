@@ -160,7 +160,7 @@ describe('dobMonthDay calendar-aware validation', () => {
 })
 
 describe('assumption-interaction caveats (footguns)', () => {
-  it('warns when state is set but stateEffectiveTaxPct is not (tax still 0%)', () => {
+  it("reports that the named state's modeled income tax applies", () => {
     const res = buildPlanFromParams({
       household: singleHousehold,
       policy: singlePolicy,
@@ -168,13 +168,30 @@ describe('assumption-interaction caveats (footguns)', () => {
     })
     expect(res.ok).toBe(true)
     expect(res.plan!.household.state).toBe('CA')
+    // The stored override stays 0 — and 0 is exactly what the engine reads as "use
+    // CA's modeled pack", so the caveat must not call this a 0% state tax.
     expect(res.plan!.assumptions.stateEffectiveTaxPct).toBe(0)
-    expect(
-      res.caveats.some((c) => c.includes('state=CA') && c.includes('stateEffectiveTaxPct')),
-    ).toBe(true)
+    const caveat = res.caveats.find((c) => c.includes('stateEffectiveTaxPct'))
+    expect(caveat).toContain('state=CA')
+    expect(caveat).toContain('modeled CA income tax applies')
+    expect(caveat).not.toContain('modeled at 0%')
   })
 
-  it('does not warn about state tax when stateEffectiveTaxPct is provided', () => {
+  it('warns that stateEffectiveTaxPct=0 does NOT disable state income tax', () => {
+    // Every pre-0.5.0 doc taught callers to write exactly this to mean "no state
+    // tax". It does not: 0 is below the override threshold, so CA's modeled pack
+    // still applies. Silence here would be the old bug in a caller's clothes.
+    const res = buildPlanFromParams({
+      household: singleHousehold,
+      policy: singlePolicy,
+      assumptions: { state: 'CA', stateEffectiveTaxPct: 0 },
+    })
+    expect(res.ok).toBe(true)
+    const caveat = res.caveats.find((c) => c.includes('stateEffectiveTaxPct'))
+    expect(caveat).toContain('does NOT disable state income tax')
+  })
+
+  it('says nothing about state tax once a real override is provided', () => {
     const res = buildPlanFromParams({
       household: singleHousehold,
       policy: singlePolicy,
@@ -182,6 +199,39 @@ describe('assumption-interaction caveats (footguns)', () => {
     })
     expect(res.ok).toBe(true)
     expect(res.caveats.some((c) => c.includes('stateEffectiveTaxPct'))).toBe(false)
+  })
+
+  it('says nothing about state tax in a state that levies none', () => {
+    const res = buildPlanFromParams({
+      household: singleHousehold,
+      policy: singlePolicy,
+      assumptions: { state: 'FL' },
+    })
+    expect(res.ok).toBe(true)
+    expect(res.caveats.some((c) => c.includes('stateEffectiveTaxPct'))).toBe(false)
+  })
+
+  it('rejects a negative state or local rate rather than silently clamping it', () => {
+    // The engine clamps a negative override to 0, which then means "use the modeled
+    // pack" — so a deliberate-looking input would quietly model something else.
+    // Neither arm of the rule ("0 = modeled", "above 0 = override") gives a negative
+    // any meaning, so it is refused at the boundary instead.
+    expect(AssumptionsSchema.safeParse({ stateEffectiveTaxPct: -1 }).success).toBe(false)
+    expect(AssumptionsSchema.safeParse({ localIncomeTaxPct: -1 }).success).toBe(false)
+    expect(AssumptionsSchema.safeParse({ stateEffectiveTaxPct: 0 }).success).toBe(true)
+  })
+
+  it('does not tell an unmodeled state that its tax is 0 when an override is in force', () => {
+    // A flat override above 0 applies whether or not a pack exists — the engine
+    // returns on it before looking the state up. Telling such a caller their state
+    // tax is 0 and to set the override they already set contradicts the result.
+    const res = buildPlanFromParams({
+      household: { ...singleHousehold, state: 'ZZ' },
+      policy: singlePolicy,
+      assumptions: { stateEffectiveTaxPct: 4 },
+    })
+    expect(res.ok).toBe(true)
+    expect(res.caveats.some((c) => c.includes('no modeled state tax pack'))).toBe(false)
   })
 
   it('warns that sex/dobMonthDay apply to every person in a multi-person household', () => {

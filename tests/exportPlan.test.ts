@@ -216,6 +216,14 @@ describe('export_plan provenance stamp', () => {
  *    the skew that can really occur between two builds that can exchange documents
  *    at all (same plan schema, different defaults/semantics).
  */
+
+/**
+ * Just the skew caveats. Module-scope because more than one block needs it: an
+ * accepted document also reports how it is taxed, and a skew assertion should not
+ * go red because an unrelated, correct caveat joined the list.
+ */
+const skew = (caveats: string[]) => caveats.filter((c) => c.includes('skew:'))
+
 describe('build_plan provenance skew (sibling labels warn, never refuse)', () => {
   function exportedDocument() {
     const session = createSession(2026)
@@ -233,8 +241,6 @@ describe('build_plan provenance skew (sibling labels warn, never refuse)', () =>
   function currentDocument() {
     return JSON.parse(JSON.stringify(exportedDocument().plan)) as Record<string, unknown>
   }
-
-  const skew = (caveats: string[]) => caveats.filter((c) => c.includes('skew:'))
 
   const callerSkewCaveat = (declared: number) =>
     `schemaVersion skew: caller-declared plan-schema v${declared} does not match this build's v${PLAN_SCHEMA_VERSION}; ` +
@@ -260,7 +266,8 @@ describe('build_plan provenance skew (sibling labels warn, never refuse)', () =>
 
       // Exact text, not substrings: a message that transposes the two versions
       // tells the agent the opposite of the truth about which side is stale.
-      expect(res.caveats).toEqual([callerSkewCaveat(declared)])
+      // Filtered to skew — an imported document now also reports how it is taxed.
+      expect(skew(res.caveats)).toEqual([callerSkewCaveat(declared)])
     },
   )
 
@@ -323,7 +330,7 @@ describe('build_plan provenance skew (sibling labels warn, never refuse)', () =>
       mcpVersion: exported.mcpVersion,
     })
     expect(res.ok).toBe(true)
-    expect(res.caveats).toEqual([])
+    expect(skew(res.caveats)).toEqual([])
   })
 
   it('accepts null provenance siblings (unresolvable versions still round-trip)', () => {
@@ -386,7 +393,7 @@ describe('build_plan engineVersion skew (the skew that can really happen)', () =
     })
     expect(res.ok).toBe(true)
     expect(res.issues).toBeUndefined()
-    expect(res.caveats).toEqual([
+    expect(skew(res.caveats)).toEqual([
       'engineVersion skew: the supplied plan document was exported under @retiregolden/engine 0.1.3 ' +
         `but this build runs ${installed}; the document was imported unchanged, but engine defaults ` +
         'and modeling semantics can differ between versions — re-run the projection here rather than ' +
@@ -434,8 +441,8 @@ describe('build_plan engineVersion skew (the skew that can really happen)', () =
     })
     const absent = buildPlanFromParams({ plan: currentDocument(), startYear: 2026 })
     expect(matching.ok).toBe(true)
-    expect(matching.caveats).toEqual([])
-    expect(absent.caveats).toEqual([])
+    expect(skew(matching.caveats)).toEqual([])
+    expect(skew(absent.caveats)).toEqual([])
   })
 
   it('reports schemaVersion and engineVersion skew independently', () => {
@@ -446,9 +453,41 @@ describe('build_plan engineVersion skew (the skew that can really happen)', () =
       engineVersion: '0.1.3',
     })
     expect(res.ok).toBe(true)
-    expect(res.caveats).toHaveLength(2)
-    expect(res.caveats[0]).toMatch(/^schemaVersion skew:/)
-    expect(res.caveats[1]).toMatch(/^engineVersion skew:/)
+    const skews = skew(res.caveats)
+    expect(skews).toHaveLength(2)
+    expect(skews[0]).toMatch(/^schemaVersion skew:/)
+    expect(skews[1]).toMatch(/^engineVersion skew:/)
+  })
+
+  // A document is where `stateEffectiveTaxPct: 0` is most likely to be sitting: it
+  // is the app's own serialization, it is what the pre-0.5.0 docs taught, and it is
+  // what an LLM authoring a plan from those docs would write. Through 0.5.0's first
+  // cut this path said nothing at all about state tax — the typed path warned and
+  // the document path, the one that most needs it, stayed silent.
+  it('tells an imported document how it is taxed', () => {
+    const res = buildPlanFromParams({ plan: currentDocument(), startYear: 2026 })
+    expect(res.ok).toBe(true)
+    const stateCaveat = res.caveats.find((c) => c.includes('stateEffectiveTaxPct'))
+    expect(stateCaveat).toContain(`state=${res.plan!.household.state}`)
+    expect(stateCaveat).toContain('income tax applies')
+  })
+
+  it('does not accuse a document of pinning a 0 it may never have written', () => {
+    // parsePlan defaults stateEffectiveTaxPct to 0, so a stored 0 is
+    // indistinguishable from an omitted one. The accusatory "you set 0" wording
+    // belongs to the typed path, where the caller's intent is actually observable.
+    const res = buildPlanFromParams({ plan: currentDocument(), startYear: 2026 })
+    expect(res.plan!.assumptions.stateEffectiveTaxPct).toBe(0)
+    expect(res.caveats.some((c) => c.includes('does NOT disable'))).toBe(false)
+  })
+
+  it('stays silent about state tax when the document carries a real override', () => {
+    const doc = currentDocument()
+    ;(doc.assumptions as Record<string, unknown>).stateEffectiveTaxPct = 7
+    const res = buildPlanFromParams({ plan: doc, startYear: 2026 })
+    expect(res.ok).toBe(true)
+    expect(res.plan!.assumptions.stateEffectiveTaxPct).toBe(7)
+    expect(res.caveats.some((c) => c.includes('stateEffectiveTaxPct'))).toBe(false)
   })
 })
 
