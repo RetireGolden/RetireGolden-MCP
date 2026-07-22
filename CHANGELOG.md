@@ -3,6 +3,63 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.6.0
+
+**Adds an optional authorization hook to `registerTools`, so a host can gate tool
+calls without forking the tool table.** Pass `{ authorize }` as a third argument;
+it is consulted before each handler and may allow, or refuse with the exact
+payload the model should see. Omit it and behavior is unchanged — `registerTools`
+runs the same two statements it always did, with no extra await, and
+`tests/registerTools.test.ts` asserts identical tool inventories, identical
+descriptors, and identical results across the with-callback and without-callback
+paths. That baseline did not exist before this release; `registerTools` had no
+test at all.
+
+The callback receives the tool name and its table entry, and deliberately **not**
+the call arguments. `build_plan` and `update_plan` accept whole plan documents,
+so passing arguments would route a user's financial data into a host's policy
+layer — and a host that logged its authorization decisions would be logging plan
+contents by accident. Withholding them makes that a property of the signature
+rather than a rule each caller has to remember. The trade: a callback cannot make
+argument-dependent decisions, which belong in the caller's own handler.
+
+A refusal returns a result, never a throw. The MCP SDK converts a thrown handler
+into an opaque `isError` result that flattens to a message string, discarding any
+structured code or remedy.
+
+One behavior worth knowing: the SDK validates a call's argument shape *before*
+invoking the handler, so a tool with required arguments called with none is
+rejected by the SDK and never reaches the hook. No handler runs and nothing is
+exposed, but a denied caller sending malformed arguments sees a validation error
+rather than the policy refusal.
+
+`ToolEntry` gains `dataScope: 'none' | 'session'`. Only `describe_plan_schema` is
+`'none'` — it is a pure function of the package's own static data. This is the
+only data distinction this package can honestly own; it has no library, no GUI
+and no user account, so richer classes belong to the host that has them.
+
+### Security
+
+**The HTTP gateway is fenced.** It is an unauthenticated loopback listener that
+accepts a client-supplied `x-session-id` and speaks a bespoke `/tool` protocol —
+a cost/ops research surface, never a supported transport. It previously read
+`RETIREGOLDEN_HTTP_HOST` straight into `server.listen`, so an environment
+variable could bind it to a non-loopback interface. Now:
+
+- it binds a literal loopback address only (`127.0.0.1`, `::1`), enforced on the
+  resolved host so neither the environment variable nor the `opts.host` argument
+  can push it off — the argument was a second, equally open channel. `localhost`
+  is rejected too: it resolves through the hosts file and DNS, so it cannot
+  guarantee what it names;
+- it does not start at all unless `RETIREGOLDEN_HTTP_GATEWAY=1` is set, which
+  also covers the `retiregolden-mcp http` / `azure` CLI subcommand; and
+- `src/index.ts` records that omitting `startHttpGateway` from the public exports
+  is deliberate, since it previously read as an oversight.
+
+`PORT` / `FUNCTIONS_CUSTOMHANDLER_PORT` no longer select a default port implicitly,
+and `docs/hosted-transport.md` no longer tells container users to bind `0.0.0.0` —
+instructions that this release makes non-functional.
+
 ## 0.5.1
 
 **Re-pinned to `@retiregolden/engine` 0.1.5, so a plan copied out of the RetireGolden
