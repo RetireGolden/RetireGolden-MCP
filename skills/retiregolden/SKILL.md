@@ -43,7 +43,7 @@ Household/policy rates are **fractions** (`0.05` = 5%); passing `5` where `0.05`
 As of **v0.3.0** the typed `household`/`policy` path defaults to **end-user-appropriate, real-world modeling** — no more baked-in RetireBench conventions. With no `assumptions` block the ENGINE's own defaults flow through:
 
 - **~2.5%/yr inflation** (was 0%), **SS COLA tracking inflation** (was fixed 0%), **+3%/yr healthcare inflation above general**, **5.5% fallback return** (for accounts without an explicit rate).
-- **0% state & local income tax** — the engine models these at 0 until you set `stateEffectiveTaxPct` / `localIncomeTaxPct`. **Naming a state does not by itself switch on that state's income tax.**
+- **The resident state's real modeled income tax.** Every US jurisdiction has a modeled pack, and `household.state` is what selects it — naming the state *is* how state tax gets switched on. **`stateEffectiveTaxPct` is an override, not a switch: it applies only when set ABOVE 0.** Omitting it, or passing `0`, means "use the modeled pack" — **not** "no state income tax". Nine states levy none (AK, FL, NH, NV, SD, TN, TX, WA, WY); everywhere else, expect state tax in the answer. Local income tax stays 0 until you set `localIncomeTaxPct`.
 - Neutral, overridable placeholders: **June-15 birthdays**, `sex` **average**, `qualifiedRatio` **0.85**.
 
 Two things are now **required / hard errors**, not silent assumptions:
@@ -55,7 +55,7 @@ When to still pass an **`assumptions`** block: to model a specific inflation/ret
 
 `inflationPct`, `ssColaPct`, `defaultReturnPct`, `healthcareExtraInflationPct`, `stateEffectiveTaxPct`, `localIncomeTaxPct` — all **percents** (`2.5` = 2.5%) · `state` (2-letter override; omitted uses `household.state`) · `qualifiedRatio` (fraction 0–1) · `dobMonthDay` (`"MM-DD"`, e.g. `"06-15"`) · `sex` (`male` / `female` / `average`).
 
-> RetireBench replication: to reproduce the pre-0.3.0 growth-neutral numbers, pass every convention explicitly (`inflationPct: 0`, `ssColaPct: 0`, `state: "KY"`, `stateEffectiveTaxPct: 0`, etc.). The bench harness does exactly this and pins the package version.
+> RetireBench replication: as of **v0.5.0** the bench conventions no longer reproduce the older growth-neutral numbers. `stateEffectiveTaxPct: 0` used to mean "no state tax" and now selects **KY's modeled income tax** — and there is no knob that zeroes out a taxing state. The bench harness pins the package version, so historical numbers stay reproducible on the version that produced them; regenerate against 0.5.0 to compare on the current stack.
 
 See `references/examples.md` for a real-household MFJ call with overrides.
 

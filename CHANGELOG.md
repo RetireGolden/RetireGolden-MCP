@@ -3,6 +3,85 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.5.0
+
+**Projections now include state income tax, and therefore match the RetireGolden
+web app.** Through 0.4.2 every simulating tool ran a **federal-only** tax stack, so
+for a resident of any state that taxes income the MCP quietly answered a different
+question than the app the plan came from. On the RetireGolden example couple — a
+Kentucky household, start year 2026 — ending net worth came back **3,616,404**
+where the app shows **3,202,991**: the MCP overstated it by **~13%**.
+
+Minor rather than patch, because **the numbers move for almost everyone.** Nine
+states levy no income tax (AK, FL, NH, NV, SD, TN, TX, WA, WY); in the other 42
+jurisdictions every projection, Monte Carlo, batch objective, optimizer schedule
+and spending solve changes. Nothing about a stored plan document changes — no
+schema bump, no engine bump. Re-run anything you are still relying on.
+
+### Fixed
+
+- **`taxCalc()` now returns the app's combined stack** — `combineTaxCalculators(
+  createFederalTaxCalculator(), createStateTaxCalculator({ overridePct, localPct }))`,
+  configured from the plan's own assumptions, a literal match for the browser
+  planner's `taxCalculatorFor`. It fed **six** call sites, all now corrected:
+  `run_projection`, `run_monte_carlo`, `batch_evaluate`, `compare_plans`, the
+  optimizer and the spending solver. A fix reaching only the projection would have
+  left the rest answering the old question.
+- **`compare_plans` prices each document with its own state.** `taxCalc` takes a
+  plan rather than reading session state, so comparing a KY plan against an FL one
+  no longer taxes both at whichever state came first — previously invisible,
+  because neither side was being taxed by a state at all.
+
+### Changed — a knob that never meant what it said
+
+`stateEffectiveTaxPct` is an **override**, and the engine applies it only when it is
+**above 0**. At 0 — the parsed-plan default — the engine uses the **modeled pack for
+`household.state`**, and a pack ships for all 51 US jurisdictions. So the field never
+switched state tax *on*; naming the state does that. The MCP's docs said the
+opposite ("state income tax is modeled at 0% until you set `stateEffectiveTaxPct`"),
+which was an accurate description of the federal-only bug and a false description of
+the engine. Every statement of it is corrected: the `build_plan` caveat, the
+`household.state` / `assumptions.state` / `stateEffectiveTaxPct` field descriptions,
+the `assumptions` block description, `docs/clients.md`, `SKILL.md` and
+`references/examples.md`.
+
+Two consequences worth stating plainly:
+
+- **There is no longer any way to model a taxing state with zero state tax.**
+  `stateEffectiveTaxPct: 0` does not do it — that is the "use the modeled pack"
+  signal. To model a household with no state income tax, name a state that levies
+  none. `build_plan` and `update_plan` now emit a caveat whenever a caller pins 0
+  in a taxing state, because the pre-0.5.0 docs actively taught that spelling.
+- **The RetireBench replication recipe no longer reproduces its historical
+  numbers.** Its conventions include `state: "KY"` with `stateEffectiveTaxPct: 0`,
+  which was only ever growth-neutral because the state calculator was not being
+  consulted. The bench harness pins the package version, so those numbers stay
+  reproducible on the version that produced them.
+
+### Added
+
+- **`explain_modeled_result` reports `taxStack`.** It described assumptions and
+  caveats but never named the tax stack, so nothing in its output revealed that the
+  numbers were federal-only. It now states the stack and the app-parity claim, and
+  `limitations` gains the above-0 override rule.
+- **`run_projection`'s description states the app-parity claim**, so an assistant
+  handed a plan copied out of the app knows the numbers are comparable (given the
+  exported `startYear`).
+- **`tests/browserParity.test.ts`** — the test whose absence let this ship. Every
+  existing test compared the MCP against its own past output, which a wrong-but-
+  stable stack passes forever. This one reconstructs the app's calculator from the
+  engine and asserts the adapter agrees with **it**, across the whole summary and
+  the full per-year ledger, for a household in a modeled state — plus a direction
+  check that the result is strictly more taxed than a federal-only run, so it
+  cannot pass by transcription drift.
+
+### Goldens
+
+`tests/goldens.test.ts` is regenerated — the first refresh that was not an engine
+bump. Both fixtures live in KY, so both sets moved, including the legacy
+bench-convention set. The header explains why that is not the blocking regression
+it would normally signal.
+
 ## 0.4.2
 
 **An exported plan document now says which build wrote it, and a re-import warns

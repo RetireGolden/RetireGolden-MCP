@@ -160,7 +160,7 @@ describe('dobMonthDay calendar-aware validation', () => {
 })
 
 describe('assumption-interaction caveats (footguns)', () => {
-  it('warns when state is set but stateEffectiveTaxPct is not (tax still 0%)', () => {
+  it("reports that the named state's modeled income tax applies", () => {
     const res = buildPlanFromParams({
       household: singleHousehold,
       policy: singlePolicy,
@@ -168,17 +168,44 @@ describe('assumption-interaction caveats (footguns)', () => {
     })
     expect(res.ok).toBe(true)
     expect(res.plan!.household.state).toBe('CA')
+    // The stored override stays 0 — and 0 is exactly what the engine reads as "use
+    // CA's modeled pack", so the caveat must not call this a 0% state tax.
     expect(res.plan!.assumptions.stateEffectiveTaxPct).toBe(0)
-    expect(
-      res.caveats.some((c) => c.includes('state=CA') && c.includes('stateEffectiveTaxPct')),
-    ).toBe(true)
+    const caveat = res.caveats.find((c) => c.includes('stateEffectiveTaxPct'))
+    expect(caveat).toContain('state=CA')
+    expect(caveat).toContain('modeled CA income tax applies')
+    expect(caveat).not.toContain('modeled at 0%')
   })
 
-  it('does not warn about state tax when stateEffectiveTaxPct is provided', () => {
+  it('warns that stateEffectiveTaxPct=0 does NOT disable state income tax', () => {
+    // Every pre-0.5.0 doc taught callers to write exactly this to mean "no state
+    // tax". It does not: 0 is below the override threshold, so CA's modeled pack
+    // still applies. Silence here would be the old bug in a caller's clothes.
+    const res = buildPlanFromParams({
+      household: singleHousehold,
+      policy: singlePolicy,
+      assumptions: { state: 'CA', stateEffectiveTaxPct: 0 },
+    })
+    expect(res.ok).toBe(true)
+    const caveat = res.caveats.find((c) => c.includes('stateEffectiveTaxPct'))
+    expect(caveat).toContain('does NOT disable state income tax')
+  })
+
+  it('says nothing about state tax once a real override is provided', () => {
     const res = buildPlanFromParams({
       household: singleHousehold,
       policy: singlePolicy,
       assumptions: { state: 'CA', stateEffectiveTaxPct: 6 },
+    })
+    expect(res.ok).toBe(true)
+    expect(res.caveats.some((c) => c.includes('stateEffectiveTaxPct'))).toBe(false)
+  })
+
+  it('says nothing about state tax in a state that levies none', () => {
+    const res = buildPlanFromParams({
+      household: singleHousehold,
+      policy: singlePolicy,
+      assumptions: { state: 'FL' },
     })
     expect(res.ok).toBe(true)
     expect(res.caveats.some((c) => c.includes('stateEffectiveTaxPct'))).toBe(false)

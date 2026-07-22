@@ -137,7 +137,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         })
         .optional(),
       assumptions: AssumptionsSchema.optional().describe(
-        "Optional overrides for default modeling assumptions (inflation, returns, SS COLA, state, taxes, qualified ratio, dob month-day, sex). Defaults now follow the engine (~2.5% inflation, SS COLA tracking inflation, 0% state/local tax); household state is a REQUIRED input, not an assumption. Set explicit values to override; omitted fields keep the engine defaults.",
+        "Optional overrides for default modeling assumptions (inflation, returns, SS COLA, state, taxes, qualified ratio, dob month-day, sex). Defaults follow the engine (~2.5% inflation, SS COLA tracking inflation, and the resident state's own modeled income tax — set stateEffectiveTaxPct above 0 only to override that with a flat rate); household state is a REQUIRED input, not an assumption. Set explicit values to override; omitted fields keep the engine defaults.",
       ),
     },
     handler: (session, args) => adapter.setPlanFromBuild(session, args as unknown as BuildPlanInput),
@@ -177,7 +177,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'run_projection',
-    description: `${EDUCATIONAL} Run a deterministic projection on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). detail='summary' (default) returns startYear/endYear/summary/caveats only; detail='years' also returns the full per-year ledger.`,
+    description: `${EDUCATIONAL} Run a deterministic projection on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). detail='summary' (default) returns startYear/endYear/summary/caveats only; detail='years' also returns the full per-year ledger. Taxes are federal PLUS the resident state's modeled income tax — the same stack the RetireGolden web app runs — so for a plan exported from that app these numbers match what the user sees on screen, provided you also pass the exported startYear.`,
     inputShape: {
       detail: z
         .enum(['summary', 'years'])

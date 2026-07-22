@@ -8,7 +8,7 @@ Every rate below is a **fraction** (`0.05` = 5%). `pia` is **monthly** dollars a
 
 ## 1. Single filer (engine defaults)
 
-No `assumptions` block → the engine's real-world defaults (~2.5% inflation, SS COLA tracking inflation, +3% healthcare inflation, 0% state/local tax, June-15 dob, `qualifiedRatio` 0.85). `state` is **required**. Add an `assumptions` block to model a specific inflation/return/COLA regime or a real state income-tax rate.
+No `assumptions` block → the engine's real-world defaults (~2.5% inflation, SS COLA tracking inflation, +3% healthcare inflation, June-15 dob, `qualifiedRatio` 0.85), plus the modeled income tax of whatever `state` you name — `state` is **required** and is what selects it. Add an `assumptions` block to model a specific inflation/return/COLA regime, or to override the state's modeled tax with a flat effective rate (`stateEffectiveTaxPct` above 0).
 
 ```json
 {
@@ -40,7 +40,7 @@ No `assumptions` block → the engine's real-world defaults (~2.5% inflation, SS
 
 ## 2. MFJ with pension + explicit assumptions overrides
 
-A real couple in Ohio. The `assumptions` block pins a specific inflation/COLA/return regime and the real Ohio state + local income-tax rates (the engine models state tax at 0% until you set `stateEffectiveTaxPct`) — **state these assumptions in your answer**.
+A real couple in Ohio. The `assumptions` block pins a specific inflation/COLA/return regime and replaces Ohio's modeled income tax with a flat effective rate. Note what each field does here: `state: "OH"` alone would already apply Ohio's modeled brackets; `stateEffectiveTaxPct: 3.5` **overrides** them with a flat 3.5% (an override only takes effect above 0), and `localIncomeTaxPct: 2` adds a local rate the packs do not model. **State these assumptions in your answer.**
 
 ```json
 {

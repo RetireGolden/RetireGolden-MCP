@@ -8,6 +8,7 @@ import type { Plan } from '@retiregolden/engine'
 import { createEmptyPlan, parsePlan } from '@retiregolden/engine/model/plan'
 import { migratePlanToCurrent } from '@retiregolden/engine/model/migrations'
 import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema'
+import { stateParamsFor } from '@retiregolden/engine/params/state'
 import { getVersions } from './versions.js'
 import type { ConventionKnobs } from './session.js'
 
@@ -41,7 +42,7 @@ export const HouseholdParamsSchema = z.object({
     .string()
     .optional()
     .describe(
-      '2-letter state-of-residence code — REQUIRED on the typed path (omitting or malforming it fails the build when no full `plan` is supplied), e.g. "CA". The engine requires a residence state — there is no hardcoded default. `assumptions.state` can override the value used. NOTE: naming a state does NOT by itself model that state\'s income tax; set `assumptions.stateEffectiveTaxPct` for that.',
+      '2-letter state-of-residence code — REQUIRED on the typed path (omitting or malforming it fails the build when no full `plan` is supplied), e.g. "CA". The engine requires a residence state — there is no hardcoded default. `assumptions.state` can override the value used. This state\'s modeled income tax IS applied: every US jurisdiction has a pack, so naming a state is what selects its tax rules. Set `assumptions.stateEffectiveTaxPct` above 0 only to override them with a flat effective rate.',
     ),
   persons: z.array(PersonParamsSchema).min(1).describe('One entry per household member'),
   taxable: z.number().min(0).describe('Taxable brokerage balance in dollars'),
@@ -130,11 +131,13 @@ export const AssumptionsSchema = z
       .string()
       .nullable()
       .optional()
-      .describe('2-letter state-of-residence OVERRIDE (e.g. "CA"); when omitted or null, the required household.state is used. NOTE: setting state alone does NOT model that state\'s income tax — state tax stays 0% unless you also set stateEffectiveTaxPct'),
+      .describe('2-letter state-of-residence OVERRIDE (e.g. "CA"); when omitted or null, the required household.state is used. This selects which state\'s modeled income tax applies — that is how state tax is switched on, not stateEffectiveTaxPct'),
     stateEffectiveTaxPct: z
       .number()
       .optional()
-      .describe('Flat effective state income tax rate, in percent'),
+      .describe(
+        'Flat effective state income tax rate, in percent — an OVERRIDE of the state\'s modeled tax rules, applied only when ABOVE 0. Omitting it (or passing 0) does NOT mean "no state income tax": the engine then applies the modeled pack for household.state. There is no knob that zeroes out a taxing state; pick a state that levies no income tax (AK, FL, NH, NV, SD, TN, TX, WA, WY) instead.',
+      ),
     localIncomeTaxPct: z
       .number()
       .optional()
@@ -334,6 +337,44 @@ function explainSchemaRefusal(declared: number, reason: string): string {
   return `plan-schema skew: the supplied document declares plan-schema v${declared} but this build validates v${PLAN_SCHEMA_VERSION} — ${direction}. (Engine migratePlanToCurrent: ${reason}.)`
 }
 
+/**
+ * What to tell the caller about state income tax for `state`, or null when there
+ * is nothing surprising to say.
+ *
+ * Through 0.4.2 the MCP told everyone that state tax "is modeled at 0% until you
+ * set stateEffectiveTaxPct". That was true of the federal-only stack it then ran,
+ * and false of the engine, which ships a modeled pack for all 51 jurisdictions.
+ * 0.5.0 adopted the app's combined stack, so the real rule is the engine's:
+ * `createStateTaxCalculator` applies a flat override only when it is ABOVE zero,
+ * and otherwise applies the state's modeled pack.
+ *
+ * So the surprising case is now the reverse of the old one — and it is precisely
+ * what the old docs taught callers to write: `stateEffectiveTaxPct: 0` does NOT
+ * mean "no state income tax". A state that levies none (AK, FL, NV, …) gets no
+ * caveat; there is nothing counterintuitive to report.
+ *
+ * Shared by buildPlan and update_plan's set_assumption path so the two can neither
+ * drift apart nor emit near-duplicate wordings of the same fact.
+ */
+export function stateTaxCaveat(
+  state: string,
+  year: number,
+  overridePct: number | null | undefined,
+): string | null {
+  const pack = stateParamsFor(state, year)
+  if (pack == null) {
+    return `state=${state}: no modeled state tax pack, so state income tax is 0 for this plan; set stateEffectiveTaxPct to model it with a flat effective rate`
+  }
+  if (!pack.hasIncomeTax) return null
+  if (overridePct == null) {
+    return `state=${state}: no stateEffectiveTaxPct given, so the engine's modeled ${state} income tax applies — the same stack the RetireGolden app runs. Pass a stateEffectiveTaxPct above 0 to override it with a flat effective rate.`
+  }
+  if (overridePct === 0) {
+    return `state=${state}: stateEffectiveTaxPct=0 does NOT disable state income tax — the engine reads 0 as "use the modeled ${state} pack", and only a value above 0 overrides it. This plan is taxed at ${state}'s modeled rates.`
+  }
+  return null
+}
+
 export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   const caveats: string[] = []
   const startYear = input.startYear ?? 2026
@@ -519,16 +560,8 @@ function buildTypedPlan(
   // the household's own state.
   const effectiveState = (asmpt?.state ?? hh.state)!
   plan.household.state = effectiveState
-  // Footgun: naming a state does NOT switch on that state's income tax. Unless the
-  // caller sets a flat stateEffectiveTaxPct, state tax stays modeled at 0%. This now
-  // fires for the primary happy path too (household.state is always present on the
-  // typed path), not just the assumptions.state override, unless the caller has
-  // explicitly set stateEffectiveTaxPct (even to 0, an acknowledged 0% state tax).
-  if (asmpt?.stateEffectiveTaxPct == null) {
-    caveats.push(
-      `state=${effectiveState} set but stateEffectiveTaxPct is not — state income tax is modeled at 0%; set stateEffectiveTaxPct to model it`,
-    )
-  }
+  const stateCaveat = stateTaxCaveat(effectiveState, startYear, asmpt?.stateEffectiveTaxPct)
+  if (stateCaveat) caveats.push(stateCaveat)
 
   const dobMonthDay = asmpt?.dobMonthDay ?? '06-15'
   const sex = asmpt?.sex ?? 'average'

@@ -329,18 +329,38 @@ describe('update_plan', () => {
     }
   })
 
-  it('prunes a superseded state-tax caveat when stateEffectiveTaxPct is set', () => {
-    // The typed build records a caveat that state income tax is modeled at 0%
-    // because stateEffectiveTaxPct was not supplied (singleHousehold names KY).
+  it('prunes the state-tax caveat when stateEffectiveTaxPct is set ABOVE zero', () => {
+    // The typed build records that KY's modeled income tax applies, because no
+    // override was supplied (singleHousehold names KY).
     const session = seededSession()
-    expect(session.caveats.some((c) => c.includes('stateEffectiveTaxPct is not'))).toBe(true)
+    expect(session.caveats.some((c) => c.includes('modeled KY income tax applies'))).toBe(true)
     const res = adapter.updatePlan(session, [
       { op: 'set_assumption', field: 'stateEffectiveTaxPct', value: 5 },
     ])
     expect(res.ok).toBe(true)
-    // The now-false "modeled at 0%" caveat is dropped.
-    expect(session.caveats.some((c) => c.includes('stateEffectiveTaxPct is not'))).toBe(false)
+    // 5% genuinely overrides the pack, so the caveat is now false and is dropped.
+    expect(session.caveats.some((c) => c.includes('stateEffectiveTaxPct'))).toBe(false)
     expect(session.plan!.assumptions.stateEffectiveTaxPct).toBe(5)
+  })
+
+  it('does not prune — but restates — the state-tax caveat when it is set to zero', () => {
+    // Setting 0 is the one set_assumption that changes NOTHING about how the plan
+    // is taxed: the engine reads 0 as "use the modeled pack". Pruning here would
+    // silently hand back a plan taxed at KY's rates with nothing left saying so —
+    // the precise failure that made the federal-only bug invisible for so long.
+    const session = seededSession()
+    const res = adapter.updatePlan(session, [
+      { op: 'set_assumption', field: 'stateEffectiveTaxPct', value: 0 },
+    ])
+    expect(res.ok).toBe(true)
+    expect(session.plan!.assumptions.stateEffectiveTaxPct).toBe(0)
+    const caveat = session.caveats.find((c) => c.includes('stateEffectiveTaxPct'))
+    expect(caveat).toContain('does NOT disable state income tax')
+    // Exactly one state-tax caveat survives: the build-time one is replaced, not
+    // supplemented, so repeated calls cannot pile up near-duplicate wordings.
+    expect(session.caveats.filter((c) => c.includes('stateEffectiveTaxPct'))).toHaveLength(1)
+    adapter.updatePlan(session, [{ op: 'set_assumption', field: 'stateEffectiveTaxPct', value: 0 }])
+    expect(session.caveats.filter((c) => c.includes('stateEffectiveTaxPct'))).toHaveLength(1)
   })
 
   it('drops the transient stale-projection caveat once a projection is re-run', () => {
