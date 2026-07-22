@@ -19,7 +19,7 @@ import { getTool, validateToolArgs } from '../toolTable.js'
  * in are this module directly and the CLI subcommand — both now opt-in.
  *
  * Two rules hold regardless of environment or arguments:
- *  - it binds loopback only, and
+ *  - it binds a literal loopback address only, and
  *  - it does not start unless RETIREGOLDEN_HTTP_GATEWAY=1 is set.
  *
  * The host clamp is enforced against `opts.host` and not just the environment,
@@ -27,7 +27,13 @@ import { getTool, validateToolArgs } from '../toolTable.js'
  */
 export const HTTP_GATEWAY_OPT_IN_ENV = 'RETIREGOLDEN_HTTP_GATEWAY'
 
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost'])
+/**
+ * Literal loopback addresses only. `localhost` is deliberately NOT accepted:
+ * it resolves through the hosts file and DNS, so a machine that maps it to a
+ * routable address would bind there and defeat the rule this list exists to
+ * enforce. Callers pass an address, not a name.
+ */
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1'])
 
 function assertLoopback(host: string): string {
   if (!LOOPBACK_HOSTS.has(host)) {

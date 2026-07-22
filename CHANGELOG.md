@@ -46,15 +46,19 @@ a cost/ops research surface, never a supported transport. It previously read
 `RETIREGOLDEN_HTTP_HOST` straight into `server.listen`, so an environment
 variable could bind it to a non-loopback interface. Now:
 
-- it binds loopback only (`127.0.0.1`, `::1`, `localhost`), enforced on the
+- it binds a literal loopback address only (`127.0.0.1`, `::1`), enforced on the
   resolved host so neither the environment variable nor the `opts.host` argument
-  can push it off — the argument was a second, equally open channel;
+  can push it off — the argument was a second, equally open channel. `localhost`
+  is rejected too: it resolves through the hosts file and DNS, so it cannot
+  guarantee what it names;
 - it does not start at all unless `RETIREGOLDEN_HTTP_GATEWAY=1` is set, which
   also covers the `retiregolden-mcp http` / `azure` CLI subcommand; and
 - `src/index.ts` records that omitting `startHttpGateway` from the public exports
   is deliberate, since it previously read as an oversight.
 
-`PORT` / `FUNCTIONS_CUSTOMHANDLER_PORT` no longer select a default port implicitly.
+`PORT` / `FUNCTIONS_CUSTOMHANDLER_PORT` no longer select a default port implicitly,
+and `docs/hosted-transport.md` no longer tells container users to bind `0.0.0.0` —
+instructions that this release makes non-functional.
 
 ## 0.5.1
 

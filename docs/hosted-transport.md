@@ -3,7 +3,12 @@
 Official RetireBench scored runs use **ephemeral stdio** (`npx @retiregolden/mcp` /
 `retiregolden-mcp`) with pinned package versions.
 
-This package also exposes an experimental **HTTP stub** (`retiregolden-mcp http`).
+This package also exposes an experimental **HTTP stub**, started with
+`RETIREGOLDEN_HTTP_GATEWAY=1 retiregolden-mcp http`. The opt-in is required: the
+stub is unauthenticated and accepts a client-supplied session id, so it must not
+be one typo away from the default invocation. Without the variable the command
+exits with an explanation instead of listening.
+
 It is a cost/ops experiment — wrap it in an Azure Function (or Container App) only
 after proving bit-identical tool results vs stdio for a fixture matrix.
 
@@ -43,8 +48,18 @@ registry-parity test holds equal to `TOOL_TABLE`.
 
 ## Binding
 
-The server binds `127.0.0.1` by default. Set `RETIREGOLDEN_HTTP_HOST` (e.g. `0.0.0.0`)
-to expose it beyond localhost — do this only behind auth / a private VNet.
+The server binds `127.0.0.1`, and **only** a literal loopback address
+(`127.0.0.1` or `::1`). `RETIREGOLDEN_HTTP_HOST` is no longer read, and passing a
+non-loopback `host` programmatically is rejected before `listen`. `localhost` is
+not accepted either — it resolves through the hosts file and DNS, so it is not a
+reliable way to say "loopback".
+
+**This removes the previous Azure/Container App instruction to set
+`RETIREGOLDEN_HTTP_HOST=0.0.0.0`.** An unauthenticated listener on a routable
+interface is not something this package will help you do. To expose the stub in a
+container, publish it through a reverse proxy or sidecar that terminates auth and
+forwards to loopback — the authentication has to live somewhere, and it is not in
+here.
 
 ## Cost comparison checklist
 

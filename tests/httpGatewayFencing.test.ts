@@ -30,7 +30,9 @@ describe('HTTP gateway fencing', () => {
   it('refuses a non-loopback host even when opted in', async () => {
     process.env[OPT_IN] = '1'
     const { startHttpGateway } = await import('../src/http/gateway.js')
-    for (const host of ['0.0.0.0', '::', '192.168.1.10']) {
+    // 'localhost' is refused deliberately: it resolves through the hosts file
+    // and DNS, so a machine that maps it elsewhere would bind non-loopback.
+    for (const host of ['0.0.0.0', '::', '192.168.1.10', 'localhost']) {
       await expect(startHttpGateway({ port: 0, host })).rejects.toThrow(/loopback only/i)
     }
   })
