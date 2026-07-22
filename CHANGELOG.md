@@ -60,6 +60,17 @@ Two consequences worth stating plainly:
 
 ### Added
 
+- **Imported plan documents get the state-tax caveat too**, not just typed builds.
+  A document is where `stateEffectiveTaxPct: 0` is most likely to sit — it is the
+  app's own serialization, and it is what an LLM authoring a plan from the old docs
+  would write — so the document path is the one that most needs the warning. It
+  reports which state's rules are in force, but never the accusatory "you pinned 0"
+  wording: `parsePlan` defaults the field to 0, so a stored 0 cannot be told apart
+  from an omitted one.
+- **`stateEffectiveTaxPct` and `localIncomeTaxPct` reject negative values.** The
+  engine clamps a negative to 0, which then means "use the modeled pack" — so a
+  deliberate-looking input would quietly model something else. Neither arm of the
+  rule gives a negative any meaning, so it is refused at the boundary.
 - **`explain_modeled_result` reports `taxStack`.** It described assumptions and
   caveats but never named the tax stack, so nothing in its output revealed that the
   numbers were federal-only. It now states the stack and the app-parity claim, and

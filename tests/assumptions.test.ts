@@ -211,6 +211,29 @@ describe('assumption-interaction caveats (footguns)', () => {
     expect(res.caveats.some((c) => c.includes('stateEffectiveTaxPct'))).toBe(false)
   })
 
+  it('rejects a negative state or local rate rather than silently clamping it', () => {
+    // The engine clamps a negative override to 0, which then means "use the modeled
+    // pack" — so a deliberate-looking input would quietly model something else.
+    // Neither arm of the rule ("0 = modeled", "above 0 = override") gives a negative
+    // any meaning, so it is refused at the boundary instead.
+    expect(AssumptionsSchema.safeParse({ stateEffectiveTaxPct: -1 }).success).toBe(false)
+    expect(AssumptionsSchema.safeParse({ localIncomeTaxPct: -1 }).success).toBe(false)
+    expect(AssumptionsSchema.safeParse({ stateEffectiveTaxPct: 0 }).success).toBe(true)
+  })
+
+  it('does not tell an unmodeled state that its tax is 0 when an override is in force', () => {
+    // A flat override above 0 applies whether or not a pack exists — the engine
+    // returns on it before looking the state up. Telling such a caller their state
+    // tax is 0 and to set the override they already set contradicts the result.
+    const res = buildPlanFromParams({
+      household: { ...singleHousehold, state: 'ZZ' },
+      policy: singlePolicy,
+      assumptions: { stateEffectiveTaxPct: 4 },
+    })
+    expect(res.ok).toBe(true)
+    expect(res.caveats.some((c) => c.includes('no modeled state tax pack'))).toBe(false)
+  })
+
   it('warns that sex/dobMonthDay apply to every person in a multi-person household', () => {
     const res = buildPlanFromParams({
       household: mfjHousehold, // two persons

@@ -177,7 +177,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'run_projection',
-    description: `${EDUCATIONAL} Run a deterministic projection on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). detail='summary' (default) returns startYear/endYear/summary/caveats only; detail='years' also returns the full per-year ledger. Taxes are federal PLUS the resident state's modeled income tax — the same stack the RetireGolden web app runs — so for a plan exported from that app these numbers match what the user sees on screen, provided you also pass the exported startYear.`,
+    description: `${EDUCATIONAL} Run a deterministic projection on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). detail='summary' (default) returns startYear/endYear/summary/caveats only; detail='years' also returns the full per-year ledger. Taxes are federal PLUS state and local: the resident state's modeled income tax unless assumptions.stateEffectiveTaxPct overrides it with a flat rate above 0, plus any localIncomeTaxPct. This is the same stack the RetireGolden web app runs, so for a plan exported from that app these numbers match what the user sees on screen, provided you also pass the exported startYear.`,
     inputShape: {
       detail: z
         .enum(['summary', 'years'])
