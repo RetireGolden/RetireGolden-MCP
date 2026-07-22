@@ -33,10 +33,14 @@ async function connect(authorize?: AuthorizeTool) {
   }
 }
 
-function payload(result: { content: unknown }): unknown {
-  const text = (result.content as { type: string; text: string }[]).find(
-    (c) => c.type === 'text',
-  )?.text
+/**
+ * `callTool` is typed as a union that still includes the deprecated
+ * `{ toolResult }` shape, so a parameter typed `{ content: unknown }` does not
+ * accept it. Take `unknown` and narrow here.
+ */
+function payload(result: unknown): unknown {
+  const content = (result as { content?: { type: string; text: string }[] }).content
+  const text = content?.find((c) => c.type === 'text')?.text
   expect(text, 'tool returned no text content').toBeTruthy()
   return JSON.parse(text as string)
 }
