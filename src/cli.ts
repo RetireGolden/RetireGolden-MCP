@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 /**
- * CLI entry: stdio MCP by default; `http` subcommand reserved for hosted transport.
+ * CLI entry: stdio MCP by default.
+ *
+ * The `http`/`azure` subcommand starts a fenced research transport and is off
+ * unless RETIREGOLDEN_HTTP_GATEWAY=1 — see src/http/gateway.ts for why. Without
+ * the opt-in a typo like `retiregolden-mcp htp` falling through to `http` used
+ * to open an unauthenticated listener.
  */
 
 import { startStdioServer } from './server.js'

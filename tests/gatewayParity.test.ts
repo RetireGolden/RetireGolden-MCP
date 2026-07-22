@@ -24,6 +24,9 @@ function post(tool: string): Promise<Response> {
 
 describe('gateway exposure parity', () => {
   beforeAll(async () => {
+    // The gateway is a fenced research surface and refuses to start without an
+    // explicit opt-in; these suites are exercising it deliberately.
+    process.env.RETIREGOLDEN_HTTP_GATEWAY = '1'
     const { startHttpGateway } = await import('../src/http/gateway.js')
     server = await startHttpGateway({ port: 0, host: '127.0.0.1' })
     const addr = server.address() as AddressInfo

@@ -10,8 +10,46 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createSession, type SessionState } from '../session.js'
 import { getTool, validateToolArgs } from '../toolTable.js'
 
-const DEFAULT_PORT = Number(process.env.PORT ?? process.env.FUNCTIONS_CUSTOMHANDLER_PORT ?? 8787)
-const DEFAULT_HOST = process.env.RETIREGOLDEN_HTTP_HOST ?? '127.0.0.1'
+/**
+ * FENCED SURFACE. This gateway is a RetireBench cost/ops research transport,
+ * not a supported product API: it is unauthenticated, it accepts a
+ * client-supplied session id, and it speaks a bespoke /tool protocol rather
+ * than Streamable HTTP. It is not exported from the package index and cannot be
+ * imported by subpath (the `exports` map has no entry for it), so the only ways
+ * in are this module directly and the CLI subcommand — both now opt-in.
+ *
+ * Two rules hold regardless of environment or arguments:
+ *  - it binds loopback only, and
+ *  - it does not start unless RETIREGOLDEN_HTTP_GATEWAY=1 is set.
+ *
+ * The host clamp is enforced against `opts.host` and not just the environment,
+ * because opts is a second, equally open channel into `server.listen`.
+ */
+export const HTTP_GATEWAY_OPT_IN_ENV = 'RETIREGOLDEN_HTTP_GATEWAY'
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost'])
+
+function assertLoopback(host: string): string {
+  if (!LOOPBACK_HOSTS.has(host)) {
+    throw new Error(
+      `RetireGolden HTTP gateway refuses to bind ${host}: loopback only ` +
+        `(${[...LOOPBACK_HOSTS].join(', ')}).`,
+    )
+  }
+  return host
+}
+
+function assertOptedIn(): void {
+  if (process.env[HTTP_GATEWAY_OPT_IN_ENV] !== '1') {
+    throw new Error(
+      'RetireGolden HTTP gateway is a research surface and is off by default. ' +
+        `Set ${HTTP_GATEWAY_OPT_IN_ENV}=1 to start it.`,
+    )
+  }
+}
+
+const DEFAULT_PORT = 8787
+const DEFAULT_HOST = '127.0.0.1'
 
 const MAX_BODY_BYTES = 1024 * 1024
 const MAX_SESSIONS = 100
@@ -88,8 +126,9 @@ function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | n
 export async function startHttpGateway(
   opts: { port?: number; host?: string } = {},
 ): Promise<Server> {
+  assertOptedIn()
   const port = opts.port ?? DEFAULT_PORT
-  const host = opts.host ?? DEFAULT_HOST
+  const host = assertLoopback(opts.host ?? DEFAULT_HOST)
 
   const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json')

@@ -71,6 +71,18 @@ export const ARM_JSON_KEY: Record<ArmName, string> = {
   optimizer: 'optimizer_arm',
 }
 
+/**
+ * Whether a tool can reach anything the caller put in the session.
+ *
+ * `'none'` means the handler is a pure function of the package's own static
+ * data and ignores session state entirely, so it stays answerable under any
+ * host policy. Everything else is `'session'`. This is the only data
+ * distinction this package can honestly own: it has no library, no GUI, and no
+ * user account, so richer classes (plan access, library access, writes) belong
+ * to the host that has them.
+ */
+export type ToolDataScope = 'none' | 'session'
+
 export interface ToolEntry {
   name: string
   description: string
@@ -80,6 +92,8 @@ export interface ToolEntry {
   handler: (session: SessionState, args: Record<string, unknown>) => unknown | Promise<unknown>
   /** Exposed over the HTTP gateway transport. */
   httpExposed: boolean
+  /** Whether the handler can read session state. See ToolDataScope. */
+  dataScope: ToolDataScope
   /** Arm memberships mirrored in the versioned tool contract. */
   arms: readonly ArmName[]
   /**
@@ -142,6 +156,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     },
     handler: (session, args) => adapter.setPlanFromBuild(session, args as unknown as BuildPlanInput),
     httpExposed: true,
+    dataScope: 'session',
     arms: ['calculator', 'optimizer'],
     crossFieldValidate: (args) => {
       if (args.plan == null && (args.household == null || args.policy == null)) {
@@ -173,6 +188,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       return adapter.validatePlanJson(target)
     },
     httpExposed: false,
+    dataScope: 'session',
     arms: [],
   },
   {
@@ -187,6 +203,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     handler: (session, args) =>
       adapter.runProjection(session, { detail: args.detail as 'summary' | 'years' | undefined }),
     httpExposed: true,
+    dataScope: 'session',
     arms: ['calculator', 'optimizer'],
   },
   {
@@ -199,6 +216,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     handler: (session, args) =>
       adapter.runMonteCarlo(session, args as { pathCount?: number; seed?: number }),
     httpExposed: false,
+    dataScope: 'session',
     arms: [],
   },
   {
@@ -220,6 +238,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
           'after_tax_estate',
       ),
     httpExposed: true,
+    dataScope: 'session',
     arms: ['calculator', 'optimizer'],
   },
   {
@@ -228,6 +247,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     inputShape: {},
     handler: (session) => adapter.runOptimizer(session),
     httpExposed: true,
+    dataScope: 'session',
     arms: ['optimizer'],
   },
   {
@@ -236,6 +256,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     inputShape: {},
     handler: (session) => adapter.solveMaxSpending(session),
     httpExposed: false,
+    dataScope: 'session',
     arms: ['optimizer'],
   },
   {
@@ -249,6 +270,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     handler: (session, args) =>
       adapter.compareScenarios(session, args.planA, args.planB, args.startYear as number | undefined),
     httpExposed: false,
+    dataScope: 'session',
     arms: [],
   },
   {
@@ -257,6 +279,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     inputShape: {},
     handler: (session) => adapter.explainModeledResult(session),
     httpExposed: true,
+    dataScope: 'session',
     arms: [],
   },
   {
@@ -276,6 +299,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       }
     },
     httpExposed: false,
+    dataScope: 'session',
     arms: [],
   },
   {
@@ -284,6 +308,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     inputShape: {},
     handler: (session) => adapter.exportPlan(session),
     httpExposed: false,
+    dataScope: 'session',
     arms: [],
   },
   {
@@ -299,6 +324,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     },
     handler: (_session, args) => adapter.describePlanSchema({ path: args.path as string | undefined }),
     httpExposed: false,
+    dataScope: 'none',
     arms: [],
   },
   {
@@ -312,6 +338,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     },
     handler: (session, args) => adapter.updatePlan(session, args.operations as adapter.UpdatePlanOp[]),
     httpExposed: false,
+    dataScope: 'session',
     arms: [],
   },
   {
@@ -323,6 +350,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       return { ok: true }
     },
     httpExposed: false,
+    dataScope: 'session',
     arms: [],
   },
 ]
