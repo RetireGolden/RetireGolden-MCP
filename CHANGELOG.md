@@ -3,6 +3,30 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.5.1
+
+**Re-pinned to `@retiregolden/engine` 0.1.5, so a plan copied out of the RetireGolden
+web app imports without a spurious provenance warning.** The web app's new "Copy plan
+for your AI" export stamps the engine that produced the document; 0.5.0 pinned engine
+0.1.4, so every such paste raised the `engineVersion` skew caveat — *defaults and
+modeling semantics can differ between versions; re-run the projection here* — on a
+document that was in fact current. The warning was truthful about the version numbers
+and misleading about the risk: engine 0.1.5 adds only the `ENGINE_VERSION` constant the
+export needs and moves no modeling whatsoever.
+
+A caveat that fires on the ordinary path is worse than no caveat, because it trains the
+reader to ignore the one that matters.
+
+**No numbers change.** Engine 0.1.5 is additive over 0.1.4; the full suite (540 tests,
+including the 0.5.0 browser-parity fixtures) passes unchanged.
+
+### Changed
+
+- `@retiregolden/engine` pinned `0.1.4 → 0.1.5`. The pin stays exact — provenance
+  reporting is only meaningful if the version this package reports is the version it
+  actually runs. The cost is this release: an engine bump a consumer depends on needs a
+  matching MCP release to clear the caveat, and that lag is the intended, visible one.
+
 ## 0.5.0
 
 **Projections now include state income tax, and therefore match the RetireGolden
