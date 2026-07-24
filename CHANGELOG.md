@@ -3,6 +3,14 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.6.1
+
+**Updates the exact `@retiregolden/engine` dependency from 0.1.5 to 0.1.6.**
+
+### Changed
+
+- Keep MCP calculations aligned with engine 0.1.6.
+
 ## 0.6.0
 
 **Adds an optional authorization hook to `registerTools`, so a host can gate tool
