@@ -3,6 +3,30 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.7.0
+
+**Updates the exact `@retiregolden/engine` dependency from 0.1.6 to 0.1.7, and
+raises the Node floor to 24.**
+
+A minor rather than a patch because the Node requirement moved, which is
+breaking for anyone on an older runtime.
+
+### Changed
+
+- Keep MCP calculations aligned with engine 0.1.7.
+- `engines.node` is now `>=24`. Node 20 reached end of life in April 2026, and
+  the rest of the RetireGolden projects standardized on 24 — the app, engine and
+  planner-ui packages plus their CI, and RetireGolden-Pro, which already declared
+  `>=24`. CI now tests Node 24 only, instead of a 20/22/24 matrix it would warn on.
+
+### Why this release exists
+
+`@retiregolden/planner-ui` 0.5.0 depends on `@retiregolden/engine` `^0.1.7`,
+while this package pinned engine `0.1.6` exactly. A host installing both — the
+Pro desktop app — could not resolve a single shared engine copy, and Pro asserts
+exactly that invariant so its GUI and MCP sidecar can never compute on different
+engine versions. Releasing this unblocks Pro from adopting planner-ui 0.5.0.
+
 ## 0.6.1
 
 **Updates the exact `@retiregolden/engine` dependency from 0.1.5 to 0.1.6.**
