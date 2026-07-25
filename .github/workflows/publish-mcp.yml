@@ -78,7 +78,9 @@ jobs:
             sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
           fi
 
-      # OIDC trusted publishing requires npm >= 11.5.1; Node 22 ships npm 10.x.
+      # OIDC trusted publishing requires npm >= 11.5.1. Installing it explicitly
+      # keeps this step correct whatever npm the runner's Node happens to bundle,
+      # rather than resting on a claim about one Node version.
       - name: Upgrade npm for OIDC support
         run: npm install -g npm@latest
 
