@@ -1,11 +1,11 @@
 {
   "name": "@retiregolden/mcp",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Model Context Protocol server for the RetireGolden retirement-planning engine: headless, in-memory sessions over stdio (and optional HTTP).",
   "license": "AGPL-3.0-only",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "repository": {
     "type": "git",
@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@retiregolden/engine": "0.1.6",
+    "@retiregolden/engine": "0.1.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
