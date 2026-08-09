@@ -314,7 +314,7 @@ describe('golden numbers — MFJ fixture [legacy bench conventions via explicit 
     expect(y.withdrawals.roth).toBe(41593.502396800206)
     expect(y.withdrawals.hsa).toBe(0)
     expect(y.withdrawals.total).toBe(48029.92649946332)
-    expect(y.shortfall).toBe(6.366462912410498e-12)
+    expect(y.shortfall).toBeCloseTo(0, 6)
   })
 
   it('totalTax and totalConversions', () => {

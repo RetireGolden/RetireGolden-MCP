@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "@retiregolden/mcp",
   "version": "0.7.2",
   "description": "Model Context Protocol server for the RetireGolden retirement-planning engine: headless, in-memory sessions over stdio (and optional HTTP).",
