@@ -3,6 +3,25 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.7.2
+
+**Updates the exact `@retiregolden/engine` dependency from 0.1.8 to 0.1.9.**
+
+### Changed
+
+- Keep MCP calculations aligned with engine 0.1.9.
+
+### Why this release exists
+
+RetireGolden Pro consumes the engine, planner UI, and MCP packages together and
+requires them to resolve one shared engine copy. Engine 0.1.9 carries the
+retirement-action execution-source-integrity work (named conversion, ordinary
+withdrawal, and QCD sourcing), inherited-IRA compliance depth, the
+tax-exempt-interest SS/MAGI cascade, per-donor QCD limits, IRA-funded annuity
+staging, and the new `TaxStrategyEvaluation` strategy contract; this
+coordination release prevents the MCP sidecar from retaining a nested engine
+0.1.8 while the desktop calculation surface advances to 0.1.9.
+
 ## 0.7.1
 
 **Updates the exact `@retiregolden/engine` dependency from 0.1.7 to 0.1.8.**
