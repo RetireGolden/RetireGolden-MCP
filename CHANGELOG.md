@@ -3,6 +3,25 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.7.3
+
+**Updates the exact `@retiregolden/engine` dependency from 0.1.9 to 0.1.10.**
+
+### Changed
+
+- Keep MCP calculations aligned with engine 0.1.10.
+
+### Why this release exists
+
+RetireGolden Pro consumes the engine, planner UI, and MCP packages together and
+requires them to resolve one shared engine copy. Engine 0.1.10 adds the advisor
+tax cockpit's engine-side scenario surfaces — the `TaxOpportunityView` per-year
+evidence/action view and the `TaxStrategyTradeoffs` seven-dimension comparison —
+with no projection-behavior change; the golden numbers are verified unchanged
+under the new pin. This coordination release prevents the MCP sidecar from
+retaining a nested engine 0.1.9 while the desktop calculation surface advances
+to 0.1.10.
+
 ## 0.7.2
 
 **Updates the exact `@retiregolden/engine` dependency from 0.1.8 to 0.1.9.**

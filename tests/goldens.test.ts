@@ -39,7 +39,8 @@
  * bench harness pins. See CHANGELOG 0.5.0.
  *
  * Regenerated for engine 0.1.9 (execution-source integrity, inherited-IRA,
- * exempt-interest, per-donor QCD engine wave).
+ * exempt-interest, per-donor QCD engine wave). Verified UNCHANGED under engine
+ * 0.1.10 (advisor-cockpit scenario surfaces only; no projection-behavior change).
  *
  * Generation recipe (scratchpad/gen-goldens.mjs on this branch):
  *   session = createSession()
