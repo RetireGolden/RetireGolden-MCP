@@ -3,6 +3,24 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.7.4
+
+**Updates the exact `@retiregolden/engine` dependency from 0.1.10 to 0.1.11.**
+
+### Changed
+
+- Keep MCP calculations aligned with engine 0.1.11.
+
+### Why this release exists
+
+Engine 0.1.11 ships the insight detector-governance contract (finding-level
+severity, structured evidence tuples, detector versioning), the completed
+advisory detector catalog, and the published per-entity facts layer — all
+observation-only, with no projection-behavior change; the golden numbers are
+verified unchanged under the new pin. This coordination release lets
+RetireGolden Pro advance its shared engine copy to 0.1.11 without the MCP
+sidecar retaining a nested engine 0.1.10.
+
 ## 0.7.3
 
 **Updates the exact `@retiregolden/engine` dependency from 0.1.9 to 0.1.10.**
