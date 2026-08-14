@@ -14,13 +14,17 @@ Thanks for helping improve the RetireGolden Model Context Protocol server.
 ## Development
 
 ```bash
+corepack enable   # installs the packageManager pnpm shim
 pnpm install --frozen-lockfile
 pnpm test
 pnpm run build
 pnpm run mcp   # stdio MCP server
 ```
 
-**Requirements:** Node.js 20+
+**Requirements:** Node.js 20+ with Corepack. `packageManager` in
+`package.json` pins pnpm; `corepack enable` is what creates the `pnpm`
+executable. Newer Node releases may need Corepack installed separately
+(see [Corepack](https://github.com/nodejs/corepack#how-to-install)).
 
 ## Licensing of contributions
 
