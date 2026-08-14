@@ -81,7 +81,7 @@ and product runners should pin the skill file digest used for scored runs.
 Releases are tag-driven: pushing a `mcp-v<version>` tag triggers the publish
 workflow (see [`.github/workflows/publish-mcp.yml`](.github/workflows/publish-mcp.yml)).
 
-To run locally after `npm run build`:
+To run locally after `pnpm run build`:
 
 ```bash
 node bin/retiregolden-mcp.js

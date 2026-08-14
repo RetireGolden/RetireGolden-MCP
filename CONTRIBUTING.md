@@ -14,13 +14,19 @@ Thanks for helping improve the RetireGolden Model Context Protocol server.
 ## Development
 
 ```bash
-npm ci
-npm test
-npm run build
-npm run mcp   # stdio MCP server
+npm install -g corepack   # Node 25+ does not bundle Corepack
+corepack enable           # installs the packageManager pnpm shim
+pnpm install --frozen-lockfile
+pnpm test
+pnpm run build
+pnpm run mcp   # stdio MCP server
 ```
 
-**Requirements:** Node.js 20+
+**Requirements:** Node.js 24+ (`engines.node`). Node 24 bundles Corepack;
+Node 25+ does not, so install it with `npm install -g corepack` before
+`corepack enable`. `packageManager` in `package.json` pins pnpm; Corepack
+is what creates the `pnpm` executable
+(see [Corepack](https://github.com/nodejs/corepack#how-to-install)).
 
 ## Licensing of contributions
 
