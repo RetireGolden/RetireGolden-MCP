@@ -4,6 +4,7 @@
   "description": "Model Context Protocol server for the RetireGolden retirement-planning engine: headless, in-memory sessions over stdio (and optional HTTP).",
   "license": "AGPL-3.0-only",
   "type": "module",
+  "packageManager": "pnpm@10.34.5",
   "engines": {
     "node": ">=24"
   },
@@ -47,7 +48,7 @@
     "build": "tsc -p tsconfig.build.json",
     "mcp": "node dist/cli.js",
     "test": "tsc -p tsconfig.json && vitest run",
-    "prepack": "npm run build"
+    "prepack": "pnpm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

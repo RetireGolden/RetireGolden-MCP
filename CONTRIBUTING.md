@@ -14,10 +14,10 @@ Thanks for helping improve the RetireGolden Model Context Protocol server.
 ## Development
 
 ```bash
-npm ci
-npm test
-npm run build
-npm run mcp   # stdio MCP server
+pnpm install --frozen-lockfile
+pnpm test
+pnpm run build
+pnpm run mcp   # stdio MCP server
 ```
 
 **Requirements:** Node.js 20+
