@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import os from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -23,6 +24,20 @@ export const TIMESTAMP_SENTINEL = '<timestamp>'
 export const PACKAGE_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 export const BASELINE_PATH = resolve(PACKAGE_ROOT, 'tests/protocol-baseline/baseline.json')
 
+let machineHomedir
+try {
+  machineHomedir = os.homedir()
+} catch {
+  // skip when homedir is unavailable
+}
+
+let machineUsername
+try {
+  machineUsername = os.userInfo().username
+} catch {
+  // skip when userInfo is unavailable
+}
+
 const require = createRequire(import.meta.url)
 const FIXED_REFUSAL = {
   ok: false,
@@ -31,24 +46,31 @@ const FIXED_REFUSAL = {
   remedy: 'fixed refusal fixture',
 }
 
+const ISO_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/
+
 /** Recursively sort object keys while preserving array order and masking package version noise. */
 export function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize)
   if (value != null && typeof value === 'object') {
     const result = {}
     for (const key of Object.keys(value).sort()) {
+      const raw = value[key]
       // mcpVersion legitimately moves on release; solveMs is wall-clock solver
       // timing; updatedAtIso/createdAtIso are engine-stamped wall-clock
       // timestamps. None are part of the calculation contract this baseline
-      // referees.
+      // referees. Sentinels apply only when the value has the expected shape so
+      // a type regression surfaces as drift instead of being masked.
       result[key] =
-        key === 'mcpVersion'
+        key === 'mcpVersion' && typeof raw === 'string'
           ? MCP_VERSION_SENTINEL
-          : key === 'solveMs'
+          : key === 'solveMs' && Number.isFinite(raw)
             ? TIMING_SENTINEL
-            : key === 'updatedAtIso' || key === 'createdAtIso'
+            : (key === 'updatedAtIso' || key === 'createdAtIso') &&
+                typeof raw === 'string' &&
+                ISO_TIMESTAMP_PATTERN.test(raw)
               ? TIMESTAMP_SENTINEL
-              : canonicalize(value[key])
+              : canonicalize(raw)
     }
     return result
   }
@@ -67,9 +89,23 @@ export function canonicalSha256(value) {
   return sha256(canonicalJson(value))
 }
 
+function escapeRegex(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 /** Remove local paths before an error message enters the baseline fingerprint. */
 export function stripMachineLocalPaths(message) {
-  return String(message)
+  let normalized = String(message)
+  for (const root of [PACKAGE_ROOT, machineHomedir].filter(Boolean)) {
+    for (const variant of [root, root.replace(/\\/g, '/'), root.replace(/\//g, '\\')]) {
+      if (!variant) continue
+      normalized = normalized.replace(new RegExp(escapeRegex(variant), 'g'), '<path>')
+    }
+  }
+  if (machineUsername) {
+    normalized = normalized.replace(new RegExp(`\\b${escapeRegex(machineUsername)}\\b`, 'g'), '<user>')
+  }
+  return normalized
     .replace(/[A-Za-z]:[\\/](?:[^\s()[\]{}<>]+[\\/])*[^\s()[\]{}<>]+/g, '<path>')
     .replace(/\/(?:[^\s()[\]{}<>]+\/)*[^\s()[\]{}<>]+/g, '<path>')
 }
@@ -101,6 +137,26 @@ function protocolSurface(error) {
   }
 }
 
+function envelopeView(result) {
+  const view = {
+    isError: result.isError === true,
+    content: (Array.isArray(result.content) ? result.content : []).map((block) => {
+      if (block?.type === 'text' && typeof block.text === 'string') {
+        try {
+          return { type: 'text', json: canonicalize(JSON.parse(block.text)) }
+        } catch {
+          return { type: 'text', text: stripMachineLocalPaths(block.text) }
+        }
+      }
+      const { type, ...rest } = block ?? {}
+      return { type: type ?? 'unknown', keys: Object.keys(rest).sort() }
+    }),
+  }
+  if ('structuredContent' in result) view.structuredContent = canonicalize(result.structuredContent)
+  if ('_meta' in result) view.meta = canonicalize(result._meta)
+  return view
+}
+
 async function captureToolCall({ client, lane, step, tool, args, includePayload = true }) {
   const base = { step, tool, lane, argsDigest: canonicalSha256(args) }
   try {
@@ -112,6 +168,7 @@ async function captureToolCall({ client, lane, step, tool, args, includePayload 
       kind: 'result',
       isError: result.isError === true,
       payloadHash: canonicalSha256(payload),
+      envelopeHash: canonicalSha256(envelopeView(result)),
       ...(includePayload ? { payload: canonicalPayload } : {}),
     }
     return { entry, payload }
@@ -329,6 +386,8 @@ export async function captureStdioLane({ root = PACKAGE_ROOT, fixtures }) {
     if (!protocolVersion || !serverInfo?.name) {
       throw new Error('initialize did not expose negotiated protocolVersion and serverInfo.name')
     }
+    const capabilities = canonicalize(client.getServerCapabilities() ?? null)
+    const instructions = client.getInstructions?.() ?? null
     const { inventory, resource } = await captureInventoryAndResource(client)
     const matrix = await replayStdioMatrix(client, fixtures)
     return {
@@ -336,6 +395,8 @@ export async function captureStdioLane({ root = PACKAGE_ROOT, fixtures }) {
         protocolVersion,
         serverInfo: { name: serverInfo.name, version: MCP_VERSION_SENTINEL },
         actualServerVersion: serverInfo.version,
+        capabilities,
+        instructions,
       },
       inventory,
       resource,
@@ -482,6 +543,8 @@ export async function captureProtocolBaseline({ root = PACKAGE_ROOT, fixtures } 
       ),
       protocolVersion: stdio.handshake.protocolVersion,
       serverInfo: stdio.handshake.serverInfo,
+      serverCapabilities: stdio.handshake.capabilities,
+      serverInstructions: stdio.handshake.instructions,
       nodeMajor: Number(process.versions.node.split('.')[0]),
       toolSchemaFile: 'schemas/tools.v1.json',
     },

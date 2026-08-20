@@ -25,6 +25,7 @@ interface MatrixStep {
   lane: 'stdio' | 'inmemory'
   argsDigest: string
   payloadHash: string
+  envelopeHash?: string
   kind: string
   isError?: boolean
 }
@@ -37,6 +38,8 @@ interface ProtocolBaseline {
     sdkPackage: string
     protocolVersion: string
     serverInfo: { name: string; version: string }
+    serverCapabilities: unknown
+    serverInstructions: string | null
     nodeMajor: number
     toolSchemaFile: string
   }
@@ -152,25 +155,49 @@ describe('protocol baseline', () => {
   }, 120_000)
 
   it('matches the committed v1 protocol contract', () => {
-    expect(actual.meta.mcpPackage, driftMessage('mcp package sentinel')).toBe(expected.meta.mcpPackage)
-    expect(actual.meta.enginePackage, driftMessage('engine package')).toBe(expected.meta.enginePackage)
-    expect(
+    // During the planned SDK v2 swap, meta fields (e.g. sdkPackage) change
+    // deliberately; soft assertions let the full matrix report drift in one run
+    // instead of exiting at the first meta mismatch, which is what makes this
+    // usable as the migration referee.
+    expect.soft(actual.meta.mcpPackage, driftMessage('mcp package sentinel')).toBe(
+      expected.meta.mcpPackage,
+    )
+    expect.soft(actual.meta.enginePackage, driftMessage('engine package')).toBe(
+      expected.meta.enginePackage,
+    )
+    expect.soft(
       actual.meta.zodPackage,
       'zod version changed; build_plan_invalid wording is zod-authored — regenerate deliberately with the bump',
     ).toBe(expected.meta.zodPackage)
-    expect(actual.meta.sdkPackage, driftMessage('SDK package')).toBe(expected.meta.sdkPackage)
-    expect(actual.meta.protocolVersion, driftMessage('initialize protocolVersion')).toBe(
+    expect.soft(actual.meta.sdkPackage, driftMessage('SDK package')).toBe(expected.meta.sdkPackage)
+    expect.soft(actual.meta.protocolVersion, driftMessage('initialize protocolVersion')).toBe(
       expected.meta.protocolVersion,
     )
-    expect(actual.meta.serverInfo, driftMessage('initialize serverInfo')).toEqual(expected.meta.serverInfo)
-    expect(actual.meta.toolSchemaFile, driftMessage('tool schema file')).toBe(expected.meta.toolSchemaFile)
+    expect.soft(actual.meta.serverInfo, driftMessage('initialize serverInfo')).toEqual(
+      expected.meta.serverInfo,
+    )
+    expect.soft(actual.meta.serverCapabilities, driftMessage('initialize serverCapabilities')).toEqual(
+      expected.meta.serverCapabilities,
+    )
+    expect.soft(actual.meta.serverInstructions, driftMessage('initialize serverInstructions')).toEqual(
+      expected.meta.serverInstructions,
+    )
+    expect.soft(actual.meta.toolSchemaFile, driftMessage('tool schema file')).toBe(
+      expected.meta.toolSchemaFile,
+    )
 
-    expect(actual.inventory.sha256, driftMessage('tools/list inventory')).toBe(expected.inventory.sha256)
-    expect(actual.resource.uri, driftMessage('plan-schema resource URI')).toBe(expected.resource.uri)
-    expect(actual.resource.mimeType, driftMessage('plan-schema resource MIME type')).toBe(
+    expect.soft(actual.inventory.sha256, driftMessage('tools/list inventory')).toBe(
+      expected.inventory.sha256,
+    )
+    expect.soft(actual.resource.uri, driftMessage('plan-schema resource URI')).toBe(
+      expected.resource.uri,
+    )
+    expect.soft(actual.resource.mimeType, driftMessage('plan-schema resource MIME type')).toBe(
       expected.resource.mimeType,
     )
-    expect(actual.resource.sha256, driftMessage('plan-schema resource')).toBe(expected.resource.sha256)
+    expect.soft(actual.resource.sha256, driftMessage('plan-schema resource')).toBe(
+      expected.resource.sha256,
+    )
 
     expect(actual.matrix, driftMessage('fixture matrix shape')).toHaveLength(expected.matrix.length)
     for (const [index, expectedStep] of expected.matrix.entries()) {
@@ -178,13 +205,14 @@ describe('protocol baseline', () => {
       expect(observed, driftMessage(`matrix entry ${index}`)).toBeDefined()
       if (!observed) continue
       const stepLabel = expectedStep.step
-      expect(observed.lane, driftMessage(stepLabel)).toBe(expectedStep.lane)
-      expect(observed.step, driftMessage(stepLabel)).toBe(expectedStep.step)
-      expect(observed.tool, driftMessage(stepLabel)).toBe(expectedStep.tool)
-      expect(observed.argsDigest, driftMessage(stepLabel)).toBe(expectedStep.argsDigest)
-      expect(observed.kind, driftMessage(stepLabel)).toBe(expectedStep.kind)
-      expect(observed.isError, driftMessage(stepLabel)).toBe(expectedStep.isError)
-      expect(observed.payloadHash, driftMessage(stepLabel)).toBe(expectedStep.payloadHash)
+      expect.soft(observed.lane, driftMessage(stepLabel)).toBe(expectedStep.lane)
+      expect.soft(observed.step, driftMessage(stepLabel)).toBe(expectedStep.step)
+      expect.soft(observed.tool, driftMessage(stepLabel)).toBe(expectedStep.tool)
+      expect.soft(observed.argsDigest, driftMessage(stepLabel)).toBe(expectedStep.argsDigest)
+      expect.soft(observed.kind, driftMessage(stepLabel)).toBe(expectedStep.kind)
+      expect.soft(observed.isError, driftMessage(stepLabel)).toBe(expectedStep.isError)
+      expect.soft(observed.payloadHash, driftMessage(stepLabel)).toBe(expectedStep.payloadHash)
+      expect.soft(observed.envelopeHash, driftMessage(stepLabel)).toBe(expectedStep.envelopeHash)
     }
   })
 })
