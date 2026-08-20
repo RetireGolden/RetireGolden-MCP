@@ -44,7 +44,14 @@ interface ProtocolBaseline {
     toolSchemaFile: string
   }
   inventory: { sha256: string }
-  resource: { uri: string; mimeType: string; sha256: string }
+  resource: {
+    uri: string
+    contentUri: string | null
+    mimeType: string
+    sha256: string
+    listSha256: string
+    readSha256: string
+  }
   matrix: MatrixStep[]
 }
 
@@ -192,11 +199,20 @@ describe('protocol baseline', () => {
     expect.soft(actual.resource.uri, driftMessage('plan-schema resource URI')).toBe(
       expected.resource.uri,
     )
+    expect.soft(actual.resource.contentUri, driftMessage('plan-schema resource content URI')).toBe(
+      expected.resource.contentUri,
+    )
     expect.soft(actual.resource.mimeType, driftMessage('plan-schema resource MIME type')).toBe(
       expected.resource.mimeType,
     )
     expect.soft(actual.resource.sha256, driftMessage('plan-schema resource')).toBe(
       expected.resource.sha256,
+    )
+    expect.soft(actual.resource.listSha256, driftMessage('resources/list')).toBe(
+      expected.resource.listSha256,
+    )
+    expect.soft(actual.resource.readSha256, driftMessage('resources/read')).toBe(
+      expected.resource.readSha256,
     )
 
     expect(actual.matrix, driftMessage('fixture matrix shape')).toHaveLength(expected.matrix.length)

@@ -142,14 +142,14 @@ function envelopeView(result) {
     isError: result.isError === true,
     content: (Array.isArray(result.content) ? result.content : []).map((block) => {
       if (block?.type === 'text' && typeof block.text === 'string') {
+        const { text, ...rest } = block
         try {
-          return { type: 'text', json: canonicalize(JSON.parse(block.text)) }
+          return { ...canonicalize(rest), json: canonicalize(JSON.parse(text)) }
         } catch {
-          return { type: 'text', text: stripMachineLocalPaths(block.text) }
+          return { ...canonicalize(rest), text: stripMachineLocalPaths(text) }
         }
       }
-      const { type, ...rest } = block ?? {}
-      return { type: type ?? 'unknown', keys: Object.keys(rest).sort() }
+      return canonicalize(block)
     }),
   }
   if ('structuredContent' in result) view.structuredContent = canonicalize(result.structuredContent)
@@ -219,6 +219,11 @@ async function captureInventoryAndResource(client) {
   if (!content || typeof content.text !== 'string') {
     throw new Error('resources/read did not return JSON text for the plan-schema resource')
   }
+  if (content.uri !== resource.uri) {
+    throw new Error(
+      `resources/read content.uri (${String(content.uri)}) did not match the advertised resource URI (${resource.uri})`,
+    )
+  }
   if (content.mimeType !== 'application/json') {
     throw new Error(`plan-schema resource mimeType drifted to ${String(content.mimeType)}`)
   }
@@ -227,8 +232,11 @@ async function captureInventoryAndResource(client) {
     inventory,
     resource: {
       uri: resource.uri,
+      contentUri: content.uri ?? null,
       mimeType: content.mimeType,
       sha256: canonicalSha256(JSON.parse(content.text)),
+      listSha256: canonicalSha256(resources),
+      readSha256: canonicalSha256(read),
     },
   }
 }
@@ -527,6 +535,15 @@ export function optimizerTimedOut(baselineLike) {
 export async function captureProtocolBaseline({ root = PACKAGE_ROOT, fixtures } = {}) {
   const activeFixtures = fixtures ?? (await defaultFixtures())
   const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
+  const sdkPackage = resolvedPackageVersion(
+    '@modelcontextprotocol/sdk',
+    '@modelcontextprotocol/sdk/client/index.js',
+  )
+  if (!sdkPackage.startsWith('1.')) {
+    throw new Error(
+      `The protocol-baseline observer must remain the frozen v1 @modelcontextprotocol/sdk client; resolved ${sdkPackage}. Install the v1 SDK as an exact dev dependency — do not observe the migration through the SDK generation being migrated to.`,
+    )
+  }
   const stdio = await captureStdioLane({ root, fixtures: activeFixtures })
   if (stdio.handshake.actualServerVersion !== packageJson.version) {
     throw new Error('stdio serverInfo.version did not match this package.json version')
@@ -537,10 +554,7 @@ export async function captureProtocolBaseline({ root = PACKAGE_ROOT, fixtures } 
       mcpPackage: MCP_VERSION_SENTINEL,
       enginePackage: resolvedPackageVersion('@retiregolden/engine'),
       zodPackage: resolvedPackageVersion('zod'),
-      sdkPackage: resolvedPackageVersion(
-        '@modelcontextprotocol/sdk',
-        '@modelcontextprotocol/sdk/client/index.js',
-      ),
+      sdkPackage,
       protocolVersion: stdio.handshake.protocolVersion,
       serverInfo: stdio.handshake.serverInfo,
       serverCapabilities: stdio.handshake.capabilities,
