@@ -12,8 +12,8 @@ importers:
         specifier: ^1.29.0
         version: 1.30.0(zod@4.4.3)
       '@retiregolden/engine':
-        specifier: 0.1.11
-        version: 0.1.11
+        specifier: 0.1.12
+        version: 0.1.12
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -68,8 +68,8 @@ packages:
   '@oxc-project/types@0.139.0':
     resolution: {integrity: sha512-r9gHphtCs+1M7J0pw6Sn/hh/Wpa/iQrOOkrNAlVLF/gHq+/CJmHIWKKUUhdWjcD6CIa8idarspCsASiXCXvFUw==}
 
-  '@retiregolden/engine@0.1.11':
-    resolution: {integrity: sha512-gQ2Gp/cg69aDK0ayf3Ru9QFC/odESeJ5R/drjIpsujq62pobltVO9jVvcO0v+kvsKi+grwddMbIRuJT9yD/fdQ==}
+  '@retiregolden/engine@0.1.12':
+    resolution: {integrity: sha512-S0rwsnLuQhPGikyCE1svwW91agTrAfXPv1w4bp7pb6iTs55rfV/UHYir4yzAzn4gJu70ZtHZRaXZlX386SkdXw==}
     engines: {node: '>=24'}
 
   '@rolldown/binding-android-arm64@1.1.5':
@@ -1021,7 +1021,7 @@ snapshots:
 
   '@oxc-project/types@0.139.0': {}
 
-  '@retiregolden/engine@0.1.11':
+  '@retiregolden/engine@0.1.12':
     dependencies:
       highs: 1.15.1
       zod: 4.4.3

@@ -3,6 +3,25 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.7.5
+
+**Updates the exact `@retiregolden/engine` dependency from 0.1.11 to 0.1.12.**
+
+### Changed
+
+- Keep MCP calculations aligned with engine 0.1.12.
+- Workspace tooling switched from npm to pnpm (no published-artifact change).
+
+### Why this release exists
+
+Engine 0.1.12 ships the IRC §414(v)(7) high-earner designated Roth catch-up
+for contribution years 2026+ (with its §415(c) exclusion and the
+compensation-minus-other-electives cap), the Plan v4 schema carrying
+`priorCalendarYearFicaWages`, and §408(d)(8)(A) post-70½ QCD offset
+corrections on the aggregate `qcdAnnual` arm. This coordination release lets
+RetireGolden Pro advance its shared engine copy to 0.1.12 (planner-ui 0.9.0
+requires it) without the MCP sidecar retaining a nested engine 0.1.11.
+
 ## 0.7.4
 
 **Updates the exact `@retiregolden/engine` dependency from 0.1.10 to 0.1.11.**
