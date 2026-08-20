@@ -37,7 +37,7 @@ interface ProtocolBaseline {
     zodPackage: string
     sdkPackage: string
     protocolVersion: string
-    serverInfo: { name: string; version: string }
+    serverInfo: Record<string, unknown>
     serverCapabilities: unknown
     serverInstructions: string | null
     nodeMajor: number
@@ -76,16 +76,24 @@ async function sourceFiles(directory: string): Promise<string[]> {
 }
 
 async function buildIsCurrent(): Promise<boolean> {
-  const cli = `${packageRoot}/dist/cli.js`
-  let cliStat
+  // The capture imports several dist modules and the spawned CLI loads the
+  // rest of the output graph, so every emitted file must postdate every
+  // source — checking dist/cli.js alone would replay a partially stale build.
+  let distFiles: string[]
   try {
-    cliStat = await stat(cli)
+    distFiles = (await sourceFiles(`${packageRoot}/dist`)).filter((file) => file.endsWith('.js'))
   } catch {
     return false
   }
+  if (distFiles.length === 0 || !distFiles.some((file) => file.endsWith('/cli.js'))) return false
   const sources = await sourceFiles(`${packageRoot}/src`)
-  const sourceStats = await Promise.all(sources.map((source) => stat(source)))
-  return !sourceStats.some((sourceStat) => sourceStat.mtimeMs >= cliStat.mtimeMs)
+  const [sourceStats, distStats] = await Promise.all([
+    Promise.all(sources.map((source) => stat(source))),
+    Promise.all(distFiles.map((file) => stat(file))),
+  ])
+  const newestSource = Math.max(...sourceStats.map((s) => s.mtimeMs))
+  const oldestDist = Math.min(...distStats.map((s) => s.mtimeMs))
+  return newestSource < oldestDist
 }
 
 async function ensureBuild(): Promise<void> {

@@ -401,7 +401,14 @@ export async function captureStdioLane({ root = PACKAGE_ROOT, fixtures }) {
     return {
       handshake: {
         protocolVersion,
-        serverInfo: { name: serverInfo.name, version: MCP_VERSION_SENTINEL },
+        // The complete initialize Implementation object (title, icons, website
+        // URL and future fields included), with only the valid version value
+        // sentineled — server metadata drift is client-visible wire drift.
+        serverInfo: {
+          ...canonicalize(serverInfo),
+          version:
+            typeof serverInfo.version === 'string' ? MCP_VERSION_SENTINEL : serverInfo.version,
+        },
         actualServerVersion: serverInfo.version,
         capabilities,
         instructions,
