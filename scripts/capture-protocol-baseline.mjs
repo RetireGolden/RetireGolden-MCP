@@ -105,9 +105,12 @@ export function stripMachineLocalPaths(message) {
   if (machineUsername) {
     normalized = normalized.replace(new RegExp(`\\b${escapeRegex(machineUsername)}\\b`, 'g'), '<user>')
   }
+  // The Unix pattern is fenced to known filesystem roots: a bare
+  // slash-delimited token can be a JSON Pointer or URI path, which is
+  // protocol-relevant content the fingerprint must keep.
   return normalized
     .replace(/[A-Za-z]:[\\/](?:[^\s()[\]{}<>]+[\\/])*[^\s()[\]{}<>]+/g, '<path>')
-    .replace(/\/(?:[^\s()[\]{}<>]+\/)*[^\s()[\]{}<>]+/g, '<path>')
+    .replace(/\/(?:home|Users|tmp|var|private|root|mnt|opt|srv)\/[^\s()[\]{}<>]+/g, '<path>')
 }
 
 function isRecord(value) {
@@ -139,7 +142,6 @@ function protocolSurface(error) {
 
 function envelopeView(result) {
   const view = {
-    isError: result.isError === true,
     content: (Array.isArray(result.content) ? result.content : []).map((block) => {
       if (block?.type === 'text' && typeof block.text === 'string') {
         const { text, ...rest } = block
@@ -152,6 +154,9 @@ function envelopeView(result) {
       return canonicalize(block)
     }),
   }
+  // Present-vs-absent is itself wire shape: an omitted isError must not hash
+  // like an explicit isError: false.
+  if ('isError' in result) view.isError = canonicalize(result.isError)
   if ('structuredContent' in result) view.structuredContent = canonicalize(result.structuredContent)
   if ('_meta' in result) view.meta = canonicalize(result._meta)
   return view
