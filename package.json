@@ -1,6 +1,6 @@
 {
   "name": "@retiregolden/mcp",
-  "version": "0.7.5",
+  "version": "0.8.0",
   "description": "Model Context Protocol server for the RetireGolden retirement-planning engine: headless, in-memory sessions over stdio (and optional HTTP).",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -49,6 +49,7 @@
     "baseline:capture": "node scripts/capture-protocol-baseline.mjs",
     "mcp": "node dist/cli.js",
     "test": "tsc -p tsconfig.json && vitest run",
+    "test:packed": "vitest run tests/packedArtifact.test.ts",
     "prepack": "pnpm run build"
   },
   "dependencies": {
