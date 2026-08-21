@@ -40,6 +40,7 @@ interface ProtocolBaseline {
     serverInfo: Record<string, unknown>
     serverCapabilities: unknown
     serverInstructions: string | null
+    initializeResult: unknown
     nodeMajor: number
     toolSchemaFile: string
   }
@@ -206,6 +207,9 @@ describe('protocol baseline', () => {
     )
     expect.soft(actual.meta.serverInstructions, driftMessage('initialize serverInstructions')).toEqual(
       expected.meta.serverInstructions,
+    )
+    expect.soft(actual.meta.initializeResult, driftMessage('raw initialize result')).toEqual(
+      expected.meta.initializeResult,
     )
     expect.soft(actual.meta.toolSchemaFile, driftMessage('tool schema file')).toBe(
       expected.meta.toolSchemaFile,

@@ -4,7 +4,7 @@ This directory holds the pre-v2 public MCP protocol baseline for `@retiregolden/
 
 `baseline.json` is generated, reviewed, and committed deliberately. It contains:
 
-- the negotiated stdio protocol version, sentineled `serverInfo`, and the initialize `serverCapabilities` and `serverInstructions` returned by the client;
+- the negotiated stdio protocol version, sentineled `serverInfo`, the initialize `serverCapabilities` and `serverInstructions` returned by the client, and the complete raw initialize result captured at the transport (so fields the client getters cannot see, such as `_meta`, are fingerprinted too);
 - the complete `tools/list` result and its digest;
 - the complete `resources/list` and `resources/read` responses and their digests, plus the `plan-schema` resource identity, content URI (must match the advertised URI), and canonical schema digest;
 - deterministic payload hashes and envelope fingerprints for one long-lived stdio session and the authorization-refusal in-memory lane.
@@ -23,10 +23,13 @@ The capture canonicalizes every value before it is stored or hashed:
 - Machine-local paths are stripped before error messages and non-JSON text enter a fingerprint. Known checkout and home-directory roots (including paths with spaces) and the current username are replaced before generic path regexes run.
 - A malformed tool call may be a JSON-RPC protocol error rather than a tool result. Its code and a digest of the message after machine-local paths are stripped are recorded, never a raw local path.
 
-Build the package first if needed, then regenerate with:
+Regenerate with:
 
 ```bash
 pnpm run baseline:capture
 ```
+
+The command rebuilds `dist/` itself before capturing, so a stale build can never be frozen into a
+regenerated baseline.
 
 Regenerate only as a deliberate, reviewed consequence of an engine bump or an intentional public protocol-contract change. Never regenerate casually to turn a red baseline test green: if the engine pin did not change, investigate the SDK/wire change as a blocking regression.

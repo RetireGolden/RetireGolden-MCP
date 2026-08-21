@@ -369,6 +369,30 @@ export async function captureStdioLane({ root = PACKAGE_ROOT, fixtures }) {
     args: [cliPath],
     cwd: root,
   })
+  // The v1 Client has getters for capabilities and instructions but none for
+  // the complete initialize result (e.g. _meta), so intercept the transport's
+  // inbound handler and record the raw result before the client consumes it.
+  let rawInitializeResult
+  {
+    let clientHandler
+    Object.defineProperty(transport, 'onmessage', {
+      configurable: true,
+      get: () => clientHandler,
+      set: (handler) => {
+        clientHandler = (message, ...rest) => {
+          if (
+            rawInitializeResult === undefined &&
+            isRecord(message) &&
+            isRecord(message.result) &&
+            'protocolVersion' in message.result
+          ) {
+            rawInitializeResult = message.result
+          }
+          return handler(message, ...rest)
+        }
+      },
+    })
+  }
   // The v1 Client exposes no getter for the negotiated protocol version; it
   // reports it only through the transport's optional setProtocolVersion hook.
   let negotiatedProtocolVersion
@@ -418,6 +442,20 @@ export async function captureStdioLane({ root = PACKAGE_ROOT, fixtures }) {
     }
     const capabilities = canonicalize(client.getServerCapabilities() ?? null)
     const instructions = client.getInstructions?.() ?? null
+    if (!isRecord(rawInitializeResult)) {
+      throw new Error('the transport intercept did not observe a raw initialize result')
+    }
+    // The complete raw initialize result (including _meta and any future
+    // fields the client getters cannot see), with only the valid
+    // serverInfo.version sentineled.
+    const initializeResultClone = JSON.parse(JSON.stringify(rawInitializeResult))
+    if (
+      isRecord(initializeResultClone.serverInfo) &&
+      typeof initializeResultClone.serverInfo.version === 'string'
+    ) {
+      initializeResultClone.serverInfo.version = MCP_VERSION_SENTINEL
+    }
+    const initializeResult = canonicalize(initializeResultClone)
     const { inventory, resource } = await captureInventoryAndResource(client)
     const matrix = await replayStdioMatrix(client, fixtures)
     return {
@@ -434,6 +472,7 @@ export async function captureStdioLane({ root = PACKAGE_ROOT, fixtures }) {
         actualServerVersion: serverInfo.version,
         capabilities,
         instructions,
+        initializeResult,
       },
       inventory,
       resource,
@@ -466,9 +505,10 @@ export async function captureStdioLane({ root = PACKAGE_ROOT, fixtures }) {
 
 /** Capture the authorization refusal surface using the existing in-memory harness shape. */
 export async function captureInMemoryLane({ root = PACKAGE_ROOT, fixtures }) {
-  const [sessionModule, toolsModule] = await Promise.all([
+  const [sessionModule, toolsModule, toolTableModule] = await Promise.all([
     import(pathToFileURL(resolve(root, 'dist/session.js')).href),
     import(pathToFileURL(resolve(root, 'dist/tools.js')).href),
+    import(pathToFileURL(resolve(root, 'dist/toolTable.js')).href),
   ])
   // WS1 seam: after the SDK v2 migration this lane must construct its server
   // through the migrated package's own factory (the same implementation the
@@ -485,6 +525,14 @@ export async function captureInMemoryLane({ root = PACKAGE_ROOT, fixtures }) {
       if (keys.join(',') !== 'entry,name') {
         throw new Error(
           `authorization request carried unexpected properties [${keys.join(', ')}]; only name and entry are permitted`,
+        )
+      }
+      // Key-shape alone is not enough: a substituted argument-bearing
+      // descriptor would still present as {entry, name}. The entry must be
+      // the exact static tool-table object, which cannot carry call args.
+      if (toolTableModule.getTool(request.name) !== request.entry) {
+        throw new Error(
+          `authorization request entry for ${request.name} is not the static tool-table entry; a substituted descriptor could smuggle call arguments into the policy layer`,
         )
       }
       return request.name === 'export_plan' ? { allow: false, result: FIXED_REFUSAL } : { allow: true }
@@ -610,6 +658,7 @@ export async function captureProtocolBaseline({ root = PACKAGE_ROOT, fixtures } 
       serverInfo: stdio.handshake.serverInfo,
       serverCapabilities: stdio.handshake.capabilities,
       serverInstructions: stdio.handshake.instructions,
+      initializeResult: stdio.handshake.initializeResult,
       nodeMajor: Number(process.versions.node.split('.')[0]),
       toolSchemaFile: 'schemas/tools.v1.json',
     },
@@ -625,6 +674,16 @@ const invokedDirectly =
   process.argv[1] &&
   resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase()
 if (invokedDirectly) {
+  // Always rebuild before writing a baseline: capturing a stale dist would
+  // freeze the pre-change contract under a post-change source tree.
+  const { execFile: execFileCallback } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  await promisify(execFileCallback)('pnpm', ['run', 'build'], {
+    cwd: PACKAGE_ROOT,
+    windowsHide: true,
+    maxBuffer: 10 * 1024 * 1024,
+    shell: process.platform === 'win32',
+  })
   let baseline = await captureProtocolBaseline()
   if (optimizerTimedOut(baseline)) {
     baseline = await captureProtocolBaseline()
