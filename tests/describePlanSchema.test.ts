@@ -6,9 +6,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { McpServer, InMemoryTransport } from '@modelcontextprotocol/server'
+import { Client } from '@modelcontextprotocol/client'
 import { planJsonSchema, PLAN_SCHEMA_VERSION, PLAN_SCHEMA_ID } from '@retiregolden/engine/schema'
 import * as adapter from '../src/adapter.js'
 import { registerResources } from '../src/tools.js'
@@ -119,7 +118,10 @@ describe('plan-schema MCP resource', () => {
     registerResources(server)
     const client = new Client({ name: 'test-client', version: '0.0.0' })
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport as Parameters<Client['connect']>[0]),
+    ])
 
     const listed = await client.listResources()
     const entry = listed.resources.find((r) => r.uri === PLAN_SCHEMA_ID)

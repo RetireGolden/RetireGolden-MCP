@@ -86,7 +86,7 @@ export type ToolDataScope = 'none' | 'session'
 export interface ToolEntry {
   name: string
   description: string
-  /** zod raw shape passed verbatim to server.tool and to gateway arg parsing. */
+  /** zod raw shape passed to registerTool via z.object() and to gateway arg parsing. */
   inputShape: z.ZodRawShape
   /** Raw handler returning the response payload (pre jsonResult wrapping). */
   handler: (session: SessionState, args: Record<string, unknown>) => unknown | Promise<unknown>

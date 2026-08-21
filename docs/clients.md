@@ -8,8 +8,9 @@ RetireGolden MCP is **educational / decision-support only** — not tax, legal, 
 financial advice. See [DISCLAIMER.md](../DISCLAIMER.md).
 
 > Every client below runs the **same** command:
-> `npx -y @retiregolden/mcp` (or the installed `retiregolden-mcp` bin). The only
-> thing that differs is where each client keeps its config file and how it
+> `npx -y @retiregolden/mcp` (or the installed `retiregolden-mcp` bin). That
+> command serves both 2025-era and 2026-07-28 clients; you change nothing. The
+> only thing that differs is where each client keeps its config file and how it
 > handles the agent skill.
 
 ## About the skill

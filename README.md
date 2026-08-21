@@ -30,7 +30,9 @@ retiregolden-mcp
 ```
 
 Configure your MCP client to launch `retiregolden-mcp` (or
-`npx @retiregolden/mcp`) over stdio.
+`npx @retiregolden/mcp`) over stdio. The same command serves both 2025-era
+(legacy `initialize`) and 2026-07-28 (modern `server/discover`) clients —
+existing configs do not change.
 
 ### Example Claude Desktop / Cursor snippet
 

@@ -8,9 +8,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { McpServer, InMemoryTransport } from '@modelcontextprotocol/server'
+import { Client } from '@modelcontextprotocol/client'
 import { createSession } from '../src/session.js'
 import { registerTools, type AuthorizeTool } from '../src/tools.js'
 import { TOOL_TABLE } from '../src/toolTable.js'
@@ -22,7 +21,12 @@ async function connect(authorize?: AuthorizeTool) {
   registerTools(server, session, authorize ? { authorize } : {})
   const client = new Client({ name: 'test-client', version: '0.0.0' })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+  // Linked pair is the server package's Transport; the client package's
+  // connect() types its own copy. Structurally identical on the wire.
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport as Parameters<Client['connect']>[0]),
+  ])
   return {
     client,
     session,
@@ -34,9 +38,9 @@ async function connect(authorize?: AuthorizeTool) {
 }
 
 /**
- * `callTool` is typed as a union that still includes the deprecated
- * `{ toolResult }` shape, so a parameter typed `{ content: unknown }` does not
- * accept it. Take `unknown` and narrow here.
+ * Narrow a `callTool` result to the JSON payload in its first text block.
+ * Take `unknown` rather than the SDK result type so the helper stays
+ * independent of extras (`structuredContent`, `_meta`, cache fields).
  */
 function payload(result: unknown): unknown {
   const content = (result as { content?: { type: string; text: string }[] }).content
