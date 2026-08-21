@@ -723,6 +723,7 @@ describe('packed npm artifact', () => {
     // @retiregolden/mcp` while every direct-path lane stayed green. The v1
     // transport spawns via cross-spawn, which handles the .cmd shim on
     // Windows.
+    if (!consumerDirectory) throw new Error('beforeAll did not create the npm consumer directory')
     const shim = join(
       consumerDirectory,
       'node_modules',
