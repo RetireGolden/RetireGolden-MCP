@@ -157,11 +157,33 @@ function envelopeView(result) {
   return view
 }
 
+/**
+ * Every mcpVersion observed in a raw payload, collected before the sentinel
+ * masks it. The capture asserts each one equals the running package version:
+ * the sentinel exists to absorb legitimate release bumps, not to hide a
+ * serving path that starts advertising the wrong build.
+ */
+const observedMcpVersions = []
+
+function collectMcpVersions(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectMcpVersions(item)
+    return
+  }
+  if (value != null && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'mcpVersion') observedMcpVersions.push(child)
+      else collectMcpVersions(child)
+    }
+  }
+}
+
 async function captureToolCall({ client, lane, step, tool, args, includePayload = true }) {
   const base = { step, tool, lane, argsDigest: canonicalSha256(args) }
   try {
     const result = await client.callTool({ name: tool, arguments: args })
     const payload = resultPayload(result)
+    collectMcpVersions(payload)
     const canonicalPayload = canonicalize(payload)
     const entry = {
       ...base,
@@ -448,11 +470,25 @@ export async function captureInMemoryLane({ root = PACKAGE_ROOT, fixtures }) {
     import(pathToFileURL(resolve(root, 'dist/session.js')).href),
     import(pathToFileURL(resolve(root, 'dist/tools.js')).href),
   ])
+  // WS1 seam: after the SDK v2 migration this lane must construct its server
+  // through the migrated package's own factory (the same implementation the
+  // stdio path serves), so the authorization hashes exercise the production
+  // registration path — only the CLIENT observer stays frozen v1.
   const server = new McpServer({ name: 'protocol-baseline-in-memory', version: '0.0.0' })
   const session = sessionModule.createSession()
   toolsModule.registerTools(server, session, {
-    authorize: ({ name }) =>
-      name === 'export_plan' ? { allow: false, result: FIXED_REFUSAL } : { allow: true },
+    authorize: (request) => {
+      // The no-arguments privacy contract, enforced: an authorization request
+      // carrying anything beyond name/entry means plan data is crossing into
+      // the host policy layer, which this baseline must fail loudly on.
+      const keys = Object.keys(request).sort()
+      if (keys.join(',') !== 'entry,name') {
+        throw new Error(
+          `authorization request carried unexpected properties [${keys.join(', ')}]; only name and entry are permitted`,
+        )
+      }
+      return request.name === 'export_plan' ? { allow: false, result: FIXED_REFUSAL } : { allow: true }
+    },
   })
   const client = new Client({ name: 'protocol-baseline-client', version: '0.0.0' })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
@@ -551,11 +587,19 @@ export async function captureProtocolBaseline({ root = PACKAGE_ROOT, fixtures } 
       `The protocol-baseline observer must remain the frozen v1 @modelcontextprotocol/sdk client; resolved ${sdkPackage}. Install the v1 SDK as an exact dev dependency — do not observe the migration through the SDK generation being migrated to.`,
     )
   }
+  observedMcpVersions.length = 0
   const stdio = await captureStdioLane({ root, fixtures: activeFixtures })
   if (stdio.handshake.actualServerVersion !== packageJson.version) {
     throw new Error('stdio serverInfo.version did not match this package.json version')
   }
   const inMemory = await captureInMemoryLane({ root, fixtures: activeFixtures })
+  for (const version of observedMcpVersions) {
+    if (version !== null && version !== packageJson.version) {
+      throw new Error(
+        `a payload advertised mcpVersion ${JSON.stringify(version)} but the running package is ${packageJson.version}; the sentinel absorbs release bumps, not wrong provenance`,
+      )
+    }
+  }
   return canonicalize({
     meta: {
       mcpPackage: MCP_VERSION_SENTINEL,

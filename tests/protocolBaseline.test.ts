@@ -77,23 +77,27 @@ async function sourceFiles(directory: string): Promise<string[]> {
 
 async function buildIsCurrent(): Promise<boolean> {
   // The capture imports several dist modules and the spawned CLI loads the
-  // rest of the output graph, so every emitted file must postdate every
-  // source — checking dist/cli.js alone would replay a partially stale build.
-  let distFiles: string[]
+  // rest of the output graph, so the check is against the EXPECTED output
+  // set: every src/*.ts must have its emitted dist/*.js present and newer
+  // than every source. Scanning only surviving dist files would bless a
+  // partial build whose remaining files happen to be fresh.
+  const sources = (await sourceFiles(`${packageRoot}/src`)).filter((file) => file.endsWith('.ts'))
+  const expectedOutputs = sources.map((file) =>
+    file.replace(`${packageRoot}/src`, `${packageRoot}/dist`).replace(/\.ts$/, '.js'),
+  )
+  let sourceStats
+  let outputStats
   try {
-    distFiles = (await sourceFiles(`${packageRoot}/dist`)).filter((file) => file.endsWith('.js'))
+    ;[sourceStats, outputStats] = await Promise.all([
+      Promise.all(sources.map((source) => stat(source))),
+      Promise.all(expectedOutputs.map((file) => stat(file))),
+    ])
   } catch {
     return false
   }
-  if (distFiles.length === 0 || !distFiles.some((file) => file.endsWith('/cli.js'))) return false
-  const sources = await sourceFiles(`${packageRoot}/src`)
-  const [sourceStats, distStats] = await Promise.all([
-    Promise.all(sources.map((source) => stat(source))),
-    Promise.all(distFiles.map((file) => stat(file))),
-  ])
   const newestSource = Math.max(...sourceStats.map((s) => s.mtimeMs))
-  const oldestDist = Math.min(...distStats.map((s) => s.mtimeMs))
-  return newestSource < oldestDist
+  const oldestOutput = Math.min(...outputStats.map((s) => s.mtimeMs))
+  return newestSource < oldestOutput
 }
 
 async function ensureBuild(): Promise<void> {
@@ -184,7 +188,13 @@ describe('protocol baseline', () => {
       actual.meta.zodPackage,
       'zod version changed; build_plan_invalid wording is zod-authored — regenerate deliberately with the bump',
     ).toBe(expected.meta.zodPackage)
-    expect.soft(actual.meta.sdkPackage, driftMessage('SDK package')).toBe(expected.meta.sdkPackage)
+    // HARD assertion, deliberately: the observer client must stay the frozen
+    // v1 SDK release the baseline was captured with — if it moved, every
+    // comparison below is made through a different referee and proves nothing.
+    expect(
+      actual.meta.sdkPackage,
+      'the baseline observer SDK moved; re-pin the frozen v1 client before trusting any replay result',
+    ).toBe(expected.meta.sdkPackage)
     expect.soft(actual.meta.protocolVersion, driftMessage('initialize protocolVersion')).toBe(
       expected.meta.protocolVersion,
     )
