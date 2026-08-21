@@ -101,6 +101,10 @@ interface CaptureLibrary {
 interface CallCapture {
   payload: unknown
   envelope: unknown
+  // Raw pre-normalization cache hints: plan-bearing responses must never be
+  // publicly cacheable, so these are asserted before envelopeView drops them.
+  rawCacheScope: unknown
+  rawTtlMs: unknown
 }
 
 interface LaneCapture {
@@ -398,9 +402,12 @@ async function captureCall(
   envelopeView: (result: unknown) => unknown,
 ): Promise<CallCapture> {
   const raw = await client.callTool({ name: tool, arguments: args })
+  const rawRecord = raw as { cacheScope?: unknown; ttlMs?: unknown }
   return {
     payload: canonicalize(parsePayload(raw)),
     envelope: envelopeView(raw),
+    rawCacheScope: rawRecord.cacheScope,
+    rawTtlMs: rawRecord.ttlMs,
   }
 }
 
@@ -884,6 +891,15 @@ describe('packed npm artifact', () => {
       const inventory = lane.inventory as { cacheScope?: string; ttlMs?: number }
       expect(inventory.cacheScope, `packed ${label} tools/list cacheScope`).toBe('private')
       expect(inventory.ttlMs ?? 0, `packed ${label} tools/list ttlMs`).toBe(0)
+      // Plan-bearing tool results must never be publicly cacheable — the
+      // hints are asserted raw, before envelope normalization drops them.
+      const calls = [...lane.calls.primary, lane.calls.malformed, lane.calls.isolatedNoPlan]
+      for (const [index, call] of calls.entries()) {
+        expect(call.rawCacheScope ?? 'private', `packed ${label} call ${index} cacheScope`).toBe(
+          'private',
+        )
+        expect(call.rawTtlMs ?? 0, `packed ${label} call ${index} ttlMs`).toBe(0)
+      }
     }
   }, 120_000)
 
