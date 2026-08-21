@@ -28,6 +28,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm run build
+      # Release gate: the packed npm artifact (what `npx` installs) must serve
+      # both protocol eras and match the committed wire baseline. Excluded from
+      # the default vitest discovery because it packs and npm-installs.
+      - run: pnpm run test:packed
 
   # Single stable check name for branch protection ("test"), independent of the
   # matrix shape. Fails unless every matrix leg succeeded.

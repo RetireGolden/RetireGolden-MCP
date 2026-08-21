@@ -108,6 +108,13 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      # The release gate proper: pack the artifact this job is about to
+      # publish, npm-install it into a scratch consumer, and prove both
+      # protocol eras plus the committed wire baseline against it. Publishing
+      # must never be possible from a commit that did not pass this.
+      - name: Packed-artifact gate
+        run: pnpm run test:packed
+
       - name: Publish to npm
         # No NODE_AUTH_TOKEN: auth is via OIDC trusted publishing. `id-token:
         # write` (set at the top) lets npm exchange a short-lived OIDC token for

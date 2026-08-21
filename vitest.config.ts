@@ -1,5 +1,11 @@
 import { defineConfig } from 'vitest/config'
 
+// The release job selects this file explicitly; ordinary discovery must skip
+// its pack/install work while preserving that explicit invocation.
+const packedArtifactRequested = process.argv.some((argument) =>
+  argument.replace(/\\/g, '/').endsWith('tests/packedArtifact.test.ts'),
+)
+
 /**
  * Discovery is pinned to this repo's own `tests/` directory.
  *
@@ -16,6 +22,11 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**', '.claude/**'],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '.claude/**',
+      ...(packedArtifactRequested ? [] : ['tests/packedArtifact.test.ts']),
+    ],
   },
 })

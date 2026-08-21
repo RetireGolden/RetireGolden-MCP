@@ -19,6 +19,7 @@ corepack enable           # installs the packageManager pnpm shim
 pnpm install --frozen-lockfile
 pnpm test
 pnpm run build
+pnpm run test:packed   # release gate: packs + npm-installs the tarball (needs npm registry access)
 pnpm run mcp   # stdio MCP server
 ```
 
