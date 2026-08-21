@@ -91,6 +91,7 @@ interface CaptureLibrary {
   canonicalize(value: unknown): unknown
   envelopeView(result: unknown): unknown
   optimizerTimedOut(baseline: unknown): boolean
+  drainObservedMcpVersions(): unknown[]
   captureStdioLane(options: {
     root: string
     fixtures: { singleHousehold: typeof singleHousehold; singlePolicy: typeof singlePolicy }
@@ -110,6 +111,7 @@ interface LaneCapture {
   resourceBody: unknown
   calls: {
     primary: CallCapture[]
+    malformed: CallCapture
     isolatedNoPlan: CallCapture
   }
 }
@@ -325,7 +327,19 @@ async function openStdio(client: ToolClient, transport: StdioTransport): Promise
     if (shuttingDown) resolveClose()
     else rejectClose(error)
   }
-  await (client as unknown as { connect(transport: unknown): Promise<void> }).connect(transport)
+  try {
+    await (client as unknown as { connect(transport: unknown): Promise<void> }).connect(transport)
+  } catch (connectError) {
+    // A rejected initialize/discover means no SessionHandle is returned, so
+    // the caller's finally can never close the child — do it here.
+    shuttingDown = true
+    try {
+      await (transport as unknown as { close?: () => Promise<void> }).close?.()
+    } catch {
+      // the connect failure is the signal
+    }
+    throw connectError
+  }
   return {
     client,
     async close() {
@@ -358,7 +372,22 @@ function parsePayload(result: unknown): unknown {
   const content = (result as { content?: Array<{ type: string; text: string }> }).content
   const text = content?.find((entry) => entry.type === 'text')?.text
   expect(text, 'tool returned no text content').toBeTruthy()
-  return JSON.parse(text as string)
+  try {
+    return JSON.parse(text as string)
+  } catch {
+    // SDK-authored validation errors are plain text, not JSON envelopes.
+    return { kind: 'text', text }
+  }
+}
+
+/**
+ * On win32 the .cmd shims require shell: true (CVE-2024-27980), and cmd.exe
+ * receives the argv joined with spaces UNQUOTED — a temp path containing a
+ * space would be split. Quote path-bearing args when a shell is in play.
+ */
+function shellSafe(args: string[]): string[] {
+  if (process.platform !== 'win32') return args
+  return args.map((arg) => (/[\s^&()%!"]/.test(arg) ? `"${arg}"` : arg))
 }
 
 async function captureCall(
@@ -440,7 +469,11 @@ async function runV1Lane(
   const primary = await connect('packed-artifact-v1')
   let captured: Omit<LaneCapture, 'era' | 'calls'>
   let primaryCalls: CallCapture[]
+  let malformed: CallCapture
   try {
+    // Malformed input first (stateless): every lane, including modern
+    // dispatch, must surface schema rejection as a structured isError result.
+    malformed = await captureCall(primary.client, 'build_plan', { household: 42 }, canonicalize, envelopeView)
     captured = await exercisePrimary(primary.client, canonicalize)
     primaryCalls = await exercisePrimaryCalls(primary.client, canonicalize, envelopeView)
   } finally {
@@ -454,7 +487,7 @@ async function runV1Lane(
   } finally {
     await isolation.close()
   }
-  return { era: 'legacy', ...captured, calls: { primary: primaryCalls, isolatedNoPlan } }
+  return { era: 'legacy', ...captured, calls: { primary: primaryCalls, malformed, isolatedNoPlan } }
 }
 
 async function runV2Lane(
@@ -495,7 +528,11 @@ async function runV2Lane(
   const primary = await connect('packed-artifact-v2')
   let captured: Omit<LaneCapture, 'era' | 'calls'>
   let primaryCalls: CallCapture[]
+  let malformed: CallCapture
   try {
+    // Malformed input first (stateless): every lane, including modern
+    // dispatch, must surface schema rejection as a structured isError result.
+    malformed = await captureCall(primary.client, 'build_plan', { household: 42 }, canonicalize, envelopeView)
     captured = await exercisePrimary(primary.client, canonicalize)
     primaryCalls = await exercisePrimaryCalls(primary.client, canonicalize, envelopeView)
   } finally {
@@ -509,7 +546,7 @@ async function runV2Lane(
   } finally {
     await isolation.close()
   }
-  return { era: options.expectedEra, ...captured, calls: { primary: primaryCalls, isolatedNoPlan } }
+  return { era: options.expectedEra, ...captured, calls: { primary: primaryCalls, malformed, isolatedNoPlan } }
 }
 
 function assertLane(label: string, lane: LaneCapture, era: ProtocolEra): void {
@@ -524,6 +561,9 @@ function assertLane(label: string, lane: LaneCapture, era: ProtocolEra): void {
     ok: false,
     error: 'NO_PLAN',
   })
+  const malformedEnvelope = lane.calls.malformed.envelope as { isError?: boolean; content?: unknown[] }
+  expect(malformedEnvelope.isError, `${label} malformed input isError`).toBe(true)
+  expect(malformedEnvelope.content?.length ?? 0, `${label} malformed input envelope`).toBeGreaterThan(0)
 }
 
 function canonicalJson(canonicalize: (value: unknown) => unknown, value: unknown): string {
@@ -583,7 +623,7 @@ describe('packed npm artifact', () => {
       shell: process.platform === 'win32',
     })
     expectedFiles = await expectedTarballFiles(packageManifest)
-    await execFile('pnpm', ['pack', '--pack-destination', packDirectory], {
+    await execFile('pnpm', shellSafe(['pack', '--pack-destination', packDirectory]), {
       cwd: packageRoot,
       windowsHide: true,
       maxBuffer: 10 * 1024 * 1024,
@@ -600,7 +640,7 @@ describe('packed npm artifact', () => {
     // npm models the package-manager path npx users receive; pnpm would hide a
     // nested runtime dependency arrangement that npm may expose.
     try {
-      await execFile('npm', ['install', tarballPath, '--no-audit', '--no-fund'], {
+      await execFile('npm', shellSafe(['install', tarballPath, '--no-audit', '--no-fund']), {
         cwd: consumerDirectory,
         windowsHide: true,
         maxBuffer: 10 * 1024 * 1024,
@@ -637,13 +677,25 @@ describe('packed npm artifact', () => {
       canonicalize,
       envelopeView,
     )
+    capture.drainObservedMcpVersions()
     packedBaseline = await capture.captureStdioLane({
       root: installedPackageRoot,
       fixtures: { singleHousehold, singlePolicy },
     })
+    // The sentinel hid these from the hashes; the raw values must still be the
+    // version this artifact claims to be — same provenance rule as
+    // captureProtocolBaseline, enforced here against the INSTALLED package.
+    for (const version of capture.drainObservedMcpVersions()) {
+      if (version !== null && version !== packageManifest.version) {
+        throw new Error(
+          `installed artifact advertised mcpVersion ${JSON.stringify(version)}; expected ${packageManifest.version}`,
+        )
+      }
+    }
     // Same contention absorber as the checkout baseline replay: one retry when
     // the optimizer's wall-clock budget expires on a loaded worker.
     if (capture.optimizerTimedOut(packedBaseline)) {
+      capture.drainObservedMcpVersions()
       packedBaseline = await capture.captureStdioLane({
         root: installedPackageRoot,
         fixtures: { singleHousehold, singlePolicy },
@@ -714,6 +766,24 @@ describe('packed npm artifact', () => {
     )
     expect(enginePackages).toHaveLength(1)
     expect(enginePackages[0]?.version).toBe(enginePin)
+  }, 120_000)
+
+  it('exposes the documented programmatic exports from the installed package', async () => {
+    // Embedders import the package root; a broken exports map would leave the
+    // CLI green while every programmatic host fails. Resolve through the
+    // scratch consumer's own node_modules, not this checkout's.
+    if (!consumerDirectory) throw new Error('beforeAll did not create the npm consumer directory')
+    const probe =
+      "const m = await import('@retiregolden/mcp'); " +
+      "const bad = ['registerTools', 'registerResources', 'jsonResult'].filter((n) => typeof m[n] !== 'function'); " +
+      "if (bad.length > 0 || typeof m.EDUCATIONAL !== 'string') { console.error('missing exports: ' + bad.join(',')); process.exit(1) } " +
+      "console.log('exports-ok')"
+    const { stdout } = await execFile(
+      process.execPath,
+      ['--input-type=module', '-e', probe],
+      { cwd: consumerDirectory, windowsHide: true },
+    )
+    expect(stdout.trim()).toBe('exports-ok')
   }, 120_000)
 
   it('serves MCP through the npm-installed executable shim', async () => {

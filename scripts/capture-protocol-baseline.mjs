@@ -168,6 +168,18 @@ export function envelopeView(result) {
  */
 const observedMcpVersions = []
 
+/**
+ * Return and clear every mcpVersion observed since the last drain. Exported so
+ * external replays (the packed-artifact gate) can enforce the same provenance
+ * rule as captureProtocolBaseline: the sentinel absorbs release bumps, never
+ * wrong provenance.
+ */
+export function drainObservedMcpVersions() {
+  const drained = [...observedMcpVersions]
+  observedMcpVersions.length = 0
+  return drained
+}
+
 function collectMcpVersions(value) {
   if (Array.isArray(value)) {
     for (const item of value) collectMcpVersions(item)
