@@ -564,6 +564,10 @@ function assertLane(label: string, lane: LaneCapture, era: ProtocolEra): void {
   const malformedEnvelope = lane.calls.malformed.envelope as { isError?: boolean; content?: unknown[] }
   expect(malformedEnvelope.isError, `${label} malformed input isError`).toBe(true)
   expect(malformedEnvelope.content?.length ?? 0, `${label} malformed input envelope`).toBeGreaterThan(0)
+  const malformedPayload = lane.calls.malformed.payload as { kind?: string; text?: string }
+  expect(malformedPayload.text ?? '', `${label} malformed input message`).toContain(
+    'Input validation error',
+  )
 }
 
 function canonicalJson(canonicalize: (value: unknown) => unknown, value: unknown): string {
@@ -921,6 +925,20 @@ describe('packed npm artifact', () => {
       stripEraEnvelope(v1Legacy.calls.isolatedNoPlan.envelope),
       stripEraEnvelope(v2Pinned.calls.isolatedNoPlan.envelope),
       'isolated run_projection envelope',
+    )
+    // Validation wording is authored by the one shared server implementation,
+    // so the malformed result must be era-invariant too.
+    assertCanonicalEqual(
+      canonicalize,
+      v1Legacy.calls.malformed.payload,
+      v2Pinned.calls.malformed.payload,
+      'malformed build_plan payload',
+    )
+    assertCanonicalEqual(
+      canonicalize,
+      stripEraEnvelope(v1Legacy.calls.malformed.envelope),
+      stripEraEnvelope(v2Pinned.calls.malformed.envelope),
+      'malformed build_plan envelope',
     )
   }, 120_000)
 })
