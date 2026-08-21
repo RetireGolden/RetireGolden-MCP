@@ -68,8 +68,21 @@ interface ProtocolBaseline {
   matrix: MatrixStep[]
 }
 
+interface CommittedMeta {
+  protocolVersion: string
+  serverInfo: unknown
+  serverCapabilities: unknown
+  serverInstructions: string | null
+  initializeResult: unknown
+}
+
 interface StdioBaselineCapture extends ProtocolBaseline {
   handshake: {
+    protocolVersion: string
+    serverInfo: unknown
+    capabilities: unknown
+    instructions: string | null
+    initializeResult: unknown
     actualServerVersion: string | undefined
   }
 }
@@ -703,6 +716,33 @@ describe('packed npm artifact', () => {
     expect(enginePackages[0]?.version).toBe(enginePin)
   }, 120_000)
 
+  it('serves MCP through the npm-installed executable shim', async () => {
+    // The other lanes launch dist/cli.js directly; this one exercises the
+    // documented entry point — the bin shim npm generated from package.json's
+    // bin field. A removed or mispointed bin would break `npx -y
+    // @retiregolden/mcp` while every direct-path lane stayed green. The v1
+    // transport spawns via cross-spawn, which handles the .cmd shim on
+    // Windows.
+    const shim = join(
+      consumerDirectory,
+      'node_modules',
+      '.bin',
+      process.platform === 'win32' ? 'retiregolden-mcp.cmd' : 'retiregolden-mcp',
+    )
+    await stat(shim)
+    const transport = new V1Stdio({ command: shim, cwd: consumerDirectory })
+    const session = await openStdio(
+      new V1Client({ name: 'packed-bin-shim', version: '0.0.0' }) as ToolClient,
+      transport,
+    )
+    try {
+      const listed = await session.client.listTools()
+      expect(listed.tools.map((tool) => tool.name)).toEqual(TOOL_NAMES)
+    } finally {
+      await session.close()
+    }
+  }, 120_000)
+
   it('a. lets the frozen v1 client use legacy initialize', () => {
     assertLane('packed v1 SDK', v1Legacy, 'legacy')
   }, 120_000)
@@ -721,6 +761,23 @@ describe('packed npm artifact', () => {
 
   it('matches the committed stdio baseline hashes through the installed CLI', () => {
     expect(packedBaseline.handshake.actualServerVersion).toBe(packageManifest.version)
+    // Full handshake parity, not just the version: the tarball's caret server
+    // dependency can resolve a different 2.x than the checkout lockfile, and
+    // legacy initialize metadata is part of the committed wire baseline.
+    const committedMeta = (expectedBaseline as unknown as { meta: CommittedMeta }).meta
+    expect(packedBaseline.handshake.protocolVersion, 'packed protocolVersion').toBe(
+      committedMeta.protocolVersion,
+    )
+    expect(packedBaseline.handshake.serverInfo, 'packed serverInfo').toEqual(committedMeta.serverInfo)
+    expect(canonicalize(packedBaseline.handshake.capabilities), 'packed serverCapabilities').toEqual(
+      committedMeta.serverCapabilities,
+    )
+    expect(packedBaseline.handshake.instructions, 'packed serverInstructions').toEqual(
+      committedMeta.serverInstructions,
+    )
+    expect(canonicalize(packedBaseline.handshake.initializeResult), 'packed initializeResult').toEqual(
+      committedMeta.initializeResult,
+    )
     expect(packedBaseline.inventory.sha256).toBe(expectedBaseline.inventory.sha256)
     expect(packedBaseline.resource.sha256).toBe(expectedBaseline.resource.sha256)
     expect(packedBaseline.resource.uri).toBe(expectedBaseline.resource.uri)
@@ -738,6 +795,20 @@ describe('packed npm artifact', () => {
       expect(actual?.isError, `${expected.step} isError`).toBe(expected.isError)
       expect(actual?.payloadHash, `${expected.step} payload`).toBe(expected.payloadHash)
       expect(actual?.envelopeHash, `${expected.step} envelope`).toBe(expected.envelopeHash)
+    }
+  }, 120_000)
+
+  it('keeps modern packed responses on the conservative cache posture', () => {
+    // Asserted BEFORE stripEraEnvelope can erase them: the installed server
+    // resolves from the published ^2.0.0 range, so a hint regression in a
+    // newer 2.x must fail this release gate, not vanish in normalization.
+    for (const [label, lane] of [
+      ['pinned', v2Pinned],
+      ['auto', v2Auto],
+    ] as const) {
+      const inventory = lane.inventory as { cacheScope?: string; ttlMs?: number }
+      expect(inventory.cacheScope, `packed ${label} tools/list cacheScope`).toBe('private')
+      expect(inventory.ttlMs ?? 0, `packed ${label} tools/list ttlMs`).toBe(0)
     }
   }, 120_000)
 
