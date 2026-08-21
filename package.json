@@ -46,6 +46,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "baseline:capture": "node scripts/capture-protocol-baseline.mjs",
     "mcp": "node dist/cli.js",
     "test": "tsc -p tsconfig.json && vitest run",
     "prepack": "pnpm run build"
