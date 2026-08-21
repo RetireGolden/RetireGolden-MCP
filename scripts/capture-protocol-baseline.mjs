@@ -15,8 +15,6 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
 export const MCP_VERSION_SENTINEL = '<mcp-version>'
 export const TIMING_SENTINEL = '<timing>'
@@ -140,7 +138,7 @@ function protocolSurface(error) {
   }
 }
 
-function envelopeView(result) {
+export function envelopeView(result) {
   const view = {
     content: (Array.isArray(result.content) ? result.content : []).map((block) => {
       if (block?.type === 'text' && typeof block.text === 'string') {
@@ -183,10 +181,20 @@ function collectMcpVersions(value) {
   }
 }
 
-async function captureToolCall({ client, lane, step, tool, args, includePayload = true }) {
-  const base = { step, tool, lane, argsDigest: canonicalSha256(args) }
+async function captureToolCall({ client, lane, step, tool, args, includePayload = true, omitArguments = false }) {
+  // When omitArguments is true the client sends no `arguments` key at all; the
+  // v1 SDK rejected that envelope but v2 validates args ?? {}. Hash the
+  // sentinel so the step fingerprints the omission, not an empty object.
+  const base = {
+    step,
+    tool,
+    lane,
+    argsDigest: omitArguments ? canonicalSha256('<omitted>') : canonicalSha256(args),
+  }
   try {
-    const result = await client.callTool({ name: tool, arguments: args })
+    const result = omitArguments
+      ? await client.callTool({ name: tool })
+      : await client.callTool({ name: tool, arguments: args })
     const payload = resultPayload(result)
     collectMcpVersions(payload)
     const canonicalPayload = canonicalize(payload)
@@ -278,6 +286,17 @@ async function replayStdioMatrix(client, fixtures) {
   }
 
   await call('run_projection_no_plan', 'run_projection', {})
+  matrix.push(
+    (
+      await captureToolCall({
+        client,
+        lane: 'stdio',
+        step: 'get_session_omitted_arguments',
+        tool: 'get_session',
+        omitArguments: true,
+      })
+    ).entry,
+  )
   await call('build_plan_invalid', 'build_plan', { household: 42 })
   requireOkResult(
     await call('build_plan_fixture', 'build_plan', {
@@ -515,10 +534,12 @@ export async function captureInMemoryLane({ root = PACKAGE_ROOT, fixtures }) {
     import(pathToFileURL(resolve(root, 'dist/tools.js')).href),
     import(pathToFileURL(resolve(root, 'dist/toolTable.js')).href),
   ])
-  // WS1 seam: after the SDK v2 migration this lane must construct its server
-  // through the migrated package's own factory (the same implementation the
-  // stdio path serves), so the authorization hashes exercise the production
-  // registration path — only the CLIENT observer stays frozen v1.
+  // WS1 seam, fulfilled: this lane constructs a v2 McpServer and exercises
+  // the migrated registerTools path. Only the stdio observer (top-level
+  // imports) stays frozen at v1; v1 server objects never cross into
+  // registerTools.
+  const { McpServer, InMemoryTransport } = await import('@modelcontextprotocol/server')
+  const { Client } = await import('@modelcontextprotocol/client')
   const server = new McpServer({ name: 'protocol-baseline-in-memory', version: '0.0.0' })
   const session = sessionModule.createSession()
   toolsModule.registerTools(server, session, {

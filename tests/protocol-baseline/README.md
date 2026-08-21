@@ -8,6 +8,7 @@ This directory holds the pre-v2 public MCP protocol baseline for `@retiregolden/
 - the complete `tools/list` result and its digest;
 - the complete `resources/list` and `resources/read` responses and their digests, plus the `plan-schema` resource identity, content URI (must match the advertised URI), and canonical schema digest;
 - deterministic payload hashes and envelope fingerprints for one long-lived stdio session and the authorization-refusal in-memory lane.
+- a `get_session_omitted_arguments` step that calls `get_session` with no `arguments` key, characterizing SDK-owned envelope behavior (v1 rejected omission; v2 treats it as `{}`).
 
 The capture canonicalizes every value before it is stored or hashed:
 

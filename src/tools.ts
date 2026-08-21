@@ -5,9 +5,16 @@
  * this module just iterates it and wraps each handler's payload in the MCP
  * content envelope. EDUCATIONAL and jsonResult are re-exported for consumers
  * (RetireGolden-Pro) that import them from the package root.
+ *
+ * Registration is the v2 `registerTool` / `registerResource` API. A v1
+ * McpServer object cannot be passed in: the methods it used (`tool`,
+ * `resource`) are gone, so an embedder must construct a v2 server from
+ * `@modelcontextprotocol/server`. Cache hints are omitted so modern
+ * responses keep the SDK's safe fallback (`ttlMs: 0`, `cacheScope: 'private'`).
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { z } from 'zod'
+import type { McpServer } from '@modelcontextprotocol/server'
 import {
   planJsonSchema,
   PLAN_SCHEMA_ID,
@@ -69,16 +76,23 @@ export function registerTools(
 ): void {
   const { authorize } = options
   for (const tool of TOOL_TABLE) {
-    server.tool(tool.name, tool.description, tool.inputShape, async (args) => {
-      // Guarded rather than defaulted to a no-op callback: with no `authorize`,
-      // the handler runs the same two statements it always did.
-      if (authorize) {
-        const decision = await authorize({ name: tool.name, entry: tool })
-        if (!decision.allow) return jsonResult(decision.result)
-      }
-      const result = await tool.handler(session, args as Record<string, unknown>)
-      return jsonResult(result)
-    })
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        inputSchema: z.object(tool.inputShape),
+      },
+      async (args) => {
+        // Guarded rather than defaulted to a no-op callback: with no `authorize`,
+        // the handler runs the same two statements it always did.
+        if (authorize) {
+          const decision = await authorize({ name: tool.name, entry: tool })
+          if (!decision.allow) return jsonResult(decision.result)
+        }
+        const result = await tool.handler(session, args as Record<string, unknown>)
+        return jsonResult(result)
+      },
+    )
   }
 }
 
@@ -93,7 +107,7 @@ export function registerTools(
  * through a callback that receives no session and so cannot reach user data.
  */
 export function registerResources(server: McpServer): void {
-  server.resource(
+  server.registerResource(
     'plan-schema',
     PLAN_SCHEMA_ID,
     {

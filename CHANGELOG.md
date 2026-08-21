@@ -3,6 +3,28 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+**Migrates the stdio server to the TypeScript MCP SDK v2, serving both 2025-era
+and 2026-07-28 clients from the same command.** No tool names, schemas, or
+calculation behavior change. Ordinary stdio configs (`npx -y @retiregolden/mcp`,
+the `retiregolden-mcp` bin) are unchanged.
+
+### Changed
+
+- Runtime depends on `@modelcontextprotocol/server` ^2.0.0. `startStdioServer`
+  uses `serveStdio` so one factory instance is pinned per connection after the
+  opening exchange selects the era (legacy `initialize`, or modern
+  `server/discover`). Tool definitions do not fork by era.
+- Programmatic embedders that constructed a v1 `McpServer` from
+  `@modelcontextprotocol/sdk` and passed it to `registerTools` must construct a
+  v2 `McpServer` from `@modelcontextprotocol/server` instead — v1 server objects
+  can no longer be passed in. `registerTools` / `registerResources` /
+  `EDUCATIONAL` / `jsonResult` names and signatures are otherwise unchanged.
+- A `tools/call` whose `arguments` field is omitted was rejected by the v1 SDK's
+  validation and now validates as `{}` (SDK v2 behavior). Affects no known client
+  (normal clients always send `arguments`); listed for completeness.
+
 ## 0.7.5
 
 **Updates the exact `@retiregolden/engine` dependency from 0.1.11 to 0.1.12.**
