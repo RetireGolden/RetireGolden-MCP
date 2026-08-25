@@ -1,5 +1,9 @@
 # Thin caller for the org-required Grok Build PR review.
 # Implementation lives in RetireGolden/.github — do not copy it here.
+#
+# Pin fe20f331 (v1.0.5 keep-findings) because @main plus secrets: inherit
+# left grok-first-pass-gate Expected. Pass only XAI_API_KEY; do not inherit
+# (this repo holds CLA_PAT).
 name: Grok code review
 
 on:
@@ -15,8 +19,14 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  statuses: write
+  checks: write
 
 jobs:
   review:
-    uses: RetireGolden/.github/.github/workflows/grok-code-review.yml@main
-    secrets: inherit
+    # Required Grok job must run on drafts (no draft skip) so grok-first-pass-gate posts before ready_for_review.
+    uses: RetireGolden/.github/.github/workflows/grok-code-review.yml@fe20f331e17eb390f4b992b6dfbe3e46ddfc227f # v1.0.5 keep-findings
+    with:
+      pr_number: ${{ inputs.pr_number || github.event.inputs.pr_number || github.event.pull_request.number }}
+    secrets:
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
