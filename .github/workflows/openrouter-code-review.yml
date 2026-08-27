@@ -7,9 +7,9 @@
 #
 # Synchronize runs a VERIFY round (behavior since the .github#19 pin)
 # that SKIPS with a notice (zero token spend) until a first-pass has
-# seeded this PR's review loop; the live pin is on the uses: line below. Seed with workflow_dispatch
-# (pr_number), or the PR's next reopen / ready_for_review. Still advisory — never a
-# required check. Per-PR concurrency lives in the org reusable's own
+# seeded this PR's review loop; the live pin is on the uses: line below.
+# Seed with workflow_dispatch (pr_number), or the PR's next reopen /
+# ready_for_review. Still advisory — never a required check. Per-PR concurrency lives in the org reusable's own
 # job-level groups; do not add a workflow-level group here (it could
 # cancel an in-progress first-pass).
 
