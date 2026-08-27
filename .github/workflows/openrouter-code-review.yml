@@ -5,13 +5,14 @@
 #
 # Pass only OPENROUTER_API_KEY. Do not inherit.
 #
-# As of the .github#19 pin (action v1.2.0), synchronize runs a VERIFY
-# round that SKIPS with a notice (zero token spend) until a first-pass
-# has seeded this PR's review loop. Seed with workflow_dispatch
-# (pr_number), or the PR's next reopen / ready_for_review. Still advisory — never a
-# required check. Per-PR concurrency lives in the org reusable's own
-# job-level groups; do not add a workflow-level group here (it could
-# cancel an in-progress first-pass).
+# Synchronize runs a VERIFY round (behavior since the .github#19 pin)
+# that SKIPS with a notice (zero token spend) until a first-pass has
+# seeded this PR's review loop; the live pin is on the uses: line below.
+# Seed with workflow_dispatch (pr_number), or the PR's next reopen /
+# ready_for_review. Still advisory — never a required check. Per-PR
+# concurrency lives in the org reusable's own job-level groups; do not
+# add a workflow-level group here (it could cancel an in-progress
+# first-pass).
 
 name: OpenRouter code review
 
@@ -32,7 +33,7 @@ permissions:
 jobs:
   openrouter:
     if: ${{ github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft }}
-    uses: RetireGolden/.github/.github/workflows/openrouter-code-review.yml@264457ca1e8d8f7e3b1972d62fbee783fb3885ec # org OpenRouter reusable after .github#19 (v1.2.0 + follow-up gating)
+    uses: RetireGolden/.github/.github/workflows/openrouter-code-review.yml@f21acbbfaa8fdb6b5ee72b01c8a835398dbc097d # .github#20 (action v1.2.1 recall fixes)
     with:
       pr_number: ${{ inputs.pr_number || github.event.inputs.pr_number || github.event.pull_request.number }}
     secrets:
