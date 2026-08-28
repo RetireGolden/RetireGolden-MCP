@@ -756,7 +756,7 @@ describe('packed npm artifact', () => {
     }
   }, 120_000)
 
-  it('installs one v2 MCP runtime and one exact engine through npm', () => {
+  it('installs one v2 MCP runtime and exact engine and zod through npm', () => {
     const mcpPackages = installedPackages.filter((installed) =>
       installed.name.startsWith('@modelcontextprotocol/'),
     )
@@ -777,6 +777,17 @@ describe('packed npm artifact', () => {
     )
     expect(enginePackages).toHaveLength(1)
     expect(enginePackages[0]?.version).toBe(enginePin)
+
+    // zod authors every tool inputSchema in the published artifact, so its
+    // version is part of the committed wire baseline the same way the
+    // engine's is. Comparing the installed version to the raw specifier makes
+    // any range operator fail here immediately, instead of on the next zod
+    // release that changes schema serialization.
+    const zodPin = packageManifest.dependencies['zod']
+    if (!zodPin) throw new Error('package.json did not pin zod')
+    const zodPackages = installedPackages.filter((installed) => installed.name === 'zod')
+    expect(zodPackages, 'exactly one installed zod').toHaveLength(1)
+    expect(zodPackages[0]?.version).toBe(zodPin)
   }, 120_000)
 
   it('exposes the documented programmatic exports from the installed package', async () => {

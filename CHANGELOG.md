@@ -3,6 +3,19 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- Runtime `zod` dependency is exact-pinned at 4.4.3 (was `^4.4.3`; same
+  resolved version). zod serializes every tool `inputSchema`, so the published
+  artifact's `tools/list` output is part of the committed wire baseline and
+  must not float with upstream zod releases — zod 4.5.0/4.5.1 (2026-08-28)
+  changed schema serialization and broke the packed-artifact gate for fresh
+  installs while 0.8.0's checkout lockfile stayed on 4.4.3. Future zod bumps
+  regenerate the baseline deliberately. The packed-artifact test now enforces
+  the exact pin the same way it enforces the engine's.
+
 ## 0.8.0
 
 **Migrates the stdio server to the TypeScript MCP SDK v2, serving both 2025-era
