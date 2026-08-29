@@ -1,9 +1,17 @@
 # Thin caller for the org-required Grok Build PR review.
 # Implementation lives in RetireGolden/.github — do not copy it here.
 #
-# Pin fe20f331 (v1.0.5 keep-findings) because @main plus secrets: inherit
+# Pin the reusable by exact SHA because @main plus secrets: inherit
 # left grok-first-pass-gate Expected. Pass only XAI_API_KEY; do not inherit
 # (this repo holds CLA_PAT).
+#
+# Green-on-partial is intentional (.github#26): when a diff exceeds
+# the embed cap it is truncated, Grok still reviews the full PR with
+# read-only tools, and the run completes with an explicit `partial`
+# verdict, which grok-first-pass-gate accepts. A green gate on
+# `partial` means the embed was incomplete, not that review was
+# skipped; partial runs never publish review-loop ledger state, so
+# follow-up rounds re-review from the last complete marker.
 name: Grok code review
 
 on:
@@ -25,7 +33,7 @@ permissions:
 jobs:
   review:
     # Required Grok job must run on drafts (no draft skip) so grok-first-pass-gate posts before ready_for_review.
-    uses: RetireGolden/.github/.github/workflows/grok-code-review.yml@fe20f331e17eb390f4b992b6dfbe3e46ddfc227f # v1.0.5 keep-findings
+    uses: RetireGolden/.github/.github/workflows/grok-code-review.yml@ed323b2437d45eaec4ca6955c384bcf19aeb8357 # .github#26 (action v1.0.6 dense-PR truncation degrades to partial)
     with:
       pr_number: ${{ inputs.pr_number || github.event.inputs.pr_number || github.event.pull_request.number }}
     secrets:
