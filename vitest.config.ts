@@ -14,8 +14,12 @@ const packedArtifactRequested = process.argv.some((argument) =>
  * fail against current pins and bury real failures in noise. CI never sees them
  * (it clones fresh), so the only effect is to make a local `pnpm test` untrustworthy,
  * which is worse than useless: it invites working around `pnpm test` with a bare
- * `vitest run`, and `pnpm test` here is `tsc -p tsconfig.json && vitest run` — the
- * workaround silently skips the typecheck that CI enforces.
+ * `vitest run`, and `pnpm test` here is
+ * `tsc -p tsconfig.json && tsc -p tsconfig.parity.json && vitest run` — the
+ * workaround silently skips the typechecks that CI enforces. Note the SECOND
+ * program especially: it is the only one that checks
+ * tests/planForAiRoundtrip.test.ts, which the root config excludes (see
+ * tsconfig.parity.json for why), so dropping it loses that file entirely.
  *
  * The explicit `.claude/**` exclude holds even if `include` is ever widened.
  */

@@ -34,6 +34,7 @@
  * bug and a future tax-stack regression should fail on different lines.
  */
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 
 import { parsePlan, type Plan } from '@retiregolden/engine/model/plan'
 // `testSupport/samplePlan` is a deprecated one-line re-export that planner-ui
@@ -47,15 +48,44 @@ import { serializeSinglePlan, type SinglePlanExport } from '@retiregolden/planne
 import * as adapter from '../src/adapter.js'
 import { buildPlanFromParams, type BuildPlanInput } from '../src/buildPlan.js'
 import { createSession } from '../src/session.js'
+import { TOOL_TABLE } from '../src/toolTable.js'
 
 /** Exactly what the toolbar button puts on the clipboard, parsed back. */
 function copiedPayload(plan: Plan, startYear: number): SinglePlanExport {
   return JSON.parse(serializeSinglePlan(plan, startYear)) as SinglePlanExport
 }
 
-/** `build_plan` with the payload spread straight in, as the paste instruction says. */
+/**
+ * The `build_plan` argument schema the transports actually enforce — stdio
+ * builds `z.object(tool.inputShape)` and the HTTP gateway validates against the
+ * same shape.
+ */
+const buildPlanArgs = z.object(TOOL_TABLE.find((t) => t.name === 'build_plan')!.inputShape)
+
+/**
+ * `build_plan` with the payload spread straight in, as the paste instruction says.
+ *
+ * Routed through the tool-layer schema first, not straight into
+ * `buildPlanFromParams`. A pasted payload never reaches `buildPlanFromParams`
+ * directly — it arrives as `tools/call` arguments and is parsed by
+ * `z.object(inputShape)` on the way in. Calling the function directly would let
+ * a serializer that is no longer a *valid `build_plan` argument* (a stringified
+ * `startYear`, a renamed sibling) sail past this suite while failing for a real
+ * assistant. Parsing here means the acceptance criterion is tested on the path
+ * the user's paste actually takes.
+ *
+ * Scope of the gate, so nobody reads more into it: it checks the SIBLINGS.
+ * `plan` is `z.unknown()` in the shape by design — the engine's `parsePlan` is
+ * the real document validator and `build_plan` warns rather than refuses — so a
+ * malformed plan still arrives as `issues`, not as a parse failure here.
+ */
 function buildFrom(payload: SinglePlanExport | Partial<BuildPlanInput>) {
-  return buildPlanFromParams(payload as BuildPlanInput)
+  const parsed = buildPlanArgs.safeParse(payload)
+  expect(
+    parsed.success,
+    parsed.success ? '' : `payload is not a valid build_plan argument: ${parsed.error.message}`,
+  ).toBe(true)
+  return buildPlanFromParams((parsed.success ? parsed.data : payload) as BuildPlanInput)
 }
 
 /**
@@ -217,6 +247,12 @@ describe('the siblings are load-bearing, not decoration', () => {
   it('stamps the engine that produced the document, and a wrong one is caught', () => {
     const plan = createSamplePlan()
     const payload = copiedPayload(plan, 2026)
+    // `schemaVersion` needs pinning as a PRESENT stamp, not just a matching one.
+    // `pushCallerSchemaSkewCaveat` fires only when the sibling is present and
+    // disagrees, so a serializer that dropped the field entirely would emit no
+    // caveat and slide past `expectNoPayloadSkew` unnoticed.
+    expect(payload.schemaVersion).toBe(plan.schemaVersion)
+
     // A real engine version, not a placeholder and not some other field.
     // Deliberately NOT compared to `@retiregolden/engine/version`'s
     // `ENGINE_VERSION`: that constant is OUR engine, and the browser stamps ITS
