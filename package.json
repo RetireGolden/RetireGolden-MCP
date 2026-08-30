@@ -48,7 +48,7 @@
     "build": "tsc -p tsconfig.build.json",
     "baseline:capture": "node scripts/capture-protocol-baseline.mjs",
     "mcp": "node dist/cli.js",
-    "test": "tsc -p tsconfig.json && vitest run",
+    "test": "tsc -p tsconfig.json && tsc -p tsconfig.parity.json && vitest run",
     "test:packed": "vitest run tests/packedArtifact.test.ts",
     "prepack": "pnpm run build"
   },
@@ -60,6 +60,7 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@retiregolden/planner-ui": "0.9.0",
     "@types/node": "^26.1.1",
     "typescript": "~7.0.2",
     "vitest": "^4.1.10"

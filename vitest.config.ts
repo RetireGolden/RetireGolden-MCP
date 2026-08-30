@@ -21,6 +21,11 @@ const packedArtifactRequested = process.argv.some((argument) =>
  */
 export default defineConfig({
   test: {
+    // `@retiregolden/planner-ui` ships TypeScript SOURCE, not built JS (it
+    // expects a Vite-class bundler). Vitest externalizes node_modules by
+    // default and would hand raw `.ts` to Node's ESM loader, so the parity
+    // round-trip needs it pulled through the transform pipeline.
+    server: { deps: { inline: ['@retiregolden/planner-ui'] } },
     include: ['tests/**/*.test.ts'],
     exclude: [
       '**/node_modules/**',

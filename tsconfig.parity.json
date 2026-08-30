@@ -1,0 +1,20 @@
+// Typecheck for tests/planForAiRoundtrip.test.ts only.
+//
+// That test imports `@retiregolden/planner-ui`, a package that ships TypeScript
+// source targeting a Vite-class bundler. Its relative imports are extensionless,
+// which the root config's `nodenext` resolution rejects. Rather than weaken the
+// root config — `nodenext` is what proves the published `dist` carries the `.js`
+// extensions Node needs — this second program checks the one file that consumes
+// a bundler-targeted package, under bundler resolution.
+//
+// This is a resolution swap, not an escape hatch: `strict` and every other check
+// are inherited, and the test's own types are still fully enforced.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "preserve",
+    "moduleResolution": "bundler"
+  },
+  "include": ["tests/planForAiRoundtrip.test.ts"],
+  "exclude": []
+}

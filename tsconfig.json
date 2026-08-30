@@ -12,5 +12,14 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  // The browser round-trip test imports `@retiregolden/planner-ui`, which ships
+  // TypeScript SOURCE written for a bundler: extensionless relative specifiers
+  // that `nodenext` resolution rejects (TS2835) even though Vite resolves them
+  // fine at run time. Those diagnostics are about another package's source, not
+  // ours, and the fix is not to loosen resolution here — `nodenext` is what
+  // validates the `.js` extensions the published `dist` actually needs. So that
+  // one file is checked by `tsconfig.parity.json` instead, under the bundler
+  // resolution its imports are written for. Both programs run in `pnpm test`.
+  "exclude": ["tests/planForAiRoundtrip.test.ts"]
 }

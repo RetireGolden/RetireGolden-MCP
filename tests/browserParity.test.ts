@@ -8,11 +8,15 @@
  * the gap this file closes: it reconstructs the app's stack from the engine and
  * asserts the adapter agrees with IT, not with its own past output.
  *
- * Why reconstruct rather than import: planner-ui is a browser package in another
- * repo, and depending on it from a headless MCP server would be a heavy, circular
- * dependency for one function. The cost of the copy is that it can drift — so
- * `taxCalculatorFor` below is a literal transcription, and the divergence test at
- * the bottom proves the assertion has teeth by showing the old stack failing it.
+ * Why reconstruct rather than import: this file must keep working on the engine
+ * alone. `@retiregolden/planner-ui` is now a dev dependency (see
+ * planForAiRoundtrip.test.ts), but it is the PUBLISHED package, so importing
+ * `taxCalculatorFor` from it would make this file agree with whatever the last
+ * release shipped instead of with the stack the app is specified to run — a
+ * parity test that imports its own oracle proves nothing. The cost of the copy is
+ * that it can drift, so `taxCalculatorFor` below is a literal transcription, and
+ * the divergence test at the bottom proves the assertion has teeth by showing the
+ * old stack failing it.
  *
  * A modeled state is essential to all of this. In a state with no income tax the
  * two stacks agree trivially and every assertion here would pass against the bug.
