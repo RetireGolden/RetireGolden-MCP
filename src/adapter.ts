@@ -26,7 +26,8 @@ import type { SessionState } from './session.js'
 
 /**
  * The tax stack EVERY simulating path runs. Deliberately identical to the
- * browser planner's `taxCalculatorFor` (planner-ui/src/planner/useProjection.ts):
+ * browser planner's `taxCalculatorFor` (planner-ui/src/planTaxCalculator.ts,
+ * which planner/useProjection.ts only re-exports):
  * federal COMBINED WITH state+local, configured from the plan's own assumptions.
  *
  * It was federal-only through 0.4.2, which silently answered a different question
