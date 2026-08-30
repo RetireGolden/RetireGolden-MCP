@@ -1,6 +1,8 @@
 # Manual emergency caller for the legacy Grok Build PR review.
 # Implementation lives in RetireGolden/.github — do not copy it here.
 #
+# Pass only XAI_API_KEY. Do not inherit: this repo also holds CLA_PAT.
+#
 # This workflow intentionally has no pull_request trigger. It is independent
 # of the required OpenRouter workflow and spends xAI tokens only when a human
 # explicitly dispatches it for a PR number.

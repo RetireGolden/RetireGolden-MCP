@@ -5,6 +5,8 @@
 #
 # OpenRouter is the only automatic AI review workflow. The separate legacy
 # Grok workflow is manual-only and is never a fallback for this caller.
+# Per-PR concurrency belongs to the central reusable; do not add a
+# workflow-level group here because it could cancel an active first pass.
 # The stable required-check context is:
 #
 #   review / openrouter-first-pass-gate
@@ -28,13 +30,14 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  # The central reusable publishes the stable required-gate commit status.
   statuses: write
 
 jobs:
   # Keep this id stable: it is the first half of the required check context.
   review:
     if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
-    uses: RetireGolden/.github/.github/workflows/openrouter-code-review.yml@134ac6abb17e27fd893f67622c6c46791f28c463 # .github#34 (high-effort Grok + GLM OpenRouter lanes)
+    uses: RetireGolden/.github/.github/workflows/openrouter-code-review.yml@f6aa157430509b5f6945b4fc2c9fafeeac4a7294 # .github#35 (action v1.2.7/#20; oversized-diff fallback, requested roster retained)
     with:
       pr_number: ${{ inputs.pr_number || github.event.inputs.pr_number || github.event.pull_request.number }}
     secrets:
