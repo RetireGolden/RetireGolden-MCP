@@ -1,18 +1,19 @@
-# Thin caller for the org OpenRouter PR review.
+# Thin caller for the org-required OpenRouter PR review.
 # Implementation lives in RetireGolden/.github — do not copy it here.
-# Separate workflow from Grok code review so a failure here cannot red
-# review / grok-first-pass-gate or cancel Grok jobs.
 #
 # Pass only OPENROUTER_API_KEY. Do not inherit.
 #
-# Synchronize runs a VERIFY round (behavior since the .github#19 pin)
-# that SKIPS with a notice (zero token spend) until a first-pass has
-# seeded this PR's review loop; the live pin is on the uses: line below.
-# Seed with workflow_dispatch (pr_number), or the PR's next reopen /
-# ready_for_review. Still advisory — never a required check. Per-PR
-# concurrency lives in the org reusable's own job-level groups; do not
-# add a workflow-level group here (it could cancel an in-progress
-# first-pass).
+# OpenRouter is the only automatic AI review workflow. The separate legacy
+# Grok workflow is manual-only and is never a fallback for this caller.
+# Per-PR concurrency belongs to the central reusable; do not add a
+# workflow-level group here because it could cancel an active first pass.
+# The stable required-check context is:
+#
+#   review / openrouter-first-pass-gate
+#
+# The lane roster is frozen by the exact central pin below. This repo runs
+# x-ai/grok-4.6 + z-ai/glm-5.3-flash at high effort; the recall-safe judge
+# merges the two independent OpenRouter lanes.
 
 name: OpenRouter code review
 
@@ -29,11 +30,14 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  # The central reusable publishes the stable required-gate commit status.
+  statuses: write
 
 jobs:
-  openrouter:
-    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft }}
-    uses: RetireGolden/.github/.github/workflows/openrouter-code-review.yml@79863e9b7b5608022b220ad9b7d6e6c944748c21 # .github#27 (action v1.2.6 diff-budget triage; this repo: single x-ai/grok-4.6 lane)
+  # Keep this id stable: it is the first half of the required check context.
+  review:
+    if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
+    uses: RetireGolden/.github/.github/workflows/openrouter-code-review.yml@f6aa157430509b5f6945b4fc2c9fafeeac4a7294 # .github#35 (action v1.2.7/#20; oversized-diff fallback, requested roster retained)
     with:
       pr_number: ${{ inputs.pr_number || github.event.inputs.pr_number || github.event.pull_request.number }}
     secrets:
