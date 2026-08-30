@@ -3,7 +3,8 @@
  *
  * Through 0.4.2 it did not: `taxCalc()` returned `createFederalTaxCalculator()`
  * alone, while the app runs federal COMBINED WITH the state calculator
- * (`taxCalculatorFor` in planner-ui/src/planner/useProjection.ts). Nothing in this
+ * (`taxCalculatorFor` in planner-ui/src/planTaxCalculator.ts, which
+ * planner/useProjection.ts only re-exports). Nothing in this
  * suite noticed, because every test here compared the MCP against itself. That is
  * the gap this file closes: it reconstructs the app's stack from the engine and
  * asserts the adapter agrees with IT, not with its own past output.
@@ -34,7 +35,7 @@ import * as adapter from '../src/adapter.js'
 import { createSession } from '../src/session.js'
 import type { HouseholdParams, PolicyParams } from '../src/buildPlan.js'
 
-/** Transcribed verbatim from planner-ui/src/planner/useProjection.ts. */
+/** Transcribed verbatim from planner-ui/src/planTaxCalculator.ts. */
 function taxCalculatorFor(plan: Plan) {
   return combineTaxCalculators(
     createFederalTaxCalculator(),

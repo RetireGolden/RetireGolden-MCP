@@ -36,7 +36,6 @@
 import { describe, expect, it } from 'vitest'
 
 import { parsePlan, type Plan } from '@retiregolden/engine/model/plan'
-import { ENGINE_VERSION } from '@retiregolden/engine/version'
 // `testSupport/samplePlan` is a deprecated one-line re-export that planner-ui
 // means to keep out of its tarball, so import the builder it forwards to.
 import { buildExampleCouple as createSamplePlan } from '@retiregolden/planner-ui/planner/examples/buildExampleCouple'
@@ -70,24 +69,35 @@ function buildFrom(payload: SinglePlanExport | Partial<BuildPlanInput>) {
  * re-pins, a correctly-stamped payload legitimately triggers the provenance
  * warning — which is the warning doing its job, not a defect.
  *
- * So this compares against this package's own view of its engine rather than
- * asserting the caveat away. Blanket-asserting no skew would couple this file to
- * another repo's release cadence and turn every engine patch into a red test
- * here, which would teach the next person to delete the assertion.
+ * So this reproduces the comparison `pushEngineSkewCaveat` actually makes — the
+ * stamp **the payload carries** against **this package's installed engine** —
+ * rather than asserting the caveat away. Blanket-asserting no skew would couple
+ * this file to another repo's release cadence and turn every engine patch into a
+ * red test here, which would teach the next person to delete the assertion.
+ *
+ * Take the stamp from the payload, never from a local `ENGINE_VERSION` import —
+ * which is why this file no longer imports one. In planner-ui's tree that
+ * constant was the *browser's* engine, so the two sides were genuinely different
+ * copies. Imported here it would resolve to this package's engine, so comparing
+ * the two would be this package reading itself: the `===` branch would always
+ * win and the skew branch would be dead code. Today all three readings agree
+ * (planner-ui's `^0.1.12` dedupes onto our exact `0.1.12`); the day planner-ui's
+ * floor rises past our pin they stop agreeing, and that is precisely the case
+ * this helper exists to keep green.
  */
-function expectNoPayloadSkew(caveats: string[]) {
+function expectNoPayloadSkew(caveats: string[], stampedEngine: string) {
   const mcpEngine = adapter.getVersions().engineVersion
 
   expect(caveats.filter((c) => c.includes('schemaVersion skew:'))).toEqual([])
 
   const engineSkew = caveats.filter((c) => c.includes('engineVersion skew:'))
-  if (mcpEngine === ENGINE_VERSION) {
+  if (mcpEngine === stampedEngine) {
     expect(engineSkew).toEqual([])
   } else {
     // Different engines: exactly one caveat, and it must name both so a reader
     // can tell a release lag from a mis-stamped payload.
     expect(engineSkew).toHaveLength(1)
-    expect(engineSkew[0]).toContain(ENGINE_VERSION)
+    expect(engineSkew[0]).toContain(stampedEngine)
     expect(engineSkew[0]).toContain(String(mcpEngine))
   }
 }
@@ -96,7 +106,8 @@ describe('copied plan → build_plan', () => {
   it('rebuilds the same plan and start year, with no version skew', () => {
     const plan = createSamplePlan()
     const view = projectPlan(plan)
-    const built = buildFrom(copiedPayload(plan, view.startYear))
+    const payload = copiedPayload(plan, view.startYear)
+    const built = buildFrom(payload)
 
     expect(built.issues ?? []).toEqual([])
     expect(built.ok).toBe(true)
@@ -106,7 +117,7 @@ describe('copied plan → build_plan', () => {
     // imported document also reports that the resident state's income tax is
     // modeled, which is a true statement about this KY plan and not a defect in
     // the payload.
-    expectNoPayloadSkew(built.caveats)
+    expectNoPayloadSkew(built.caveats, payload.engineVersion)
   })
 
   it('reproduces the projection the results page is showing', () => {
@@ -125,9 +136,12 @@ describe('copied plan → build_plan', () => {
   })
 
   it('survives a plan with every exotic corner filled in', () => {
-    // The sample plan is a well-behaved couple. Prove the wrapper is agnostic to
-    // plan content by round-tripping a plan with scenarios, insurance, care
-    // events and a one-time goal attached.
+    // Prove the wrapper is agnostic to plan content. The fixture already carries
+    // the awkward corners — `insurance` (whole life + two LTC policies),
+    // `careEvents`, and an `expenses.oneTimeGoals` entry — see
+    // planner-ui/src/planner/examples/buildExampleCouple.ts. This adds the one
+    // corner it lacks, `scenarios`, so all four are in the object under test and
+    // a serializer that dropped any of them fails the `toEqual` below.
     const plan = createSamplePlan()
     plan.scenarios = [{ id: 'scen-1', name: 'Higher inflation', patch: { 'assumptions.inflationPct': 3 } }]
     const validated = parsePlan(plan)
@@ -203,7 +217,15 @@ describe('the siblings are load-bearing, not decoration', () => {
   it('stamps the engine that produced the document, and a wrong one is caught', () => {
     const plan = createSamplePlan()
     const payload = copiedPayload(plan, 2026)
-    expect(payload.engineVersion).toBe(ENGINE_VERSION)
+    // A real engine version, not a placeholder and not some other field.
+    // Deliberately NOT compared to `@retiregolden/engine/version`'s
+    // `ENGINE_VERSION`: that constant is OUR engine, and the browser stamps ITS
+    // own, so asserting equality would make this file go red the moment
+    // planner-ui's engine range moves off our exact pin — the same
+    // release-cadence coupling `expectNoPayloadSkew` is written to avoid. The
+    // teeth are in the negative control below, which proves `build_plan` really
+    // reads this field as an engine version.
+    expect(payload.engineVersion).toMatch(/^\d+\.\d+\.\d+/)
 
     // The provenance warning is the entire point of stamping it: a document
     // exported under a different engine still imports, but says so.
@@ -220,7 +242,7 @@ describe('the siblings are load-bearing, not decoration', () => {
     const payload = copiedPayload(createSamplePlan(), 2026)
     expect('conventions' in (payload as object)).toBe(false)
     const caveats: string[] = buildFrom(payload).caveats
-    expectNoPayloadSkew(caveats)
+    expectNoPayloadSkew(caveats, payload.engineVersion)
     // Nothing about conventions either — the absence must not read as a posture.
     expect(caveats.some((c) => c.includes('convention'))).toBe(false)
   })
