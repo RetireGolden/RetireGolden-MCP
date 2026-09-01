@@ -16,10 +16,21 @@ changed shape: the Plan JSON Schema now REQUIRES `inflationAdjusted` on a
 - Keep MCP calculations aligned with engine 0.2.0.
 - `describe_plan_schema` (and the `plan-schema` resource) report plan schema
   **v5** with `schemaId` `https://retiregolden.org/schemas/plan/v5.json`. The
-  one shape change: `properties.incomes.items` — the `oneTime` variant gains a
-  required boolean `inflationAdjusted`, the election `recurring` always had.
-  `true` reads the amount as today's dollars grown to the year it pays; `false`
-  reads it as that year's dollars, taken as written.
+  complete v4 → v5 difference in the served artifact, taken from a leaf-level
+  diff of the two `describe_plan_schema` payloads rather than from memory:
+  - `properties.incomes.items`, the `oneTime` variant: a **required** boolean
+    `inflationAdjusted`, the election `recurring` always had. `true` reads the
+    amount as today's dollars grown to the year it pays; `false` reads it as
+    that year's dollars, taken as written. This is the change that made v5
+    a version.
+  - `properties.accounts.items`, the `traditional` variant: an **optional**
+    `employerPlanType` (`401k` | `403b` | `457b`).
+  - `properties.accounts.items`, the `traditional` and `roth` variants: an
+    **optional** `inherited.decedentId` string.
+  The two account fields are additive and arrived in the engine between
+  0.1.12 and 0.2.0 (IRC §4974 RMD shortfall excise work) without a schema
+  bump; they appear here because the artifact is the whole schema as of
+  0.2.0. Nothing was removed.
 - `build_plan` with full plan JSON: a document written against v1–v4 still
   migrates in (the engine writes `inflationAdjusted: false` onto any pre-v5
   one-time income, preserving what it already projected). A document that
@@ -40,20 +51,29 @@ changed shape: the Plan JSON Schema now REQUIRES `inflationAdjusted` on a
   **byte-identical** to the 0.1.12 baseline. What moved is exactly the
   `engineVersion` stamp (`0.1.12` → `0.2.0`), the `schemaVersion` stamps
   (`4` → `5`), and the two `describe_plan_schema` payloads. No number changed.
-- That is the expected shape for engine 0.2.0. Its two behaviour changes —
-  one-time income stops paying after the last household death, and the new
-  election — cannot reach a retired household with pensions and Social
-  Security on a default horizon; everything else between the two tags is
-  extraction verified byte-identical in the engine's own differential.
+- That is the expected shape for engine 0.2.0 **on this fixture**: a retired
+  household with pensions and Social Security, no one-time income, default
+  horizon. Its two behaviour changes — one-time income stops paying after the
+  last household death, and the new election — cannot reach that fixture;
+  everything else between the two tags is extraction the engine verified
+  byte-identical in its own differential. A plan that authors one-time
+  income, or runs stochastic longevity, can project differently on 0.2.0.
+  That is the engine change, not baseline drift, and it is why the baseline
+  was regenerated rather than the engine pinned back.
 
 ### Why this release exists
 
 Engine 0.2.0 is the first breaking engine release (a required new field is
-not additive). Until this package re-pinned, `describe_plan_schema` kept
-teaching assistants to author v4 documents against an engine that now
-migrates them — harmless, but one version behind the plan format the web
-app writes. This release brings the served schema and the installed engine
-back into lockstep.
+not additive). Until this package re-pinned, `describe_plan_schema` taught
+assistants the v4 shape while the engine on `main` had moved to v5. This
+release brings the served schema and the installed engine back into
+lockstep **with each other**.
+
+The web app is a separate axis, and it is NOT yet in lockstep: the published
+`@retiregolden/planner-ui` 0.9.0 still resolves engine `^0.1.12` and writes
+`schemaVersion: 4` documents. A payload copied from the app now migrates in
+with a `plan-schema migration:` caveat — correct behaviour, visibly reported.
+That gap closes when planner-ui republishes on `^0.2.0`.
 
 **Known lag, by design:** `tests/planForAiRoundtrip.test.ts` runs the copied
 payload through the *published* `@retiregolden/planner-ui` (0.9.0), which

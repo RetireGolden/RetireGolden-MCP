@@ -196,7 +196,7 @@ function expectNoPayloadSkew(caveats: string[], stampedEngine: string, documentV
 }
 
 describe('copied plan → build_plan', () => {
-  it('rebuilds the same plan and start year, with no version skew', () => {
+  it('rebuilds the same plan and start year, reporting release lag but never skew', () => {
     const plan = createSamplePlan()
     const view = projectPlan(plan)
     const payload = copiedPayload(plan, view.startYear)
@@ -253,8 +253,13 @@ describe('copied plan → build_plan', () => {
     // `schemaVersion` alone. The browser's OWN object is what gets serialized,
     // so the sibling stamp and the embedded version agree exactly as they do
     // for a real paste.
-    const stored = asThisBuildStoresIt(plan)
+    // Serialize BEFORE building the comparison object. `migratePlanToCurrent` is
+    // pure today — the lag assertion below passing (exactly one migration
+    // caveat) is what proves the payload still went out as v4 — but this order
+    // keeps the test independent of that: nothing the comparison does can leak
+    // into the bytes the browser is modelled as pasting.
     const payload = copiedPayload(plan, 2029)
+    const stored = asThisBuildStoresIt(plan)
     const built = buildFrom(payload)
     expect(built.ok).toBe(true)
     expect(built.plan).toEqual(stored)
