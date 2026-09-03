@@ -102,9 +102,11 @@ Code, Codex, Cursor, the Grok and OpenRouter review bots, and any other tool.
 
 ### Merging
 
-- Squash-merge is the repository admin's call. The admin is named in
-  "Repo-specific" below. An agent session may squash-merge with admin bypass
-  only when all of the following hold: `gh auth status` shows the session is
+- Squash-merge is the repository admin's call, and the admin has granted it
+  as a standing rule (this replaces the earlier "do not merge unless asked"
+  rule). The admin is named in "Repo-specific" below. An agent session may
+  squash-merge, with admin bypass where the repo needs it, only when all of
+  the following hold: `gh auth status` shows the session is
   authenticated as that admin account; the head is review-clean; every check
   the repo expects is green for that head; and every review thread is
   resolved. The bypass exists solely to clear ruleset conditions an
@@ -124,20 +126,38 @@ Code, Codex, Cursor, the Grok and OpenRouter review bots, and any other tool.
   be retracted. Do not derive handles from git author names; use only the
   handles named in "Repo-specific".
 - Never add `cursoragent` or any other shared tool account to a CLA
-  allowlist, and never edit `.github/workflows/cla.yml` to do so.
+  allowlist. Never edit `.github/workflows/cla.yml` for any reason: it is a
+  `pull_request_target` workflow with write permissions and a PAT, and
+  changes to it are the admin's alone.
 - Delegate mechanical loops (review-fix rounds, rebases, check watches) to
-  subagents where the tool supports them. Verify each subagent's report
-  against live GitHub state (head SHA, verdict, unresolved threads, gated
-  jobs) before acting on it.
+  subagents where the tool supports them. Every rule in this file binds a
+  subagent as well: a subagent never merges, dispatches a release or
+  production workflow, or edits CI or CLA workflows on its own. Verify each
+  subagent's report against live GitHub state (head SHA, verdict, unresolved
+  threads, gated jobs) before acting on it.
 
 <!-- rg-shared-agent-rules:end -->
 
 ## Repo-specific
 
 - Repository admin: @FlyOverCoderKY.
-- No `run-ci` label here. `ci.yml` runs `test` (plus the Node matrix) on
-  every PR. Required checks on `main`: `test` and the first-pass review
-  gate. The CLA check (`cla.yml`) runs on every PR.
+- Ruleset facts below were verified 2026-09-03 with
+  `gh api repos/RetireGolden/RetireGolden-MCP/rules/branches/main`; re-run
+  it when in doubt, the live ruleset wins over this text.
+- No `run-ci` label here. `ci.yml` runs a three-OS matrix on Node 24
+  (`test (ubuntu-latest, 24)`, `test (windows-latest, 24)`,
+  `test (macos-latest, 24)`); each leg runs `pnpm test`, `pnpm run build`,
+  and `pnpm run test:packed`, and an aggregate `test` job checks the matrix
+  result. Required checks on `main`, by exact context: `test` and
+  `review / openrouter-first-pass-gate`. Wait for the whole matrix anyway;
+  a red leg is a real failure.
+- The `CLA` check (from the `CLA Assistant` workflow, `cla.yml`) runs on PR
+  `opened`, `synchronize`, and `closed`, not on `reopened`; after reopening
+  a PR, push or wait for a fresh run before trusting its status. It is not a
+  required check on `main`. Its allowlist already covers `FlyOverCoderKY`
+  and `*[bot]`. If it is red because a commit author is not allowlisted,
+  that author signs the CLA through the bot's comment; nobody edits the
+  allowlist and nobody bypasses the check.
 - `main` requires every review thread resolved but has no post-push-approval
   rule, so a review-clean, green PR with resolved threads merges without the
   admin bypass. Resolve the threads; do not reach for the bypass.
