@@ -6,8 +6,10 @@
 # Publishes via npm Trusted Publishing (OIDC): the @retiregolden/mcp package on
 # npmjs.com is configured with a trusted publisher pinned to this repo, this
 # workflow filename, and the `npm-publish` environment, so no long-lived token
-# is needed. This requires npm >= 11.5.1; the explicit `npm install -g npm@latest`
-# step below guarantees it regardless of what the runner's Node bundles.
+# is needed. It requires a minimum npm version (NPM_MIN in the "Pin the npm
+# that publishes" step below); that step installs one exact npm version
+# (NPM_PIN) on every run, regardless of what the runner's Node bundles, and
+# fails the job if the pin is below the minimum.
 # There is no NPM_TOKEN: token-based publishing has been retired, and the npm
 # package is set to disallow tokens, so releases authenticate only via OIDC.
 #
@@ -83,11 +85,37 @@ jobs:
             sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
           fi
 
-      # OIDC trusted publishing requires npm >= 11.5.1. Installing it explicitly
-      # keeps this step correct whatever npm the runner's Node happens to bundle,
-      # rather than resting on a claim about one Node version.
-      - name: Upgrade npm for OIDC support
-        run: npm install -g npm@latest
+      # Every action in this workflow is pinned to a SHA, and the npm that
+      # performs the publish is pinned the same way: NPM_PIN is installed on
+      # every run, so the publish CLI never depends on what the floating
+      # `node-version: "24"` image happens to bundle, and two releases from the
+      # same commit run the same npm. (`npm@latest` would have put whatever npm
+      # shipped that day into the release path with no review; using the bundled
+      # npm conditionally would have left it moving with the runner image.)
+      # Because the install runs unconditionally, every dry-run dispatch
+      # exercises it too, so a broken pin fails there rather than during an
+      # approval-gated release. The version check after the install fails the
+      # job if NPM_PIN is ever bumped below NPM_MIN, the OIDC trusted-publishing
+      # minimum; without it a too-old pin would surface later as an opaque
+      # authentication error from `npm publish --provenance`. Bump NPM_PIN
+      # deliberately (Dependabot does not track this line) and keep it on the
+      # same major the bundled npm uses.
+      - name: Pin the npm that publishes
+        env:
+          NPM_MIN: "11.5.1"
+          NPM_PIN: "11.18.0"
+        run: |
+          npm install -g "npm@$NPM_PIN"
+          have="$(npm --version)"
+          if [ "$have" != "$NPM_PIN" ]; then
+            echo "npm --version reports $have after installing npm@$NPM_PIN" >&2
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$NPM_MIN" "$have" | sort -V | head -n1)" != "$NPM_MIN" ]; then
+            echo "npm@$NPM_PIN is below the OIDC trusted-publishing minimum $NPM_MIN" >&2
+            exit 1
+          fi
+          echo "publishing with npm $have (pinned; OIDC minimum $NPM_MIN)"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

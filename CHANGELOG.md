@@ -126,6 +126,17 @@ same null-on-failure contract — and it is not re-exported from the package roo
   export in `skills/retiregolden/references/plan-json.md` is a current
   (plan-schema v5) export rather than a stale one.
 
+### Changed (release workflow only)
+
+- `publish-mcp.yml` no longer installs `npm@latest` into the release job. It
+  installs one exact-pinned npm version on every run (`NPM_PIN` in the
+  workflow, 11.18.0 at the time of this entry), asserts the installed version
+  and that it meets the OIDC trusted-publishing minimum (`NPM_MIN`, 11.5.1),
+  and fails the job otherwise. The npm that performs the publish is therefore
+  pinned like every action in the workflow, independent of what the runner's
+  Node 24 image bundles; the install path runs on dry-run dispatches too, so a
+  broken pin fails there rather than during an approval-gated release.
+
 ### Removed
 
 - `bin/retiregolden-mcp.js`. Run the published `retiregolden-mcp` bin
