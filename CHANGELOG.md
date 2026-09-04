@@ -130,9 +130,11 @@ same null-on-failure contract — and it is not re-exported from the package roo
 
 - `publish-mcp.yml` no longer installs `npm@latest` into the release job. It uses the
   runner's bundled npm when that already satisfies the OIDC trusted-publishing
-  minimum (>= 11.5.1) and otherwise installs an exact-pinned npm, so the tool
-  that performs the publish is pinned like every action in the workflow and two
-  releases from the same commit cannot differ by whatever npm shipped that day.
+  minimum (>= 11.5.1) and otherwise installs an exact-pinned npm. That is a
+  minimum-version guarantee, not a full pin of the publish CLI: on the happy path
+  the publish still runs whatever npm the workflow's Node 24 bundles, which moves
+  as the runner image does. What it removes is `npm@latest` — an unreviewed npm
+  published that morning can no longer walk into the release path.
 
 ### Removed
 
