@@ -291,8 +291,9 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       return {
         hasPlan: session.plan != null,
         startYear: session.startYear,
-        caveats: session.caveats,
-        conventions: session.conventions,
+        // Copies, not the live arrays/objects — see adapter.snapshotCaveats.
+        caveats: adapter.snapshotCaveats(session),
+        conventions: adapter.snapshotConventions(session),
         planName: session.plan?.name ?? null,
         mcpVersion,
         engineVersion,
@@ -304,6 +305,12 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'export_plan',
+    // NOTE: this description spells "non-2026" as a literal, not as an
+    // interpolation of session.DEFAULT_START_YEAR. Deliberate: every
+    // description here is hashed into tests/protocol-baseline/baseline.json's
+    // inventory, so interpolating it is itself a wire-visible change. If
+    // DEFAULT_START_YEAR ever moves, this string moves in the SAME change and
+    // the baseline is regenerated deliberately. @see session.DEFAULT_START_YEAR
     description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear, conventions and caveats, and the identity of the build that emitted it: schemaVersion (the engine's plan-schema version), engineVersion and mcpVersion (null if not resolvable). Round-trips via build_plan({ plan, startYear, conventions, schemaVersion, engineVersion }) — pass the exported startYear back or a non-2026 session's projection will diverge, and pass the version siblings back so a different build can warn on skew (a differing engineVersion, or a schemaVersion that disagrees with the document, is a caveat only — never a refusal). A document written against an OLDER plan schema is migrated forward by the engine before import and accepted with a plan-schema migration caveat naming both versions (re-export it from this build to persist the upgrade). Only a document the engine cannot migrate — one newer than this build, or one that fails validation after migration — is rejected with an explanatory message rather than silently mis-read. Returns a clone; mutating it does not affect the live session.`,
     inputShape: {},
     handler: (session) => adapter.exportPlan(session),
@@ -367,11 +374,54 @@ function zodIssues(error: z.ZodError): string {
 }
 
 /**
+ * The compiled `z.object(entry.inputShape)` for a tool, built once per entry.
+ *
+ * `inputShape` is a raw shape, not a schema, because it is the shape both
+ * `registerTool` and the gateway want and it is part of the exported
+ * `ToolEntry` surface. But `z.object()` is a real compile — every gateway
+ * request was rebuilding the whole object schema (build_plan's is four nested
+ * param schemas deep) just to throw it away after one `safeParse`.
+ *
+ * Cached in a WeakMap rather than a field on the entry so `ToolEntry` stays the
+ * plain declarative record it is documented as, and so an entry a caller
+ * constructs itself (Pro composes tables) is memoized on the same terms as ours
+ * without having to know about the cache.
+ *
+ * THE CACHE'S PRECONDITION, stated as a contract rather than a guarantee: an
+ * entry's `inputShape` must not change after its first use. Nothing enforces
+ * that — `readonly TOOL_TABLE` freezes the array binding, not the entries, and
+ * `entry.inputShape = { ... }` still typechecks — so an embedder that edits a
+ * shape after one `validateToolArgs` keeps being validated against the schema
+ * compiled from the OLD shape, silently. Build the shape before first use, or
+ * hand out a fresh entry. Our own table never mutates one (grep: no assignment
+ * to `.inputShape` anywhere in src/ or tests/).
+ *
+ * The other shared-instance question — whether handing the SAME compiled object
+ * to `registerTool` and to the gateway lets one corrupt the other — was checked
+ * against the pinned SDK: @modelcontextprotocol/server 2.0.0's
+ * `normalizeRawShapeSchema` returns an already-Standard-Schema value untouched
+ * (it only wraps a RAW shape in `z.object`), and never writes to it. Zod
+ * schemas are themselves immutable under parsing. If that ever changes, give
+ * registration its own instance.
+ */
+const compiledSchemas = new WeakMap<ToolEntry, z.ZodObject<z.ZodRawShape>>()
+
+/** The compiled input schema for `entry`, compiling it on first use. */
+export function argsSchemaFor(entry: ToolEntry): z.ZodObject<z.ZodRawShape> {
+  let schema = compiledSchemas.get(entry)
+  if (!schema) {
+    schema = z.object(entry.inputShape)
+    compiledSchemas.set(entry, schema)
+  }
+  return schema
+}
+
+/**
  * Validate gateway arguments against the tool's own zod shape (plus any
  * cross-field rule). Returns an error message, or null when valid.
  */
 export function validateToolArgs(entry: ToolEntry, args: Record<string, unknown>): string | null {
-  const parsed = z.object(entry.inputShape).safeParse(args)
+  const parsed = argsSchemaFor(entry).safeParse(args)
   if (!parsed.success) return zodIssues(parsed.error)
   if (entry.crossFieldValidate) return entry.crossFieldValidate(args)
   return null

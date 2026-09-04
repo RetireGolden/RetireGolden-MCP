@@ -3,6 +3,43 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+Internal adapter hygiene. **No change to any tool's wire output or to
+`tools/list` descriptions** — the protocol baseline
+(`tests/protocol-baseline/baseline.json`) is unmoved.
+
+### Changed (programmatic embedders only)
+
+- `BuildPlanResult` (exported from the package root) is now a discriminated
+  union on `ok` instead of one interface with optional `plan`/`issues`:
+  `{ ok: true; plan; startYear; endYear?; caveats; ordering_unsupported? }`
+  or `{ ok: false; startYear; caveats; issues; ordering_unsupported? }`.
+  Runtime shape is identical — the same fields were already present or absent
+  on the same branches — but TypeScript now narrows on `result.ok` alone.
+  Embedders that read `result.plan` without checking `result.ok` (or that
+  wrote `result.plan!`) will see a type error; guard on `result.ok` first.
+- Every handler now returns COPIES of `session.caveats` and
+  `session.conventions` rather than the live values. `export_plan` already
+  did; `run_projection`, `run_monte_carlo`, `batch_evaluate`, `run_optimizer`,
+  `solve_max_spending`, `explain_modeled_result`, `update_plan` and
+  `get_session` now do too. A consumer that relied on mutating a returned
+  `caveats` array to edit the live session no longer can — that was never the
+  documented contract.
+- The same now holds for the other two session-owned objects that reached a
+  response by reference: `run_projection`'s `summary` (which is also cached on
+  the session) and `explain_modeled_result`'s `assumptions` (the live plan's)
+  and `lastProjectionSummary`. `build_plan` also deep-copies the `conventions`
+  it is given, so a caller that keeps its own `irmaaLookbackMagis` tuple can no
+  longer mutate live session conventions through it.
+- `adapter.snapshotCaveats(session)` and `adapter.snapshotConventions(session)`
+  are exported (via the `adapter` namespace) for embedders composing their own
+  handlers on the same isolation terms.
+- `SessionState.lastProjection` is typed as
+  `{ result: ProjectionResult; summary: ProjectionSummary } | null` instead of
+  `unknown | null`.
+- `DEFAULT_START_YEAR` (2026) is exported from the package root.
+
 ## 0.9.1
 
 **Updates the exact `@retiregolden/engine` dependency from 0.2.0 to 0.3.0, and

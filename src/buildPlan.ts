@@ -10,7 +10,7 @@ import { migratePlanToCurrent } from '@retiregolden/engine/model/migrations'
 import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema/current'
 import { stateParamsFor } from '@retiregolden/engine/params/state'
 import { getVersions } from './versions.js'
-import type { ConventionKnobs } from './session.js'
+import { DEFAULT_START_YEAR, type ConventionKnobs } from './session.js'
 
 export const PersonParamsSchema = z.object({
   birth_year: z.number().int().min(1900).max(2100).describe('4-digit birth year, e.g. 1960'),
@@ -224,15 +224,74 @@ export interface BuildPlanInput {
   mcpVersion?: string | null
 }
 
-export interface BuildPlanResult {
-  ok: boolean
-  plan?: Plan
-  startYear: number
-  endYear?: number
-  caveats: string[]
-  issues?: string[]
-  ordering_unsupported?: boolean
-}
+/**
+ * A build either produced a plan or produced issues — never both, and never
+ * neither. Expressing that as a discriminated union on `ok` lets `result.ok`
+ * alone narrow to a non-optional `plan`, so callers stop writing the
+ * `!result.ok || !result.plan` belt-and-braces check (and stop reaching for
+ * `result.plan!`, which asserted away a real invariant instead of stating it).
+ *
+ * `startYear`, `caveats` and `ordering_unsupported` are on both arms: a failed
+ * build still resolved a start year and may have accumulated caveats before it
+ * failed, and the typed path reports ordering support even when parsePlan
+ * rejects the plan it built.
+ */
+export type BuildPlanResult =
+  | {
+      ok: true
+      plan: Plan
+      startYear: number
+      endYear?: number
+      caveats: string[]
+      ordering_unsupported?: boolean
+    }
+  | {
+      ok: false
+      startYear: number
+      caveats: string[]
+      issues: string[]
+      ordering_unsupported?: boolean
+    }
+
+/**
+ * The three `traditional-first` caveat wordings, in one place.
+ *
+ * All three say the same thing — the engine's sequential drain cannot express
+ * traditional-first, so the ledger is approximate — in three different sets of
+ * words, because they grew at three different sites: the typed build path, the
+ * conventions overlay, and the adapter's batch cell.
+ *
+ * DO NOT UNIFY THE TEXT HERE — but be accurate about what pins them.
+ *
+ * They are NOT in tests/protocol-baseline/baseline.json. The baseline's
+ * `batch_evaluate_fixture` step runs `singlePolicy`, whose `ordering` is
+ * `taxable-first`, so the only caveat it records is the state-tax one; none of
+ * these three strings appears anywhere in that file. What pins them is the unit
+ * suite, by substring:
+ *
+ * - `TRADITIONAL_FIRST_TYPED_CAVEAT` — `'ordering=traditional-first'` in
+ *   tests/buildPlan.test.ts and tests/adapter.extended.test.ts.
+ * - `TRADITIONAL_FIRST_CONVENTION_CAVEAT` — `'convention
+ *   withdrawalOrdering=traditional-first'` in tests/buildPlan.test.ts.
+ * - `TRADITIONAL_FIRST_BATCH_CAVEAT` — `'traditional-first approximate'` in
+ *   tests/adapter.extended.test.ts.
+ *
+ * They are still WIRE-VISIBLE: each reaches a tool response whenever a caller
+ * actually asks for traditional-first ordering. So rewording one is a change a
+ * client can see, and belongs in a deliberate commit that says so — it is just
+ * not the protocol baseline that would catch it. Naming them is the part that
+ * is safe: the three sites now point at one definition, so the next reader can
+ * see they are duplicates rather than rediscovering it.
+ */
+export const TRADITIONAL_FIRST_TYPED_CAVEAT =
+  'ordering=traditional-first has no full engine equivalent (sequential drains taxable before traditional); ledger is approximate'
+
+/** @see TRADITIONAL_FIRST_TYPED_CAVEAT — frozen wording, do not reword. */
+export const TRADITIONAL_FIRST_CONVENTION_CAVEAT =
+  'convention withdrawalOrdering=traditional-first: approximate under sequential'
+
+/** @see TRADITIONAL_FIRST_TYPED_CAVEAT — frozen wording, do not reword. */
+export const TRADITIONAL_FIRST_BATCH_CAVEAT = 'traditional-first approximate'
 
 const FILING = { single: 'single', mfj: 'marriedFilingJointly' } as const
 
@@ -395,7 +454,7 @@ export function stateTaxCaveat(
 
 export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   const caveats: string[] = []
-  const startYear = input.startYear ?? 2026
+  const startYear = input.startYear ?? DEFAULT_START_YEAR
   const conventions = input.conventions ?? {}
 
   if (input.plan != null) {
@@ -502,6 +561,29 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   const hh = input.household
   const policy = input.policy
 
+  // KEEP THESE, even though they look redundant against HouseholdParamsSchema.
+  //
+  // `buildPlanFromParams` is exported from the package root and takes a plain
+  // `BuildPlanInput`, not a zod-parsed one. The tool layer happens to run
+  // HouseholdParamsSchema / PolicyParamsSchema first (so `horizon >= 1`,
+  // non-empty `persons`, and the `filing` / `ordering` enums are already
+  // enforced on THAT path) — but a programmatic caller (Pro, a test, an
+  // embedder) reaches this function directly with whatever it constructed, and
+  // for those callers these are the only checks there are. Without them a bad
+  // input becomes an opaque engine parsePlan failure, or worse, an
+  // `undefined` filing silently written into the plan.
+  //
+  // The same reasoning covers `FILING[hh.filing]` being unknown and the
+  // `unknown ordering` fallthrough in buildTypedPlan below.
+  //
+  // Test coverage is UNEVEN, so do not read "tested" into all four: the two
+  // guards immediately below have their exact messages asserted in
+  // tests/buildPlan.test.ts ('horizon must be >= 1',
+  // 'household.persons must not be empty'). The `unknown filing` / `unknown
+  // ordering` fallthroughs have NO test — they are unreachable from the zod
+  // enums, so a test would have to construct a `BuildPlanInput` by hand. They
+  // are kept for the programmatic caller described above, not because CI would
+  // catch their removal. Do not "clean them up" as dead code.
   if (hh.horizon < 1) {
     return { ok: false, startYear, caveats, issues: ['horizon must be >= 1'] }
   }
@@ -579,10 +661,15 @@ function buildTypedPlan(
 ): BuildPlanResult {
   let n = 0
   const newId = () => `id-${++n}`
-  const now = () => new Date('2026-01-01T00:00:00.000Z')
+  // Frozen clock, not `new Date()`: a build must be reproducible, and this
+  // stamps the plan's createdAt/updatedAt. Pinned to the same default year as
+  // the session so the two cannot drift. @see DEFAULT_START_YEAR
+  const now = () => new Date(`${DEFAULT_START_YEAR}-01-01T00:00:00.000Z`)
 
   const endYear = startYear + hh.horizon - 1
   const filing = FILING[hh.filing]
+  // Unreachable through the tool layer's zod enum; reachable from a
+  // programmatic caller. See the guard note in buildPlanFromParams.
   if (!filing) {
     return { ok: false, startYear, caveats, issues: [`unknown filing ${hh.filing}`] }
   }
@@ -706,10 +793,10 @@ function buildTypedPlan(
   } else if (ordering === 'traditional-first') {
     plan.strategies.withdrawalOrder = { mode: 'sequential' }
     ordering_unsupported = true
-    caveats.push(
-      'ordering=traditional-first has no full engine equivalent (sequential drains taxable before traditional); ledger is approximate',
-    )
+    caveats.push(TRADITIONAL_FIRST_TYPED_CAVEAT)
   } else {
+    // Same as the filing guard above: the zod enum cannot produce this, a
+    // programmatic caller can. See the guard note in buildPlanFromParams.
     return { ok: false, startYear, caveats, issues: [`unknown ordering ${ordering}`] }
   }
   plan.strategies.qcdAnnual = 0
@@ -808,7 +895,7 @@ function applyConventions(
   } else if (conventions.withdrawalOrdering === 'traditional-first') {
     plan.strategies.withdrawalOrder = { mode: 'sequential' }
     mutated = true
-    caveats.push('convention withdrawalOrdering=traditional-first: approximate under sequential')
+    caveats.push(TRADITIONAL_FIRST_CONVENTION_CAVEAT)
   }
   return mutated
 }

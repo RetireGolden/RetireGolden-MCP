@@ -6,14 +6,32 @@
  * pinned, so the factory must be side-effect-free per call.
  */
 
-import { createRequire } from 'node:module'
 import { McpServer } from '@modelcontextprotocol/server'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { createSession } from './session.js'
 import { registerTools, registerResources } from './tools.js'
+import { getVersions } from './versions.js'
 
-const require = createRequire(import.meta.url)
-const { version } = require('../package.json') as { version: string }
+/**
+ * The version this server reports in `serverInfo`. Read through
+ * `getVersions()`, which is the one place that resolves package identity (and
+ * the same value `get_session` and `export_plan` report), rather than through a
+ * second `createRequire('../package.json')` of its own: two readers is two
+ * chances to disagree about what "the running version" means, and this one had
+ * no fallback — an unresolvable package.json threw at module load instead of
+ * degrading. `getVersions` never throws, so the sentinel is the visible
+ * '0.0.0'.
+ *
+ * That sentinel deliberately does NOT match what the tools report on the same
+ * unresolvable install: `get_session` and `export_plan` keep emitting
+ * `mcpVersion: null`. The two surfaces have different contracts — MCP's
+ * `serverInfo.version` is a required string, so there is no null to send, while
+ * `mcpVersion` is a documented nullable whose null is recorded in
+ * tests/protocol-baseline/baseline.json. Unifying them either way is a wire
+ * change, so the divergence is stated here rather than papered over. Both still
+ * come from the one resolver, which is the drift this indirection removes.
+ */
+const version = getVersions().mcpVersion ?? '0.0.0'
 
 /**
  * Construct one server for one serving unit (a pinned stdio connection, or a

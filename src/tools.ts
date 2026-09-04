@@ -13,7 +13,6 @@
  * responses keep the SDK's safe fallback (`ttlMs: 0`, `cacheScope: 'private'`).
  */
 
-import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/server'
 import {
   planJsonSchema,
@@ -21,7 +20,7 @@ import {
   PLAN_SCHEMA_VERSION,
 } from '@retiregolden/engine/schema/current'
 import type { SessionState } from './session.js'
-import { TOOL_TABLE, jsonResult, type ToolEntry } from './toolTable.js'
+import { TOOL_TABLE, argsSchemaFor, jsonResult, type ToolEntry } from './toolTable.js'
 
 export { EDUCATIONAL, jsonResult } from './toolTable.js'
 
@@ -80,7 +79,9 @@ export function registerTools(
       tool.name,
       {
         description: tool.description,
-        inputSchema: z.object(tool.inputShape),
+        // Same compiled schema object the gateway's validateToolArgs uses, so
+        // the two transports cannot drift and the compile happens once.
+        inputSchema: argsSchemaFor(tool),
       },
       async (args) => {
         // Guarded rather than defaulted to a no-op callback: with no `authorize`,

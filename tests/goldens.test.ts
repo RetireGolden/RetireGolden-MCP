@@ -67,6 +67,7 @@ import { describe, expect, it } from 'vitest'
 import { createSession } from '../src/session.js'
 import * as adapter from '../src/adapter.js'
 import type { AssumptionsInput, HouseholdParams, PolicyParams } from '../src/buildPlan.js'
+import { builtOk } from './fixtures.js'
 
 /**
  * Every RetireBench convention stated explicitly. Passing this reproduces the
@@ -526,7 +527,7 @@ describe('engine-default passthrough (WS1.3 decision a)', () => {
       startYear: 2026,
     })
     expect(build.ok).toBe(true)
-    const a = build.plan!.assumptions
+    const a = builtOk(build).plan.assumptions
     expect(a.inflationPct).toBe(2.5)
     expect(a.healthcareExtraInflationPct).toBe(3)
     expect(a.defaultReturnPct).toBe(5.5)
