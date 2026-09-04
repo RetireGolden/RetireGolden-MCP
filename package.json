@@ -58,6 +58,11 @@
     "@retiregolden/engine": "0.3.0",
     "zod": "4.4.3"
   },
+  "pnpm": {
+    "overrides": {
+      "fast-uri": "^3.1.6"
+    }
+  },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/sdk": "1.30.0",
