@@ -61,15 +61,14 @@ const MAX_BODY_BYTES = 1024 * 1024
 const MAX_SESSIONS = 100
 const MAX_SESSION_ID_LENGTH = 128
 const SESSION_TTL_MS = 30 * 60 * 1000
+const SESSION_SWEEP_INTERVAL_MS = 60 * 1000
 
 interface SessionEntry {
   state: SessionState
   lastSeen: number
 }
 
-const sessions = new Map<string, SessionEntry>()
-
-function sweepExpired(now: number): void {
+function sweepExpired(sessions: Map<string, SessionEntry>, now: number): void {
   for (const [id, entry] of sessions) {
     if (now - entry.lastSeen > SESSION_TTL_MS) sessions.delete(id)
   }
@@ -136,10 +135,17 @@ export async function startHttpGateway(
   const port = opts.port ?? DEFAULT_PORT
   const host = assertLoopback(opts.host ?? DEFAULT_HOST)
 
+  // One store per gateway instance, not per module. Plan state is in-memory and
+  // must not outlive the listener that accepted it: a module-global map is
+  // shared by every instance started in the process (so two gateways would see
+  // each other's sessions) and survives close(), leaving plan data resident in a
+  // process that no longer has a listener.
+  const sessions = new Map<string, SessionEntry>()
+
   const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json')
     const now = Date.now()
-    sweepExpired(now)
+    sweepExpired(sessions, now)
 
     if (req.method === 'GET' && req.url === '/health') {
       res.writeHead(200)
@@ -223,6 +229,20 @@ export async function startHttpGateway(
   })
 
   server.requestTimeout = 30_000
+
+  // The per-request sweep only runs while traffic arrives, so an idle gateway
+  // would hold expired plan state indefinitely. This timer expires it anyway.
+  // unref() so it never by itself keeps the process alive.
+  const sweepTimer = setInterval(
+    () => sweepExpired(sessions, Date.now()),
+    SESSION_SWEEP_INTERVAL_MS,
+  )
+  sweepTimer.unref()
+
+  server.on('close', () => {
+    clearInterval(sweepTimer)
+    sessions.clear()
+  })
 
   await new Promise<void>((resolve) => {
     server.listen(port, host, () => {
