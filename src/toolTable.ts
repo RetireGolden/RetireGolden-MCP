@@ -368,11 +368,38 @@ function zodIssues(error: z.ZodError): string {
 }
 
 /**
+ * The compiled `z.object(entry.inputShape)` for a tool, built once per entry.
+ *
+ * `inputShape` is a raw shape, not a schema, because it is the shape both
+ * `registerTool` and the gateway want and it is part of the exported
+ * `ToolEntry` surface. But `z.object()` is a real compile — every gateway
+ * request was rebuilding the whole object schema (build_plan's is four nested
+ * param schemas deep) just to throw it away after one `safeParse`.
+ *
+ * Cached in a WeakMap rather than a field on the entry so `ToolEntry` stays the
+ * plain declarative record it is documented as, and so an entry a caller
+ * constructs itself (Pro composes tables) is memoized on the same terms as ours
+ * without having to know about the cache. Sound because a shape is frozen for
+ * an entry's lifetime: TOOL_TABLE is a module-level `readonly` literal.
+ */
+const compiledSchemas = new WeakMap<ToolEntry, z.ZodObject<z.ZodRawShape>>()
+
+/** The compiled input schema for `entry`, compiling it on first use. */
+export function argsSchemaFor(entry: ToolEntry): z.ZodObject<z.ZodRawShape> {
+  let schema = compiledSchemas.get(entry)
+  if (!schema) {
+    schema = z.object(entry.inputShape)
+    compiledSchemas.set(entry, schema)
+  }
+  return schema
+}
+
+/**
  * Validate gateway arguments against the tool's own zod shape (plus any
  * cross-field rule). Returns an error message, or null when valid.
  */
 export function validateToolArgs(entry: ToolEntry, args: Record<string, unknown>): string | null {
-  const parsed = z.object(entry.inputShape).safeParse(args)
+  const parsed = argsSchemaFor(entry).safeParse(args)
   if (!parsed.success) return zodIssues(parsed.error)
   if (entry.crossFieldValidate) return entry.crossFieldValidate(args)
   return null
