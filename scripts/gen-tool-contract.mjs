@@ -10,8 +10,12 @@
  * shows up in the PR diff. tests/registry-parity.test.ts fails until the
  * committed block matches the live table again.
  *
- * Every other key in the document is preserved byte-for-byte as it was read:
- * this script owns `inputSchemas` and nothing else.
+ * This script owns the VALUE of `inputSchemas` and nothing else: every other
+ * key keeps the value it was read with. Formatting is not preserved, though —
+ * the document is reparsed and rewritten with `JSON.stringify(.., null, 2)`, so
+ * hand-collapsed arrays (the arm lists were one-liners) come back expanded. If a
+ * regeneration diff touches a key other than `inputSchemas`, it is a
+ * re-indentation, not a value change.
  *
  * Usage: pnpm run contract:generate
  */
@@ -25,20 +29,56 @@ export const PACKAGE_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)
 export const CONTRACT_PATH = resolve(PACKAGE_ROOT, 'schemas/tools.v1.json')
 
 /**
- * JSON Schema for one tool's arguments.
+ * The conversion options, exported so the parity test cannot pass under options
+ * that differ from the ones this script writes with.
+ *
+ * `io: 'input'` is what makes the published block an INPUT contract. Zod's
+ * default is output-mode, which closes the top-level object with
+ * `additionalProperties: false` — a shape `tools/list` does not send, because
+ * `z.object` STRIPS unknown keys rather than rejecting them. Under output mode
+ * the published schema was stricter than both the wire and the runtime, so a
+ * client validating against it would have rejected calls the server accepts.
+ * With `io: 'input'` every one of the 14 blocks is deep-equal to the
+ * `inputSchema` the SDK actually advertises, as captured in
+ * tests/protocol-baseline/baseline.json and asserted by
+ * tests/registry-parity.test.ts. It also keeps the block honest if a future
+ * shape gains a `.default()` or a transform, where the two modes really diverge.
  *
  * `unrepresentable: 'any'` is deliberate: a few shapes in the table
  * (`z.unknown()` plan documents, the `PlanFragment` record) intentionally accept
  * anything the engine's own validator is the authority on, and an empty schema
- * is the truthful rendering of that. Zod refinements that JSON Schema cannot
- * express (e.g. the `dobMonthDay` calendar check) are dropped the same way the
- * schema the MCP client sees drops them; the runtime parse still enforces them.
+ * is the truthful rendering of that.
+ */
+export const JSON_SCHEMA_OPTIONS = Object.freeze({
+  target: 'draft-2020-12',
+  unrepresentable: 'any',
+  io: 'input',
+})
+
+/**
+ * JSON Schema for one tool's arguments.
+ *
+ * NECESSARY BUT NOT SUFFICIENT — this is the same guarantee `tools/list` gives,
+ * and it is worth stating because a client could otherwise read the block as a
+ * complete admission test. A call these schemas accept can still be refused at
+ * runtime, in three known ways:
+ *
+ *  1. Cross-field rules live in `ToolEntry.crossFieldValidate`, which JSON Schema
+ *     never sees: `build_plan` demands `plan`, or BOTH `household` and `policy`,
+ *     and on the typed path a 2-letter `household.state`.
+ *  2. Zod refinements JSON Schema cannot express are dropped — the `dobMonthDay`
+ *     calendar check, `update_plan`'s `fragmentKey` rule — exactly as they are
+ *     dropped from the schema the MCP client sees. The runtime parse still
+ *     enforces them.
+ *  3. `z.unknown()` fields render as an empty schema that accepts anything; the
+ *     engine's own validator is the authority on those documents.
+ *
+ * Encoding (1) or (2) here would make the published block disagree with the wire
+ * schema, which is the one thing this file exists to mirror. The fix for a
+ * caller who needs them is the error message, not a tighter contract file.
  */
 export function toolInputSchema(entry) {
-  return z.toJSONSchema(z.object(entry.inputShape), {
-    target: 'draft-2020-12',
-    unrepresentable: 'any',
-  })
+  return z.toJSONSchema(z.object(entry.inputShape), JSON_SCHEMA_OPTIONS)
 }
 
 /** The whole `inputSchemas` block, keyed by tool name in table declaration order. */

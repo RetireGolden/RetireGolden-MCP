@@ -2,7 +2,7 @@
   "contractVersion": 1,
   "$id": "https://retiregolden.org/schemas/mcp-tools/v1.json",
   "title": "RetireGolden MCP tool surface v1",
-  "description": "Versioned tool contract for stdio and future HTTP transports. Educational decision-support only.",
+  "description": "Versioned tool contract for stdio and future HTTP transports. Educational decision-support only. `inputSchemas` holds the same per-tool schema `tools/list` advertises, and carries the same guarantee: necessary, not sufficient. Arguments these schemas accept can still be refused at runtime by cross-field rules JSON Schema cannot express (build_plan requires `plan`, or BOTH `household` and `policy`, and a 2-letter `household.state` on the typed path) and by zod refinements that do not survive conversion. Validate against them to catch obvious mistakes early; treat the server's error as the authority.",
   "tools": [
     "build_plan",
     "validate_plan",
@@ -104,8 +104,7 @@
                   "trad",
                   "roth",
                   "pia"
-                ],
-                "additionalProperties": false
+                ]
               },
               "description": "One entry per household member"
             },
@@ -151,7 +150,6 @@
                 "roth",
                 "taxable"
               ],
-              "additionalProperties": false,
               "description": "Per-bucket NOMINAL annual return rates (fractions, not percents). These are written straight into the engine's nominal annualReturnPct — real return is roughly this minus inflationPct. Use nominal figures (e.g. 0.05 for a 5% headline return), not inflation-adjusted ones."
             },
             "pre_horizon_magi": {
@@ -182,8 +180,7 @@
             "horizon",
             "growth",
             "heir_ordinary_rate"
-          ],
-          "additionalProperties": false
+          ]
         },
         "policy": {
           "description": "Typed policy params: claim_ages[], optional conversion_bracket/conversion_years, withdrawal ordering",
@@ -238,8 +235,7 @@
           "required": [
             "claim_ages",
             "ordering"
-          ],
-          "additionalProperties": false
+          ]
         },
         "conversion": {
           "description": "Optional manual Roth conversion schedule (overrides bracket-fill conversions)",
@@ -267,16 +263,14 @@
                 "required": [
                   "year",
                   "amount"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           },
           "required": [
             "mode",
             "conversions"
-          ],
-          "additionalProperties": false
+          ]
         },
         "startYear": {
           "type": "integer",
@@ -359,8 +353,7 @@
                 }
               ]
             }
-          },
-          "additionalProperties": false
+          }
         },
         "assumptions": {
           "description": "Optional overrides for default modeling assumptions (inflation, returns, SS COLA, state, taxes, qualified ratio, dob month-day, sex). Defaults follow the engine (~2.5% inflation, SS COLA tracking inflation, and the resident state's own modeled income tax — set stateEffectiveTaxPct above 0 only to override that with a flat rate); household state is a REQUIRED input, not an assumption. Set explicit values to override; omitted fields keep the engine defaults.",
@@ -423,19 +416,16 @@
                 "average"
               ]
             }
-          },
-          "additionalProperties": false
+          }
         }
-      },
-      "additionalProperties": false
+      }
     },
     "validate_plan": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "plan": {}
-      },
-      "additionalProperties": false
+      }
     },
     "run_projection": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -449,8 +439,7 @@
             "years"
           ]
         }
-      },
-      "additionalProperties": false
+      }
     },
     "run_monte_carlo": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -466,8 +455,7 @@
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
         }
-      },
-      "additionalProperties": false
+      }
     },
     "batch_evaluate": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -529,8 +517,7 @@
             "required": [
               "claim_ages",
               "ordering"
-            ],
-            "additionalProperties": false
+            ]
           },
           "description": "Typed policy params to sweep: claim_ages[], conversion_bracket/years, ordering"
         },
@@ -545,20 +532,17 @@
       },
       "required": [
         "policies"
-      ],
-      "additionalProperties": false
+      ]
     },
     "run_optimizer": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": false
+      "properties": {}
     },
     "solve_max_spending": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": false
+      "properties": {}
     },
     "compare_scenarios": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -575,26 +559,22 @@
       "required": [
         "planA",
         "planB"
-      ],
-      "additionalProperties": false
+      ]
     },
     "explain_modeled_result": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": false
+      "properties": {}
     },
     "get_session": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": false
+      "properties": {}
     },
     "export_plan": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": false
+      "properties": {}
     },
     "describe_plan_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -604,8 +584,7 @@
           "description": "Optional dotted path or JSON pointer into the schema; omit for the full document",
           "type": "string"
         }
-      },
-      "additionalProperties": false
+      }
     },
     "update_plan": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -634,8 +613,7 @@
                 "required": [
                   "op",
                   "account"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -660,8 +638,7 @@
                   "op",
                   "id",
                   "account"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -678,8 +655,7 @@
                 "required": [
                   "op",
                   "id"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -699,8 +675,7 @@
                 "required": [
                   "op",
                   "income"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -725,8 +700,7 @@
                   "op",
                   "id",
                   "income"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -743,8 +717,7 @@
                 "required": [
                   "op",
                   "id"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -763,8 +736,7 @@
                   "op",
                   "field",
                   "value"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -783,8 +755,7 @@
                   "op",
                   "field",
                   "value"
-                ],
-                "additionalProperties": false
+                ]
               }
             ]
           },
@@ -793,14 +764,12 @@
       },
       "required": [
         "operations"
-      ],
-      "additionalProperties": false
+      ]
     },
     "clear_session": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": false
+      "properties": {}
     }
   }
 }

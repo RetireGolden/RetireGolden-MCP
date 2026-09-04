@@ -13,8 +13,10 @@ It exists to measure one thing — whether the same adapter behind a different
 transport returns the same numbers as stdio for a fixture matrix. It is not a
 product API, it is not exported from the package index, and it has no subpath in
 the `exports` map. From an installed package the only way in is this CLI
-subcommand; working in a clone of the repository you can also call
-`startHttpGateway()` in `src/http/gateway.ts` directly.
+subcommand; working in a clone of the repository, `pnpm run build` then
+`RETIREGOLDEN_HTTP_GATEWAY=1 pnpm run mcp http` runs the same `src/cli.ts`
+subcommand against your checkout (the opt-in variable is still required), or you
+can call `startHttpGateway()` in `src/http/gateway.ts` directly.
 
 Paths below that begin `src/` or `tests/` are repository paths. Neither
 directory is in the published tarball, so they are references for people reading

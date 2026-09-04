@@ -165,10 +165,14 @@ Create `.cursor/rules/retiregolden.mdc`. Rather than duplicating all of
 `SKILL.md`, point the model at the tool surface and the non-negotiable units /
 framing rules.
 
-> This rule is the **single full hand-translation of `SKILL.md`** in this
-> repository — the copy to keep in sync when the skill's units, defaults, or
-> framing change. Everywhere else (including the Codex `AGENTS.md` alternative
-> below) points here or at `SKILL.md` rather than restating it.
+> This rule is a deliberate SUBSET of `SKILL.md`, not a replacement for it: the
+> units, typed-path defaults, and framing rules, and nothing else. It leaves the
+> worked call examples, the policy limits, the error and caveat semantics, and
+> the plan-ingestion loop in the skill. What it does own is the **fullest
+> hand-written copy of those units-and-defaults rules in this repository** — so
+> when they change, this is the copy to update. Nothing else here restates them;
+> the Codex `AGENTS.md` alternative below carries a shorter set and points at
+> `SKILL.md` for the rest.
 
 ```md
 ---
@@ -306,9 +310,10 @@ Non-negotiables:
   `caveats`; never drop them.
 ```
 
-This snippet is deliberately shorter than the Cursor rule above, which is the
-one full hand-translation of `SKILL.md` here. Copy from that rule if you want
-inline instructions with the complete units and defaults detail.
+This snippet is deliberately shorter than the Cursor rule above, which carries
+the complete units and typed-path defaults. Copy from that rule if you want them
+inline; read `SKILL.md` for everything neither one restates (worked calls, policy
+limits, error and caveat semantics, plan ingestion).
 
 ---
 
