@@ -7,34 +7,22 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import type { Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { TOOL_TABLE } from '../src/toolTable.js'
+import { startTestGateway, type TestGateway } from './helpers/gateway.js'
 
-let server: Server
-let BASE = ''
+let gateway: TestGateway
 
 function post(tool: string): Promise<Response> {
-  return fetch(`${BASE}/tool`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-session-id': 'parity' },
-    body: JSON.stringify({ tool, arguments: {} }),
-  })
+  return gateway.post({ tool, arguments: {} }, { 'x-session-id': 'parity' })
 }
 
 describe('gateway exposure parity', () => {
   beforeAll(async () => {
-    // The gateway is a fenced research surface and refuses to start without an
-    // explicit opt-in; these suites are exercising it deliberately.
-    process.env.RETIREGOLDEN_HTTP_GATEWAY = '1'
-    const { startHttpGateway } = await import('../src/http/gateway.js')
-    server = await startHttpGateway({ port: 0, host: '127.0.0.1' })
-    const addr = server.address() as AddressInfo
-    BASE = `http://127.0.0.1:${addr.port}`
+    gateway = await startTestGateway()
   })
 
   afterAll(async () => {
-    await new Promise<void>((res) => server.close(() => res()))
+    await gateway.close()
   })
 
   it('rejects every non-exposed tool with UNKNOWN_TOOL', async () => {

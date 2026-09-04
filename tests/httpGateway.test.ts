@@ -1,21 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import type { Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { singleHousehold, singlePolicy } from './fixtures.js'
+import { startTestGateway, type TestGateway } from './helpers/gateway.js'
 
-let server: Server
+let gateway: TestGateway
 let BASE = ''
 
-function post(
-  body: unknown,
-  headers: Record<string, string> = {},
-): Promise<Response> {
-  return fetch(`${BASE}/tool`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...headers },
-    body: typeof body === 'string' ? body : JSON.stringify(body),
-  })
-}
+const post: TestGateway['post'] = (body, headers) => gateway.post(body, headers)
 
 const buildBody = {
   tool: 'build_plan',
@@ -24,17 +14,12 @@ const buildBody = {
 
 describe('HTTP gateway (Phase 6 stub) integration', () => {
   beforeAll(async () => {
-    // The gateway is a fenced research surface and refuses to start without an
-    // explicit opt-in; these suites are exercising it deliberately.
-    process.env.RETIREGOLDEN_HTTP_GATEWAY = '1'
-    const { startHttpGateway } = await import('../src/http/gateway.js')
-    server = await startHttpGateway({ port: 0, host: '127.0.0.1' })
-    const addr = server.address() as AddressInfo
-    BASE = `http://127.0.0.1:${addr.port}`
+    gateway = await startTestGateway()
+    BASE = gateway.base
   })
 
   afterAll(async () => {
-    await new Promise<void>((res) => server.close(() => res()))
+    await gateway.close()
   })
 
   it('serves /health', async () => {
