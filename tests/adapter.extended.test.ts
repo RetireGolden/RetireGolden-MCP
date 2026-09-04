@@ -110,6 +110,73 @@ describe('batchEvaluate — ordering modes', () => {
     )
   })
 
+  it('maps claim_ages by person, not by Social Security income order', () => {
+    // `claim_ages` is documented as aligned to household.persons order. A plan
+    // whose Social Security incomes are listed in the opposite order (an imported
+    // document, or one reshaped by update_plan) must still get each person their
+    // OWN claim age — the two orders have to price identically.
+    const policy = { ...mfjPolicy, claim_ages: [70, 62] }
+    const inOrder = mfjSession()
+    const reordered = mfjSession()
+    const incomes = reordered.plan!.incomes
+    const ssIdx = incomes.flatMap((inc, i) => (inc.type === 'socialSecurity' ? [i] : []))
+    expect(ssIdx).toHaveLength(2)
+    const [i0, i1] = ssIdx as [number, number]
+    ;[incomes[i0], incomes[i1]] = [incomes[i1]!, incomes[i0]!]
+
+    const a = adapter.batchEvaluate(inOrder, [policy])
+    const b = adapter.batchEvaluate(reordered, [policy])
+    expect(a.ok && b.ok).toBe(true)
+    if (!a.ok || !b.ok) return
+    expect(a.results[0]!.ok).toBe(true)
+    expect(b.results[0]!.ok).toBe(true)
+    expect(b.results[0]!.objective).toBe(a.results[0]!.objective)
+
+    // Guard the guard: swapping the AGES really does move the number, so the
+    // assertion above is not vacuously true for any pair of claim ages.
+    const swapped = adapter.batchEvaluate(mfjSession(), [{ ...mfjPolicy, claim_ages: [62, 70] }])
+    expect(swapped.ok).toBe(true)
+    if (!swapped.ok) return
+    expect(swapped.results[0]!.objective).not.toBe(a.results[0]!.objective)
+  })
+
+  it('fails the row when a person owns more than one Social Security income', () => {
+    const session = mfjSession()
+    const incomes = session.plan!.incomes
+    const ss = incomes.find((inc) => inc.type === 'socialSecurity')!
+    incomes.push({ ...ss, id: `${ss.id}-duplicate` })
+
+    const batch = adapter.batchEvaluate(session, [mfjPolicy])
+    expect(batch.ok).toBe(true)
+    if (!batch.ok) return
+    expect(batch.results[0]!.ok).toBe(false)
+    expect(batch.results[0]!.objective).toBeNull()
+    expect(batch.results[0]!.error).toContain('Social Security incomes')
+  })
+
+  it('fails the row when a person has no Social Security income', () => {
+    const session = mfjSession()
+    session.plan!.incomes = session.plan!.incomes.filter(
+      (inc) => !(inc.type === 'socialSecurity' && inc.personId === 'person-1'),
+    )
+
+    const batch = adapter.batchEvaluate(session, [mfjPolicy])
+    expect(batch.ok).toBe(true)
+    if (!batch.ok) return
+    expect(batch.results[0]!.ok).toBe(false)
+    expect(batch.results[0]!.error).toContain("person 'person-1'")
+    expect(batch.results[0]!.error).toContain('no Social Security income')
+  })
+
+  it('fails the row when claim_ages does not have one entry per person', () => {
+    const session = mfjSession() // two people
+    const batch = adapter.batchEvaluate(session, [{ ...mfjPolicy, claim_ages: [67] }])
+    expect(batch.ok).toBe(true)
+    if (!batch.ok) return
+    expect(batch.results[0]!.ok).toBe(false)
+    expect(batch.results[0]!.error).toContain('claim_ages has 1 entries but the household has 2 people')
+  })
+
   it('supports the cumulative_tax objective', () => {
     const session = mfjSession()
     const batch = adapter.batchEvaluate(session, [mfjPolicy], 'cumulative_tax')

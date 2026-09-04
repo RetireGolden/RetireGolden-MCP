@@ -268,18 +268,62 @@ export function batchEvaluate(
     caveats: string[]
   }> = []
 
-  const ssIncomeCount = session.plan.incomes.filter((inc) => inc.type === 'socialSecurity').length
+  // `claim_ages` is documented as "aligned to household.persons order", so the
+  // mapping is BY PERSON, not by the order Social Security incomes happen to sit
+  // in `plan.incomes`. Those two agree only for a plan this package built itself;
+  // an imported document (or one reshaped by update_plan) can list a spouse's
+  // benefit first, and the old positional walk then silently handed each person
+  // the other's claim age — a wrong answer with nothing on the wire admitting it.
+  //
+  // Resolved once from the session plan (every row clones the same plan, so the
+  // income indices are stable across rows).
+  const people = session.plan.household.people
+  const ssIncomeIndexByPerson = new Map<string, number[]>()
+  session.plan.incomes.forEach((inc, idx) => {
+    if (inc.type !== 'socialSecurity') return
+    const owner = inc.personId
+    if (owner == null) return
+    const seen = ssIncomeIndexByPerson.get(owner)
+    if (seen) seen.push(idx)
+    else ssIncomeIndexByPerson.set(owner, [idx])
+  })
+
+  /**
+   * The income index each person's claim age must be written to, or an error
+   * string when the plan cannot express a one-claim-age-per-person mapping.
+   * A row-level error, never a throw: one unmappable policy must not abort a sweep.
+   */
+  function resolveClaimAgeTargets(policy: PolicyParams): number[] | string {
+    if (policy.claim_ages.length !== people.length) {
+      return `claim_ages has ${policy.claim_ages.length} entries but the household has ${people.length} ${
+        people.length === 1 ? 'person' : 'people'
+      }; claim ages are aligned to household.persons order, one per person`
+    }
+    const targets: number[] = []
+    for (const person of people) {
+      const owned = ssIncomeIndexByPerson.get(person.id) ?? []
+      if (owned.length === 0) {
+        return `person '${person.id}' (${person.name}) has no Social Security income in the plan, so its claim age cannot be applied; add one via update_plan or rebuild the plan`
+      }
+      if (owned.length > 1) {
+        return `person '${person.id}' (${person.name}) owns ${owned.length} Social Security incomes; batch_evaluate maps exactly one claim age per person, so it cannot tell which to set`
+      }
+      targets.push(owned[0]!)
+    }
+    return targets
+  }
 
   for (let i = 0; i < policies.length; i++) {
     const policy = policies[i]!
     try {
-      if (policy.claim_ages.length < ssIncomeCount) {
+      const targets = resolveClaimAgeTargets(policy)
+      if (typeof targets === 'string') {
         results.push({
           index: i,
           policy,
           objective: null,
           ok: false,
-          error: `claim_ages has ${policy.claim_ages.length} entries but the plan has ${ssIncomeCount} Social Security incomes`,
+          error: targets,
           caveats: snapshotCaveats(session),
         })
         continue
@@ -313,13 +357,12 @@ export function batchEvaluate(
         planJson.strategies.rothConversion = { mode: 'none' }
       }
 
-      let personIdx = 0
-      for (const inc of planJson.incomes) {
-        if (inc.type === 'socialSecurity' && policy.claim_ages[personIdx] != null) {
-          inc.claimAge = { years: policy.claim_ages[personIdx]!, months: 0 }
-          personIdx++
-        }
-      }
+      targets.forEach((incomeIdx, personIdx) => {
+        const inc = planJson.incomes[incomeIdx]!
+        // Narrowing only — `targets` was built from socialSecurity incomes.
+        if (inc.type !== 'socialSecurity') return
+        inc.claimAge = { years: policy.claim_ages[personIdx]!, months: 0 }
+      })
 
       const parsed = parsePlan(planJson)
       if (!parsed.ok) {
