@@ -44,7 +44,27 @@ export interface SessionState {
   lastProjection: { result: ProjectionResult; summary: ProjectionSummary } | null
 }
 
-export function createSession(startYear = 2026): SessionState {
+/**
+ * The projection start year a session (and a build) assumes when the caller
+ * names none.
+ *
+ * One definition for what were three separate `2026` literals:
+ * `createSession`'s default, `buildPlanFromParams`'s `input.startYear ?? 2026`,
+ * and `buildTypedPlan`'s frozen `now()` clock — the createdAt/updatedAt stamp on
+ * a freshly built plan, which is pinned rather than `new Date()` so a build is
+ * reproducible.
+ *
+ * CHANGING THIS VALUE IS A WIRE CHANGE and not a one-line edit. Several
+ * `tools/list` descriptions in src/toolTable.ts name 2026 in prose
+ * ("a non-2026 session's projection would diverge"), and those descriptions are
+ * hashed into tests/protocol-baseline/baseline.json's inventory. They are plain
+ * strings, not interpolations, so moving the year means editing them in the
+ * same change and regenerating the baseline deliberately. Interpolating them
+ * would itself be a wire-visible change and belongs in its own commit.
+ */
+export const DEFAULT_START_YEAR = 2026
+
+export function createSession(startYear: number = DEFAULT_START_YEAR): SessionState {
   return {
     plan: null,
     startYear,

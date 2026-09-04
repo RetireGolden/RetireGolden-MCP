@@ -2,7 +2,13 @@
  * Public package exports for programmatic use (Pro / tests).
  */
 
-export { createSession, clearSession, type SessionState, type ConventionKnobs } from './session.js'
+export {
+  createSession,
+  clearSession,
+  DEFAULT_START_YEAR,
+  type SessionState,
+  type ConventionKnobs,
+} from './session.js'
 export {
   buildPlanFromParams,
   type BuildPlanInput,

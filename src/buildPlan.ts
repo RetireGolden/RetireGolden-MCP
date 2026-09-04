@@ -10,7 +10,7 @@ import { migratePlanToCurrent } from '@retiregolden/engine/model/migrations'
 import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema/current'
 import { stateParamsFor } from '@retiregolden/engine/params/state'
 import { getVersions } from './versions.js'
-import type { ConventionKnobs } from './session.js'
+import { DEFAULT_START_YEAR, type ConventionKnobs } from './session.js'
 
 export const PersonParamsSchema = z.object({
   birth_year: z.number().int().min(1900).max(2100).describe('4-digit birth year, e.g. 1960'),
@@ -440,7 +440,7 @@ export function stateTaxCaveat(
 
 export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   const caveats: string[] = []
-  const startYear = input.startYear ?? 2026
+  const startYear = input.startYear ?? DEFAULT_START_YEAR
   const conventions = input.conventions ?? {}
 
   if (input.plan != null) {
@@ -639,7 +639,10 @@ function buildTypedPlan(
 ): BuildPlanResult {
   let n = 0
   const newId = () => `id-${++n}`
-  const now = () => new Date('2026-01-01T00:00:00.000Z')
+  // Frozen clock, not `new Date()`: a build must be reproducible, and this
+  // stamps the plan's createdAt/updatedAt. Pinned to the same default year as
+  // the session so the two cannot drift. @see DEFAULT_START_YEAR
+  const now = () => new Date(`${DEFAULT_START_YEAR}-01-01T00:00:00.000Z`)
 
   const endYear = startYear + hh.horizon - 1
   const filing = FILING[hh.filing]
