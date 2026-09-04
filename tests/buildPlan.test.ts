@@ -309,7 +309,7 @@ describe('build_plan gateway arg validation (state format deferred to typed path
   it('rejects a typed-path build (no plan) whose household state is missing', () => {
     const { state: _dropped, ...noState } = singleHousehold
     const err = validateToolArgs(entry, { household: noState, policy: singlePolicy })
-    expect(err).toContain('household.state is required on the typed path')
+    expect(err).toContain('household.state is required')
   })
 
   it('rejects a typed-path build (no plan) whose household state is malformed', () => {
@@ -317,7 +317,28 @@ describe('build_plan gateway arg validation (state format deferred to typed path
       household: { ...singleHousehold, state: 'California' },
       policy: singlePolicy,
     })
-    expect(err).toContain('household.state is required on the typed path')
+    // A malformed value must not read as "required/missing" here either — the
+    // gateway used to say exactly that, telling a caller who supplied
+    // "California" that they had supplied nothing.
+    expect(err).toContain('household.state must be a 2-letter code')
+    expect(err).toContain('California')
+  })
+
+  it('word-for-word matches what the typed path reports, for every shared rule', () => {
+    // The point of validateTypedPathInputs: one wording, both transports. A
+    // gateway caller and a stdio caller must not be told different things about
+    // the same bad input.
+    const cases: Array<Record<string, unknown>> = [
+      { policy: singlePolicy },
+      { household: (({ state: _s, ...rest }) => rest)(singleHousehold), policy: singlePolicy },
+      { household: { ...singleHousehold, state: 'California' }, policy: singlePolicy },
+      { household: singleHousehold, policy: singlePolicy, assumptions: { state: '9!' } },
+    ]
+    for (const args of cases) {
+      const gatewayError = validateToolArgs(entry, args)
+      const typedIssues = builtFailed(buildPlanFromParams(args as never)).issues
+      expect(gatewayError).toBe(typedIssues[0])
+    }
   })
 })
 

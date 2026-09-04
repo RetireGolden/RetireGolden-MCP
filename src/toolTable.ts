@@ -17,6 +17,7 @@ import {
   ConversionSchema,
   AssumptionsSchema,
   ConventionKnobsSchema,
+  validateTypedPathInputs,
   type BuildPlanInput,
   type PolicyParams,
 } from './buildPlan.js'
@@ -155,21 +156,11 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     httpExposed: true,
     dataScope: 'session',
     arms: ['calculator', 'optimizer'],
-    crossFieldValidate: (args) => {
-      if (args.plan == null && (args.household == null || args.policy == null)) {
-        return 'Provide either `plan` JSON or both `household` and `policy`'
-      }
-      // Required-state is enforced only on the typed path: when a full `plan` is
-      // supplied the household is ignored, so do not demand its state. Mirrors the
-      // runtime rule in buildPlanFromParams for a clean gateway-level message.
-      if (args.plan == null && args.household != null) {
-        const state = (args.household as { state?: unknown }).state
-        if (state == null || (typeof state === 'string' && !/^[A-Za-z]{2}$/.test(state))) {
-          return 'household.state is required on the typed path: provide a 2-letter state-of-residence code (e.g. "CA")'
-        }
-      }
-      return null
-    },
+    // The same function buildPlanFromParams derives its issues from, so the two
+    // transports cannot report the same bad input in different words. Safe to
+    // cast: crossFieldValidate runs only after the shape parse succeeded.
+    // @see buildPlan.validateTypedPathInputs
+    crossFieldValidate: (args) => validateTypedPathInputs(args as unknown as BuildPlanInput),
   },
   {
     name: 'validate_plan',

@@ -502,6 +502,54 @@ export function stateTaxCaveat(
   return `state=${state}: stateEffectiveTaxPct=${overridePct} does NOT disable state income tax — only a value above 0 overrides the modeled ${state} pack, so this plan is taxed at ${state}'s modeled rates.`
 }
 
+/** A 2-letter US state-of-residence code, the only form the engine accepts. */
+const STATE_CODE = /^[A-Za-z]{2}$/
+
+/**
+ * The `build_plan` argument rules a flat zod shape cannot express, in ONE place.
+ *
+ * These three rules were written twice, in different words: here (as
+ * `buildPlanFromParams` issues, which the stdio transport surfaces) and in
+ * `build_plan.crossFieldValidate` (which the HTTP gateway surfaces). The two
+ * disagreed — the gateway reported a MALFORMED state as "household.state is
+ * required", telling a caller who had supplied "California" that they had
+ * supplied nothing, and it said nothing at all about `assumptions.state`. Both
+ * transports now read the wording from here.
+ *
+ * Only the rules that are genuinely cross-field or format-level live here.
+ * `horizon`, empty `persons`, `claim_ages` length and the wage contract stay in
+ * `buildPlanFromParams`: they are checks for the PROGRAMMATIC caller (the tool
+ * layer's zod already enforces the first three), not gateway argument rules.
+ *
+ * @returns the first issue, or null when the input is well-formed.
+ */
+export function validateTypedPathInputs(input: BuildPlanInput): string | null {
+  // Full plan JSON takes precedence and the typed fields are ignored, so none of
+  // the typed-path rules apply — including a malformed state on a household that
+  // will not be read. @see the mixed-mode note on HouseholdParamsSchema.state.
+  if (input.plan != null) return null
+  if (input.household == null || input.policy == null) {
+    return 'Provide either `plan` JSON or both `household` and `policy`'
+  }
+  // state is a required household input on the typed path — the engine needs a
+  // residence state and there is no longer a hardcoded KY default. assumptions.state
+  // can override the value used, but household.state must still be provided.
+  const state = input.household.state
+  if (state == null || state === '') {
+    return 'household.state is required: provide a 2-letter state-of-residence code (e.g. "CA"); assumptions.state can override the value used'
+  }
+  if (!STATE_CODE.test(state)) {
+    return `household.state must be a 2-letter code (A–Z), got "${state}"`
+  }
+  // assumptions.state overrides household.state, so validate it here too rather than
+  // letting a bad override surface only later as an opaque parsePlan failure.
+  const override = input.assumptions?.state
+  if (override != null && !STATE_CODE.test(override)) {
+    return `assumptions.state must be a 2-letter code (A–Z), got "${override}"`
+  }
+  return null
+}
+
 export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   const caveats: string[] = []
   const startYear = input.startYear ?? DEFAULT_START_YEAR
@@ -599,17 +647,15 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
     return { ok: true, plan: documentPlan, startYear, caveats }
   }
 
-  if (!input.household || !input.policy) {
-    return {
-      ok: false,
-      startYear,
-      caveats,
-      issues: ['Provide either `plan` JSON or both `household` and `policy`'],
-    }
+  // The typed-path shape rules, in the ONE place both transports read them from.
+  // @see validateTypedPathInputs
+  const typedPathIssue = validateTypedPathInputs(input)
+  if (typedPathIssue != null) {
+    return { ok: false, startYear, caveats, issues: [typedPathIssue] }
   }
 
-  const hh = input.household
-  const policy = input.policy
+  const hh = input.household!
+  const policy = input.policy!
 
   // KEEP THESE, even though they look redundant against HouseholdParamsSchema.
   //
@@ -646,38 +692,6 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
       startYear,
       caveats,
       issues: ['policy.claim_ages must have an entry for each person'],
-    }
-  }
-  // state is a required household input on the typed path — the engine needs a
-  // residence state and there is no longer a hardcoded KY default. assumptions.state
-  // can override the value used, but household.state must still be provided.
-  const STATE_CODE = /^[A-Za-z]{2}$/
-  if (hh.state == null || hh.state === '') {
-    return {
-      ok: false,
-      startYear,
-      caveats,
-      issues: [
-        'household.state is required: provide a 2-letter state-of-residence code (e.g. "CA"); assumptions.state can override the value used',
-      ],
-    }
-  }
-  if (!STATE_CODE.test(hh.state)) {
-    return {
-      ok: false,
-      startYear,
-      caveats,
-      issues: [`household.state must be a 2-letter code (A–Z), got "${hh.state}"`],
-    }
-  }
-  // assumptions.state overrides household.state, so validate it here too rather than
-  // letting a bad override surface only later as an opaque parsePlan failure.
-  if (input.assumptions?.state != null && !STATE_CODE.test(input.assumptions.state)) {
-    return {
-      ok: false,
-      startYear,
-      caveats,
-      issues: [`assumptions.state must be a 2-letter code (A–Z), got "${input.assumptions.state}"`],
     }
   }
   // Wages are not modeled by the typed path — a retired household is the explicit
