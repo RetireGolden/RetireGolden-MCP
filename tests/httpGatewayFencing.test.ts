@@ -6,8 +6,13 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { HTTP_GATEWAY_OPT_IN_ENV } from '../src/http/gateway.js'
 
-const OPT_IN = 'RETIREGOLDEN_HTTP_GATEWAY'
+// The exported constant, not a copy of its value: a rename that missed this
+// suite would otherwise leave it setting a variable nothing reads, and the
+// refusal tests would pass for the wrong reason. (`startHttpGateway` is still
+// imported dynamically inside each test; only the name is taken statically.)
+const OPT_IN = HTTP_GATEWAY_OPT_IN_ENV
 
 afterEach(() => {
   delete process.env[OPT_IN]

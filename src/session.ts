@@ -4,6 +4,16 @@
  */
 
 import type { Plan, ProjectionResult, summarizeProjection } from '@retiregolden/engine'
+import type { ConventionKnobs } from './buildPlan.js'
+
+/**
+ * The convention knobs a session stores. Defined in src/buildPlan.ts, next to
+ * the zod schema `build_plan` validates them with and that they are derived
+ * from, and re-exported here (type-only, so nothing is imported at runtime)
+ * because `SessionState` and the package root have always named it from this
+ * module.
+ */
+export type { ConventionKnobs }
 
 /**
  * The engine's projection summary. Named here via `ReturnType` because the
@@ -12,22 +22,6 @@ import type { Plan, ProjectionResult, summarizeProjection } from '@retiregolden/
  * from the engine is pulled in at runtime.
  */
 type ProjectionSummary = ReturnType<typeof summarizeProjection>
-
-export interface ConventionKnobs {
-  /** When set, freeze tax-law parameters at this calendar year (best-effort). */
-  lawSunsetFreezeYear?: number | null
-  /**
-   * Two distinct pre-projection IRMAA lookback MAGIs [Y-2, Y-1].
-   * These are mapped to the engine's year-keyed historical MAGI assumptions;
-   * recentAnnualMagi retains the first value as a compatibility fallback.
-   */
-  irmaaLookbackMagis?: [number, number] | null
-  /**
-   * Withdrawal sequence preference. `traditional-first` is not fully supported
-   * by the engine sequential drain; adapter records caveats.
-   */
-  withdrawalOrdering?: 'taxable-first' | 'traditional-first' | 'proportional' | null
-}
 
 export interface SessionState {
   plan: Plan | null
@@ -54,13 +48,13 @@ export interface SessionState {
  * a freshly built plan, which is pinned rather than `new Date()` so a build is
  * reproducible.
  *
- * CHANGING THIS VALUE IS A WIRE CHANGE and not a one-line edit. Exactly one
- * `tools/list` description names 2026 in prose — `export_plan`'s "a non-2026
- * session's projection will diverge" in src/toolTable.ts — and that description
- * is hashed into tests/protocol-baseline/baseline.json's inventory. It is a
- * plain string, not an interpolation, so moving the year means editing it in
- * the same change and regenerating the baseline deliberately. Interpolating it
- * would itself be a wire-visible change and belongs in its own commit.
+ * CHANGING THIS VALUE IS A WIRE CHANGE. Exactly one `tools/list` description
+ * names the year in prose — `export_plan`'s "a non-2026 session's projection
+ * will diverge" in src/toolTable.ts — and that description is hashed into
+ * tests/protocol-baseline/baseline.json's inventory. As of 0.10.0 it
+ * INTERPOLATES this constant rather than spelling the year out, so the two
+ * cannot disagree; moving the year still moves that description, and the
+ * baseline must be regenerated deliberately in the same change.
  *
  * It also stamps `createdAtIso`/`updatedAtIso` on every newly built plan, via
  * `buildTypedPlan`'s frozen clock — INCLUDING plans built with an explicit

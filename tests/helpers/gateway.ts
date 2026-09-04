@@ -13,6 +13,7 @@
 
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { HTTP_GATEWAY_OPT_IN_ENV } from '../../src/http/gateway.js'
 
 export interface TestGateway {
   /** Origin of the listening gateway, e.g. `http://127.0.0.1:54321`. */
@@ -39,11 +40,13 @@ export async function startTestGateway(): Promise<TestGateway> {
   // but the opt-in is the fence, and a helper that leaves it set is exactly how
   // a future refusal-path test would silently stop testing a refusal. Restore
   // it on close.
-  const priorOptIn = process.env.RETIREGOLDEN_HTTP_GATEWAY
-  process.env.RETIREGOLDEN_HTTP_GATEWAY = '1'
+  // The exported name, not a copy of its value, so a rename cannot leave this
+  // helper setting a variable the gateway no longer reads.
+  const priorOptIn = process.env[HTTP_GATEWAY_OPT_IN_ENV]
+  process.env[HTTP_GATEWAY_OPT_IN_ENV] = '1'
   const restoreOptIn = (): void => {
-    if (priorOptIn === undefined) delete process.env.RETIREGOLDEN_HTTP_GATEWAY
-    else process.env.RETIREGOLDEN_HTTP_GATEWAY = priorOptIn
+    if (priorOptIn === undefined) delete process.env[HTTP_GATEWAY_OPT_IN_ENV]
+    else process.env[HTTP_GATEWAY_OPT_IN_ENV] = priorOptIn
   }
 
   const { startHttpGateway } = await import('../../src/http/gateway.js')

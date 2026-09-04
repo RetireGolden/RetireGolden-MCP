@@ -8,7 +8,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createSession, type SessionState } from '../session.js'
-import { getTool, validateToolArgs } from '../toolTable.js'
+import { getTool, parseToolArgs } from '../toolTable.js'
 
 /**
  * FENCED SURFACE. This gateway is a RetireBench cost/ops research transport,
@@ -197,12 +197,18 @@ export async function startHttpGateway(
       return
     }
 
-    const invalid = validateToolArgs(toolEntry, args)
-    if (invalid) {
+    const validated = parseToolArgs(toolEntry, args)
+    if (!validated.ok) {
       res.writeHead(400)
-      res.end(JSON.stringify({ error: 'INVALID_ARGS', message: invalid }))
+      res.end(JSON.stringify({ error: 'INVALID_ARGS', message: validated.message }))
       return
     }
+    // The PARSED arguments, not the raw body: the tool shapes are non-strict, so
+    // parsing prunes unknown and retired keys exactly as the stdio transport's
+    // SDK does. Handing the handler the raw body let an HTTP caller push e.g.
+    // `conventions.lawSunsetFreezeYear` into session state on one transport only.
+    // @see toolTable.parseToolArgs
+    const toolArgs = validated.args
 
     // Allocate the session only for a fully validated request so malformed or
     // oversized traffic cannot exhaust the session cap.
@@ -220,7 +226,7 @@ export async function startHttpGateway(
     const session = entry.state
 
     try {
-      const result = await toolEntry.handler(session, args)
+      const result = await toolEntry.handler(session, toolArgs)
       res.writeHead(200)
       res.end(JSON.stringify(result))
     } catch (e) {

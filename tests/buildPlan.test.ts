@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildPlanFromParams } from '../src/buildPlan.js'
 import { DEFAULT_START_YEAR } from '../src/session.js'
-import { getTool, validateToolArgs } from '../src/toolTable.js'
+import { argsSchemaFor, getTool, validateToolArgs } from '../src/toolTable.js'
 import {
   builtFailed,
   builtOk,
@@ -97,7 +97,9 @@ describe('buildPlanFromParams — withdrawal ordering modes', () => {
     expect(res.ok).toBe(true)
     expect(builtOk(res).plan.strategies.withdrawalOrder).toEqual({ mode: 'sequential' })
     expect(res.ordering_unsupported).toBe(true)
-    expect(res.caveats.some((c) => c.includes('ordering=traditional-first'))).toBe(true)
+    expect(
+      res.caveats.some((c) => c.includes('traditional-first has no exact engine equivalent')),
+    ).toBe(true)
   })
 })
 
@@ -225,7 +227,38 @@ describe('buildPlanFromParams — validation guards', () => {
       policy: { ...mfjPolicy, claim_ages: [67] }, // only one
     })
     expect(res.ok).toBe(false)
-    expect(builtFailed(res).issues).toEqual(['policy.claim_ages must have an entry for each person'])
+    expect(builtFailed(res).issues).toEqual([
+      'policy.claim_ages must have exactly one entry per person',
+    ])
+  })
+
+  // The build path used to check `<`, so a LONGER array was accepted and the
+  // surplus silently dropped, while batch_evaluate rejected the same policy.
+  // Exact length, both paths. @see adapter.batchEvaluate
+  it('rejects claim_ages longer than persons', () => {
+    const res = buildPlanFromParams({
+      household: mfjHousehold, // two persons
+      policy: { ...mfjPolicy, claim_ages: [67, 70, 62] }, // one too many
+    })
+    expect(res.ok).toBe(false)
+    expect(builtFailed(res).issues).toEqual([
+      'policy.claim_ages must have exactly one entry per person',
+    ])
+  })
+
+  // validateTypedPathInputs runs BEFORE the horizon/persons/claim_ages guards, so
+  // an input that is invalid several ways reports the state issue first. Pinned
+  // because the error text is wire-visible and the precedence is deliberate, not
+  // incidental to statement order.
+  it('reports the state issue first when several typed-path rules fail at once', () => {
+    const res = buildPlanFromParams({
+      household: { ...mfjHousehold, state: 'California', horizon: 0 },
+      policy: { ...mfjPolicy, claim_ages: [67] },
+    })
+    expect(res.ok).toBe(false)
+    expect(builtFailed(res).issues).toEqual([
+      'household.state must be a 2-letter code (A–Z), got "California"',
+    ])
   })
 
   it('rejects a typed build with no household.state (WS1.3: state is required)', () => {
@@ -307,7 +340,7 @@ describe('build_plan gateway arg validation (state format deferred to typed path
   it('rejects a typed-path build (no plan) whose household state is missing', () => {
     const { state: _dropped, ...noState } = singleHousehold
     const err = validateToolArgs(entry, { household: noState, policy: singlePolicy })
-    expect(err).toContain('household.state is required on the typed path')
+    expect(err).toContain('household.state is required')
   })
 
   it('rejects a typed-path build (no plan) whose household state is malformed', () => {
@@ -315,7 +348,28 @@ describe('build_plan gateway arg validation (state format deferred to typed path
       household: { ...singleHousehold, state: 'California' },
       policy: singlePolicy,
     })
-    expect(err).toContain('household.state is required on the typed path')
+    // A malformed value must not read as "required/missing" here either — the
+    // gateway used to say exactly that, telling a caller who supplied
+    // "California" that they had supplied nothing.
+    expect(err).toContain('household.state must be a 2-letter code')
+    expect(err).toContain('California')
+  })
+
+  it('word-for-word matches what the typed path reports, for every shared rule', () => {
+    // The point of validateTypedPathInputs: one wording, both transports. A
+    // gateway caller and a stdio caller must not be told different things about
+    // the same bad input.
+    const cases: Array<Record<string, unknown>> = [
+      { policy: singlePolicy },
+      { household: (({ state: _s, ...rest }) => rest)(singleHousehold), policy: singlePolicy },
+      { household: { ...singleHousehold, state: 'California' }, policy: singlePolicy },
+      { household: singleHousehold, policy: singlePolicy, assumptions: { state: '9!' } },
+    ]
+    for (const args of cases) {
+      const gatewayError = validateToolArgs(entry, args)
+      const typedIssues = builtFailed(buildPlanFromParams(args as never)).issues
+      expect(gatewayError).toBe(typedIssues[0])
+    }
   })
 })
 
@@ -354,19 +408,47 @@ describe('buildPlanFromParams — conventions and caveats', () => {
     expect(res.ok).toBe(true)
     expect(builtOk(res).plan.strategies.withdrawalOrder).toEqual({ mode: 'sequential' })
     expect(
-      res.caveats.some((c) => c.includes('convention withdrawalOrdering=traditional-first')),
+      res.caveats.some((c) => c.includes('traditional-first has no exact engine equivalent')),
     ).toBe(true)
   })
 
-  it('records a lawSunsetFreezeYear caveat', () => {
+  it('ignores a legacy lawSunsetFreezeYear without a caveat, and strips it at the tool boundary', () => {
+    // A conventions block saved by an older export_plan can still carry the key.
+    // The engine has no freeze knob, so 0.10.0 removed it from the tool schema and
+    // stopped emitting the caveat that implied one was attempted. Two things must
+    // remain true: the programmatic path still accepts (and ignores) it, and the
+    // zod object is non-strict, so the tool transports drop the unknown key rather
+    // than refusing the whole import.
     const res = buildPlanFromParams({
       household: singleHousehold,
       policy: singlePolicy,
       startYear: 2030,
-      conventions: { lawSunsetFreezeYear: 2031 },
+      conventions: { lawSunsetFreezeYear: 2030, irmaaLookbackMagis: [1, 2] },
     })
     expect(res.ok).toBe(true)
-    expect(res.caveats.some((c) => c.includes('lawSunsetFreezeYear=2031'))).toBe(true)
+    expect(res.caveats.some((c) => c.toLowerCase().includes('sunset'))).toBe(false)
+    expect(res.caveats.some((c) => c.toLowerCase().includes('freeze'))).toBe(false)
+    // The surviving knob still applied.
+    expect(builtOk(res).plan.assumptions.historicalAnnualMagiByYear).toEqual({
+      '2028': 1,
+      '2029': 2,
+    })
+
+    const entry = getTool('build_plan')!
+    const args = {
+      household: singleHousehold,
+      policy: singlePolicy,
+      startYear: 2030,
+      conventions: { lawSunsetFreezeYear: 2030, irmaaLookbackMagis: [1, 2] },
+    }
+    expect(validateToolArgs(entry, args)).toBeNull()
+    expect(
+      argsSchemaFor(entry).parse(args) as { conventions: Record<string, unknown> },
+    ).toMatchObject({ conventions: { irmaaLookbackMagis: [1, 2] } })
+    expect(
+      'lawSunsetFreezeYear' in
+        (argsSchemaFor(entry).parse(args) as { conventions: Record<string, unknown> }).conventions,
+    ).toBe(false)
   })
 
   it('maps a convention irmaaLookbackMagis pair without a lossy caveat', () => {

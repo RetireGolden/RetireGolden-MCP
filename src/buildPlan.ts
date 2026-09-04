@@ -10,7 +10,7 @@ import { migratePlanToCurrent } from '@retiregolden/engine/model/migrations'
 import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema/current'
 import { stateParamsFor } from '@retiregolden/engine/params/state'
 import { getVersions } from './versions.js'
-import { DEFAULT_START_YEAR, type ConventionKnobs } from './session.js'
+import { DEFAULT_START_YEAR } from './session.js'
 
 export const PersonParamsSchema = z.object({
   birth_year: z.number().int().min(1900).max(2100).describe('4-digit birth year, e.g. 1960'),
@@ -34,10 +34,12 @@ export const HouseholdParamsSchema = z.object({
   // Deliberately no format constraint (no `.length(2)`) at the Zod layer: both
   // transports parse HouseholdParamsSchema before buildPlanFromParams runs, so any
   // schema-level rule here would reject mixed-mode `build_plan({ plan, household })`
-  // even though full plan JSON takes precedence and the household is ignored. Both
-  // presence AND 2-letter format are enforced on the typed path in
-  // buildPlanFromParams, and mirrored in the gateway crossFieldValidate when no
-  // `plan` is supplied.
+  // even though full plan JSON takes precedence and the household is ignored.
+  // Presence AND 2-letter format are enforced on the typed path by
+  // `validateTypedPathInputs`, which is the SINGLE definition both transports
+  // read: `buildPlanFromParams` calls it, and so does the gateway's
+  // `crossFieldValidate`. Do not re-add a mirrored copy here or in either caller.
+  // @see validateTypedPathInputs
   state: z
     .string()
     .optional()
@@ -66,6 +68,75 @@ export const HouseholdParamsSchema = z.object({
 })
 export type HouseholdParams = z.infer<typeof HouseholdParamsSchema>
 
+/**
+ * The withdrawal-ordering vocabulary, in ONE place.
+ *
+ * It was spelled out three times — `PolicyParamsSchema.ordering`, the
+ * `build_plan` `conventions` shape in src/toolTable.ts, and the union on
+ * `ConventionKnobs.withdrawalOrdering` — so adding an ordering mode meant
+ * finding all three, and any one of them could quietly fall behind.
+ */
+export const WithdrawalOrderingSchema = z.enum([
+  'taxable-first',
+  'traditional-first',
+  'proportional',
+])
+export type WithdrawalOrdering = z.infer<typeof WithdrawalOrderingSchema>
+
+/**
+ * Modeling-convention overrides, in ONE place.
+ *
+ * The same three knobs were declared twice: as a zod object inline in
+ * `build_plan.inputShape.conventions`, and as the `ConventionKnobs` interface in
+ * src/session.ts. The tool schema and the shape the session stores (and
+ * `export_plan` hands back for a round trip) could therefore disagree, and
+ * `conventions` was the only `build_plan` field that reached the model with no
+ * description at all.
+ *
+ * `ConventionKnobs` is now derived from this schema, and the tool input uses the
+ * schema itself.
+ *
+ * NO object-level `.describe()` here, deliberately. `build_plan` wires this in as
+ * `ConventionKnobsSchema.optional().describe(...)`, and the OUTER description is
+ * the one that reaches `tools/list`; a description set here would be unpublished
+ * dead text, free to drift from what consumers actually receive. The per-field
+ * descriptions below ARE published; the object-level one lives in src/toolTable.ts.
+ */
+export const ConventionKnobsSchema = z
+  .object({
+    irmaaLookbackMagis: z
+      .tuple([z.number(), z.number()])
+      .nullable()
+      .optional()
+      .describe(
+        "Two pre-projection IRMAA lookback MAGIs in dollars, [startYear-2, startYear-1]. Written to the engine's year-keyed historicalAnnualMagiByYear for exactly those two years (assumptions.recentAnnualMagi keeps the first value as a compatibility fallback), overriding household.pre_horizon_magi and whatever an imported document carried.",
+      ),
+    withdrawalOrdering: WithdrawalOrderingSchema.nullable()
+      .optional()
+      .describe(
+        'Withdrawal ordering override, applied on top of policy.ordering and of an imported document\'s own strategy. "traditional-first" has no exact engine equivalent and is modeled as sequential drain, with a caveat saying so.',
+      ),
+  })
+
+/**
+ * The session-stored convention knobs: the schema above, plus one deprecated
+ * field that is no longer part of the tool input.
+ */
+export type ConventionKnobs = z.infer<typeof ConventionKnobsSchema> & {
+  /**
+   * @deprecated no engine knob exists; ignored. Removed from the tool schema in
+   * 0.10.0.
+   *
+   * It never froze anything: `@retiregolden/engine` has no law-sunset or
+   * parameter-freeze option (its only `sunsetting` is a volatility LABEL on tax
+   * rule records), so the build merely pushed a caveat implying a best-effort
+   * freeze that was not attempted. The field survives on this type only so a
+   * programmatic consumer that still sets it keeps compiling; nothing reads it,
+   * and the (non-strict) `conventions` tool schema drops the key on the wire.
+   */
+  lawSunsetFreezeYear?: number | null
+}
+
 export const PolicyParamsSchema = z.object({
   claim_ages: z
     .array(z.number().int().min(0).max(120))
@@ -86,9 +157,9 @@ export const PolicyParamsSchema = z.object({
     .nullable()
     .optional()
     .describe('Number of years to run fill-to-bracket conversions from startYear, or null'),
-  ordering: z
-    .enum(['taxable-first', 'traditional-first', 'proportional'])
-    .describe('Withdrawal ordering; traditional-first is approximate under sequential drain'),
+  ordering: WithdrawalOrderingSchema.describe(
+    'Withdrawal ordering; traditional-first is approximate under sequential drain',
+  ),
 })
 export type PolicyParams = z.infer<typeof PolicyParamsSchema>
 
@@ -254,44 +325,28 @@ export type BuildPlanResult =
     }
 
 /**
- * The three `traditional-first` caveat wordings, in one place.
+ * The ONE `traditional-first` caveat, used at every site that records it.
  *
- * All three say the same thing — the engine's sequential drain cannot express
- * traditional-first, so the ledger is approximate — in three different sets of
- * words, because they grew at three different sites: the typed build path, the
- * conventions overlay, and the adapter's batch cell.
+ * It grew as three near-identical wordings, at three sites that all say the same
+ * thing — the engine's sequential drain cannot express traditional-first, so the
+ * ledger is approximate: the typed build path, the conventions overlay, and the
+ * adapter's batch cell. Three strings meant a caller sweeping orderings saw the
+ * same limitation described three ways, and any reader had to check all three to
+ * learn whether they really did mean the same thing.
  *
- * DO NOT UNIFY THE TEXT HERE — but be accurate about what pins them.
+ * It is WIRE-VISIBLE: it reaches a tool response whenever a caller actually asks
+ * for traditional-first ordering. It is NOT in
+ * tests/protocol-baseline/baseline.json — every fixture there uses
+ * `taxable-first`, so no ordering caveat is recorded — so what pins it is the
+ * unit suite, by the substring `'traditional-first has no exact engine
+ * equivalent'` in tests/buildPlan.test.ts and tests/adapter.extended.test.ts.
  *
- * They are NOT in tests/protocol-baseline/baseline.json. The baseline's
- * `batch_evaluate_fixture` step runs `singlePolicy`, whose `ordering` is
- * `taxable-first`, so the only caveat it records is the state-tax one; none of
- * these three strings appears anywhere in that file. What pins them is the unit
- * suite, by substring:
- *
- * - `TRADITIONAL_FIRST_TYPED_CAVEAT` — `'ordering=traditional-first'` in
- *   tests/buildPlan.test.ts and tests/adapter.extended.test.ts.
- * - `TRADITIONAL_FIRST_CONVENTION_CAVEAT` — `'convention
- *   withdrawalOrdering=traditional-first'` in tests/buildPlan.test.ts.
- * - `TRADITIONAL_FIRST_BATCH_CAVEAT` — `'traditional-first approximate'` in
- *   tests/adapter.extended.test.ts.
- *
- * They are still WIRE-VISIBLE: each reaches a tool response whenever a caller
- * actually asks for traditional-first ordering. So rewording one is a change a
- * client can see, and belongs in a deliberate commit that says so — it is just
- * not the protocol baseline that would catch it. Naming them is the part that
- * is safe: the three sites now point at one definition, so the next reader can
- * see they are duplicates rather than rediscovering it.
+ * `explain_modeled_result` keys its conditional traditional-first limitation on
+ * this exact constant being present in `session.caveats`, so rewording it is a
+ * single edit rather than four.
  */
-export const TRADITIONAL_FIRST_TYPED_CAVEAT =
-  'ordering=traditional-first has no full engine equivalent (sequential drains taxable before traditional); ledger is approximate'
-
-/** @see TRADITIONAL_FIRST_TYPED_CAVEAT — frozen wording, do not reword. */
-export const TRADITIONAL_FIRST_CONVENTION_CAVEAT =
-  'convention withdrawalOrdering=traditional-first: approximate under sequential'
-
-/** @see TRADITIONAL_FIRST_TYPED_CAVEAT — frozen wording, do not reword. */
-export const TRADITIONAL_FIRST_BATCH_CAVEAT = 'traditional-first approximate'
+export const TRADITIONAL_FIRST_CAVEAT =
+  'withdrawal ordering traditional-first has no exact engine equivalent; modeled as sequential drain (taxable before traditional), so the ledger is approximate'
 
 const FILING = { single: 'single', mfj: 'marriedFilingJointly' } as const
 
@@ -452,6 +507,54 @@ export function stateTaxCaveat(
   return `state=${state}: stateEffectiveTaxPct=${overridePct} does NOT disable state income tax — only a value above 0 overrides the modeled ${state} pack, so this plan is taxed at ${state}'s modeled rates.`
 }
 
+/** A 2-letter US state-of-residence code, the only form the engine accepts. */
+const STATE_CODE = /^[A-Za-z]{2}$/
+
+/**
+ * The `build_plan` argument rules a flat zod shape cannot express, in ONE place.
+ *
+ * These three rules were written twice, in different words: here (as
+ * `buildPlanFromParams` issues, which the stdio transport surfaces) and in
+ * `build_plan.crossFieldValidate` (which the HTTP gateway surfaces). The two
+ * disagreed — the gateway reported a MALFORMED state as "household.state is
+ * required", telling a caller who had supplied "California" that they had
+ * supplied nothing, and it said nothing at all about `assumptions.state`. Both
+ * transports now read the wording from here.
+ *
+ * Only the rules that are genuinely cross-field or format-level live here.
+ * `horizon`, empty `persons`, `claim_ages` length and the wage contract stay in
+ * `buildPlanFromParams`: they are checks for the PROGRAMMATIC caller (the tool
+ * layer's zod already enforces the first three), not gateway argument rules.
+ *
+ * @returns the first issue, or null when the input is well-formed.
+ */
+export function validateTypedPathInputs(input: BuildPlanInput): string | null {
+  // Full plan JSON takes precedence and the typed fields are ignored, so none of
+  // the typed-path rules apply — including a malformed state on a household that
+  // will not be read. @see the mixed-mode note on HouseholdParamsSchema.state.
+  if (input.plan != null) return null
+  if (input.household == null || input.policy == null) {
+    return 'Provide either `plan` JSON or both `household` and `policy`'
+  }
+  // state is a required household input on the typed path — the engine needs a
+  // residence state and there is no longer a hardcoded KY default. assumptions.state
+  // can override the value used, but household.state must still be provided.
+  const state = input.household.state
+  if (state == null || state === '') {
+    return 'household.state is required: provide a 2-letter state-of-residence code (e.g. "CA"); assumptions.state can override the value used'
+  }
+  if (!STATE_CODE.test(state)) {
+    return `household.state must be a 2-letter code (A–Z), got "${state}"`
+  }
+  // assumptions.state overrides household.state, so validate it here too rather than
+  // letting a bad override surface only later as an opaque parsePlan failure.
+  const override = input.assumptions?.state
+  if (override != null && !STATE_CODE.test(override)) {
+    return `assumptions.state must be a 2-letter code (A–Z), got "${override}"`
+  }
+  return null
+}
+
 export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   const caveats: string[] = []
   const startYear = input.startYear ?? DEFAULT_START_YEAR
@@ -549,17 +652,15 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
     return { ok: true, plan: documentPlan, startYear, caveats }
   }
 
-  if (!input.household || !input.policy) {
-    return {
-      ok: false,
-      startYear,
-      caveats,
-      issues: ['Provide either `plan` JSON or both `household` and `policy`'],
-    }
+  // The typed-path shape rules, in the ONE place both transports read them from.
+  // @see validateTypedPathInputs
+  const typedPathIssue = validateTypedPathInputs(input)
+  if (typedPathIssue != null) {
+    return { ok: false, startYear, caveats, issues: [typedPathIssue] }
   }
 
-  const hh = input.household
-  const policy = input.policy
+  const hh = input.household!
+  const policy = input.policy!
 
   // KEEP THESE, even though they look redundant against HouseholdParamsSchema.
   //
@@ -590,44 +691,17 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   if (hh.persons.length === 0) {
     return { ok: false, startYear, caveats, issues: ['household.persons must not be empty'] }
   }
-  if (policy.claim_ages.length < hh.persons.length) {
+  // EXACT length, not `<`. `claim_ages` is documented as "aligned to
+  // household.persons order", i.e. one age per person, and a `<` check let a
+  // longer array through and then silently dropped the surplus — the same
+  // positional-drift class of bug `batch_evaluate` fixes in 0.10.0. The two
+  // paths now agree: a policy that `batch_evaluate` rejects cannot build either.
+  if (policy.claim_ages.length !== hh.persons.length) {
     return {
       ok: false,
       startYear,
       caveats,
-      issues: ['policy.claim_ages must have an entry for each person'],
-    }
-  }
-  // state is a required household input on the typed path — the engine needs a
-  // residence state and there is no longer a hardcoded KY default. assumptions.state
-  // can override the value used, but household.state must still be provided.
-  const STATE_CODE = /^[A-Za-z]{2}$/
-  if (hh.state == null || hh.state === '') {
-    return {
-      ok: false,
-      startYear,
-      caveats,
-      issues: [
-        'household.state is required: provide a 2-letter state-of-residence code (e.g. "CA"); assumptions.state can override the value used',
-      ],
-    }
-  }
-  if (!STATE_CODE.test(hh.state)) {
-    return {
-      ok: false,
-      startYear,
-      caveats,
-      issues: [`household.state must be a 2-letter code (A–Z), got "${hh.state}"`],
-    }
-  }
-  // assumptions.state overrides household.state, so validate it here too rather than
-  // letting a bad override surface only later as an opaque parsePlan failure.
-  if (input.assumptions?.state != null && !STATE_CODE.test(input.assumptions.state)) {
-    return {
-      ok: false,
-      startYear,
-      caveats,
-      issues: [`assumptions.state must be a 2-letter code (A–Z), got "${input.assumptions.state}"`],
+      issues: ['policy.claim_ages must have exactly one entry per person'],
     }
   }
   // Wages are not modeled by the typed path — a retired household is the explicit
@@ -793,7 +867,7 @@ function buildTypedPlan(
   } else if (ordering === 'traditional-first') {
     plan.strategies.withdrawalOrder = { mode: 'sequential' }
     ordering_unsupported = true
-    caveats.push(TRADITIONAL_FIRST_TYPED_CAVEAT)
+    caveats.push(TRADITIONAL_FIRST_CAVEAT)
   } else {
     // Same as the filing guard above: the zod enum cannot produce this, a
     // programmatic caller can. See the guard note in buildPlanFromParams.
@@ -841,12 +915,6 @@ function buildTypedPlan(
     [String(startYear - 1)]: pre[1] ?? pre[0] ?? 0,
   }
 
-  if (conventions.lawSunsetFreezeYear != null) {
-    caveats.push(
-      `lawSunsetFreezeYear=${conventions.lawSunsetFreezeYear} requested; engine freeze toggle is best-effort — verify parameter packs for that year`,
-    )
-  }
-
   applyConventions(plan, conventions, caveats, startYear)
 
   const parsed = parsePlan(plan)
@@ -866,9 +934,7 @@ function buildTypedPlan(
 
 /**
  * @returns whether any knob actually rewrote a field of `plan`. Callers use this
- * to describe an imported document honestly — see `acceptedHow`. Note
- * `lawSunsetFreezeYear` is deliberately not counted: it has no engine knob yet and
- * mutates nothing.
+ * to describe an imported document honestly — see `acceptedHow`.
  */
 function applyConventions(
   plan: Plan,
@@ -895,7 +961,12 @@ function applyConventions(
   } else if (conventions.withdrawalOrdering === 'traditional-first') {
     plan.strategies.withdrawalOrder = { mode: 'sequential' }
     mutated = true
-    caveats.push(TRADITIONAL_FIRST_CONVENTION_CAVEAT)
+    // Guarded on presence, like the batch cell. On the typed path `ordering`
+    // is `conventions.withdrawalOrdering ?? policy.ordering`, so a build with
+    // this convention has ALREADY recorded the caveat before we get here, and
+    // an unguarded push repeated the identical sentence in every later
+    // projection, export, explain and batch row. @see TRADITIONAL_FIRST_CAVEAT
+    if (!caveats.includes(TRADITIONAL_FIRST_CAVEAT)) caveats.push(TRADITIONAL_FIRST_CAVEAT)
   }
   return mutated
 }

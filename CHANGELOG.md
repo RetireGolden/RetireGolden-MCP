@@ -3,13 +3,155 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.10.0
 
-Internal adapter hygiene. **No change to any tool's wire output or to
-`tools/list` descriptions** — the protocol baseline
-(`tests/protocol-baseline/baseline.json`) is unmoved.
+**A minor, because the tool surface moved.** `build_plan`'s `conventions` loses
+`lawSunsetFreezeYear` (an input for an engine knob that does not exist),
+`run_monte_carlo` gains `returnVolPct` and echoes it, and
+`explain_modeled_result`'s `limitations` list changes shape and content. Three
+sections of the protocol baseline were regenerated deliberately and inspected
+leaf by leaf (see **Verified**); every engine-numeric leaf, and every literal in
+`tests/goldens.test.ts`, is byte-identical. The earlier subsections below —
+adapter hygiene, the HTTP research transport, tooling and tests, and the docs /
+skill / tool-contract pass — ship in the same release and moved nothing on the
+wire themselves.
+
+### Changed (wire-visible)
+
+- **`batch_evaluate` maps `claim_ages` by person.** The tool documents them as
+  "aligned to household.persons order"; the implementation walked `plan.incomes`
+  and gave the i-th claim age to the i-th Social Security income. Those orders
+  agree only for a plan this package built itself, so an imported document — or
+  one reshaped by `update_plan` — could silently hand each spouse the other's
+  claim age. Ages are now matched to `household.people[i].id`.
+- **`batch_evaluate` reports an unmappable policy as a per-ROW `ok: false`**, not
+  a throw, in three cases: `claim_ages.length` differs from the number of people
+  (the old check only rejected *too few*, and counted Social Security incomes
+  rather than people), a person with no Social Security income, and a person
+  owning more than one.
+- **`run_monte_carlo` accepts `returnVolPct`** (0–100, percent) and echoes it
+  beside `pathCount` and `seed`; the description now states all three defaults
+  (200 / 42 / 12). The volatility was previously a hardcoded `12` that no caller
+  could set and no response reported. Omitting it reproduces the old numbers
+  exactly.
+- **`explain_modeled_result.limitations` states only what is true.** The "single
+  IRMAA lookback MAGI scalar" line was false — the build writes
+  `historicalAnnualMagiByYear` for both lookback years, which the engine prefers,
+  and `recentAnnualMagi` is only a compatibility fallback; the new line says
+  that. "Law-sunset freeze is best-effort pending engine knobs" is gone with the
+  knob. The `traditional-first` line is now emitted only when that ordering is in
+  effect, instead of being told to every taxable-first caller.
+- **`build_plan`'s `conventions` loses `lawSunsetFreezeYear`.**
+  `@retiregolden/engine` 0.3.0 has no law-sunset or parameter-freeze option (its
+  only `sunsetting` is a volatility *label* on tax rule records), so the build was
+  pushing a caveat implying a best-effort freeze that was never attempted. Old
+  documents still import: the `conventions` object is non-strict, so the tool
+  layer drops the unknown key. `ConventionKnobs.lawSunsetFreezeYear` stays on the
+  exported TypeScript interface, marked `@deprecated`, so a programmatic consumer
+  that still sets it keeps compiling; nothing reads it.
+- **`build_plan`'s `conventions` is now documented.** It was the only `build_plan`
+  field reaching the model with no description at all; it and both of its knobs
+  now carry one. The accepted shape is otherwise unchanged.
+- **One `traditional-first` caveat wording, not three.** The typed build path, the
+  conventions overlay and `batch_evaluate` each said the same thing differently.
+  All three now emit "withdrawal ordering traditional-first has no exact engine
+  equivalent; modeled as sequential drain (taxable before traditional), so the
+  ledger is approximate", and no site repeats it: a batch row does not re-add a
+  caveat the session already carries, and the conventions overlay does not re-add
+  the one the typed ordering just recorded (with a single wording, an unguarded
+  push would have printed the identical sentence twice for every typed build
+  using `conventions.withdrawalOrdering: "traditional-first"`).
+- **Both transports word a bad `build_plan` argument identically.** One exported
+  `validateTypedPathInputs` now owns the plan-or-both rule, `household.state`
+  presence and 2-letter format, and `assumptions.state` format. The HTTP gateway
+  previously reported a MALFORMED state as "household.state is required" — telling
+  a caller who supplied `"California"` that they had supplied nothing — and
+  checked `assumptions.state` not at all.
+- **`build_plan` rejects a `claim_ages` array LONGER than `persons`.** The typed
+  path checked `claim_ages.length < persons.length` and silently discarded the
+  surplus, so the same policy that `batch_evaluate` now rejects could still
+  build. Both paths require exactly one age per person; the message is
+  "policy.claim_ages must have exactly one entry per person".
+- **The HTTP gateway hands handlers PARSED arguments.** It validated with the
+  tool's zod shape and then invoked the handler with the raw request body, so
+  unknown and retired keys survived on that transport only — an HTTP
+  `build_plan` could still push `conventions.lawSunsetFreezeYear` into session
+  state and round-trip it through `export_plan`, which the stdio path (where the
+  MCP SDK parses with the same compiled schema) never did. `parseToolArgs` now
+  returns the parsed value and the gateway uses it. `plan` is `z.unknown()`, so
+  full plan documents are untouched; only the declared object shapes are pruned.
+- **`solve_max_spending`'s `SPENDING_SOLVER_FAILED` arm carries `caveats`**, as
+  `run_optimizer`'s failure arm already did. A solver that could not converge is
+  exactly when the plan's approximations matter.
+- **Two dead `SUPERSEDED_CAVEATS` matchers removed.** The `recentAnnualMagi` and
+  `historicalAnnualMagiByYear` entries matched caveat prefixes (`IRMAA-lookback:`,
+  `convention irmaaLookbackMagis=`) that nothing emits — the unit suite pins their
+  absence. `update_plan` still clears a seeded `irmaaLookbackMagis` convention when
+  either MAGI field is set directly; that is a separate step and is unchanged.
+- **`export_plan`'s description interpolates `DEFAULT_START_YEAR`** where "2026"
+  was spelled out. The rendered string is byte-identical today; it can no longer
+  disagree with the constant tomorrow.
+- The `retiregolden` skill's caveat, limitations and "Conventions knob" text now
+  describes what is actually emitted.
+
+### Verified
+
+- The protocol baseline was regenerated **deliberately** and diffed leaf by leaf
+  against a saved copy before being trusted. Of the 25 recorded envelopes plus
+  the inventory and resource sections, exactly **three** moved:
+  - **`inventory`** (`8ddeae53…` → `3129545f…`), 13 leaves: the four
+    `conventions.lawSunsetFreezeYear` schema leaves removed; descriptions added on
+    `conventions` and on both surviving knobs; `run_monte_carlo`'s description
+    extended with the three defaults; and four new `returnVolPct` leaves (type,
+    minimum, maximum, description). `export_plan`'s description is byte-identical
+    across the interpolation.
+  - **`run_monte_carlo_seeded`**, one leaf: `returnVolPct: 12` added. `successRate`,
+    `requiredFloorSuccessRate` and all five percentiles are byte-identical.
+  - **`explain_modeled_result`**, four leaves, all inside `limitations`, which goes
+    from four entries to **two** for this fixture: the IRMAA line replaced
+    (index 0), the law-sunset line removed, the traditional-first line absent
+    because the fixture plan is `taxable-first`, and the `stateEffectiveTaxPct`
+    line unchanged in content but moved from index 3 to index 1. A session that
+    IS running `traditional-first` gets three.
+- Byte-identical: `meta`; `resource` (both URIs and all four digests); and every
+  other matrix step, including `batch_evaluate_fixture` (person-ordered, one
+  person, one claim age — the claim-age fix cannot reach it), `build_plan_invalid`
+  (`{ household: 42 }` still fails the zod shape before any cross-field rule),
+  `run_projection_years`, `run_projection_round_trip_summary`,
+  `run_optimizer_default`, `solve_max_spending_default`,
+  `compare_scenarios_identical_export`, both `export_plan` steps, both
+  `get_session` steps, `update_plan_base_annual`, `build_plan_round_trip`
+  (including its `argsDigest`), both `describe_plan_schema` payloads, and all
+  three authorization-lane steps.
+- `tests/goldens.test.ts` is untouched — `git diff origin/main` reports no change
+  to that file — and the golden-number suite passes without regeneration.
+
+### Why this release exists
+
+Correctness first: `batch_evaluate` was quietly swapping spouses' Social Security
+claim ages on any plan whose incomes were not in the order this package happens to
+write them, which is a wrong answer with nothing in the response admitting it.
+Then honesty: `explain_modeled_result` was reporting a limitation the build does
+not have and one for a knob the engine never had, and `build_plan` was accepting
+an input — `lawSunsetFreezeYear` — that froze nothing and answered with a caveat
+implying it had tried. A tool that documents its own approximations has to be
+right about them, so both the false lines and the input that produced one are
+gone, and the remaining approximation is stated once, in one wording, only when it
+applies.
 
 ### Changed (programmatic embedders only)
+
+Adapter hygiene. Nothing in this subsection moves a tool's wire output or a
+`tools/list` description; the baseline movement above is entirely the
+wire-visible section's.
+
+One addition here: `ConventionKnobs` is now derived from a
+`ConventionKnobsSchema` that lives in `src/buildPlan.ts` beside the zod
+`build_plan` validates it with — the shape was declared twice and could drift.
+`src/session.ts` re-exports the type (type-only, so no runtime import cycle), so
+`SessionState` and the package root still name it from there.
+`WithdrawalOrderingSchema` is likewise the single definition of the ordering
+enum, which was written out three times.
 
 - `BuildPlanResult` (exported from the package root) is now a discriminated
   union on `ok` instead of one interface with optional `plan`/`issues`:
@@ -62,8 +204,9 @@ Internal adapter hygiene. **No change to any tool's wire output or to
 
 ### Changed (tooling and tests only)
 
-No tool's wire output moves; the protocol baseline and every golden literal are
-unmoved. One item below does reach the published package: `src/versions.ts`
+No item in this subsection moves a tool's wire output; every golden literal is
+unmoved, and none of the baseline movement recorded above is theirs. One item
+below does reach the published package: `src/versions.ts`
 gains an exported `resolveInstalledPackageVersion`, so `dist/versions.js` ships
 it. It is a refactor of the resolver `getVersions()` already used — same lookup,
 same null-on-failure contract — and it is not re-exported from the package root.
@@ -104,7 +247,10 @@ same null-on-failure contract — and it is not re-exported from the package roo
   `$schema` key is dropped — the file is a tool contract, not a JSON Schema
   document, and claiming otherwise was misleading. Every key the contract
   already had (`$id`, `title`, `description`, the tool list, the arm
-  groupings) is kept, and no tool name, description, or input shape changed.
+  groupings) is kept, and publishing the block changed no tool name,
+  description, or input shape — the two shapes that do move in this release
+  are the wire-visible section's, and the committed block is regenerated to
+  match them.
   The block is generated in zod's INPUT mode (`io: 'input'`), which is what
   makes each entry deep-equal to the `inputSchema` `tools/list` actually
   advertises; output mode closes the top-level object with

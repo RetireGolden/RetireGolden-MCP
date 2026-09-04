@@ -18,7 +18,7 @@ import { solveMaxSustainableSpending } from '@retiregolden/engine/decisions/spen
 import {
   buildPlanFromParams,
   stateTaxCaveat,
-  TRADITIONAL_FIRST_BATCH_CAVEAT,
+  TRADITIONAL_FIRST_CAVEAT,
   type BuildPlanInput,
   type PolicyParams,
 } from './buildPlan.js'
@@ -79,12 +79,17 @@ const STATE_TAX_CAVEAT_MARKER = 'stateEffectiveTaxPct'
  * re-derives it from `stateTaxCaveat` afterwards rather than deciding here: one
  * function owns what is true of a (state, override) pair, and the build path and
  * the update path cannot drift apart.
+ *
+ * ONE entry, deliberately. There were three: `recentAnnualMagi` and
+ * `historicalAnnualMagiByYear` each matched the prefixes `IRMAA-lookback:` and
+ * `convention irmaaLookbackMagis=`, and NOTHING emits either — `applyConventions`
+ * pushes no caveat for `irmaaLookbackMagis`, and tests/buildPlan.test.ts and
+ * tests/session.test.ts pin that absence. Two dead matchers reading as live rules
+ * are worse than none: they imply a caveat exists to supersede. Setting either
+ * MAGI field still clears the seeded `irmaaLookbackMagis` convention — that is a
+ * separate step at the end of `updatePlan`, and is unaffected.
  */
 const SUPERSEDED_CAVEATS: Record<string, (caveat: string) => boolean> = {
-  recentAnnualMagi: (c) =>
-    c.startsWith('IRMAA-lookback:') || c.startsWith('convention irmaaLookbackMagis='),
-  historicalAnnualMagiByYear: (c) =>
-    c.startsWith('IRMAA-lookback:') || c.startsWith('convention irmaaLookbackMagis='),
   stateEffectiveTaxPct: (c) => c.includes(STATE_TAX_CAVEAT_MARKER),
 }
 
@@ -209,19 +214,35 @@ export function runProjection(
   }
 }
 
+/**
+ * Monte Carlo defaults, named rather than spelled inline three times.
+ *
+ * All three are ECHOED in the response and stated in the `run_monte_carlo` tool
+ * description, so a caller can tell a defaulted run from a configured one without
+ * reading this file. The description INTERPOLATES these constants rather than
+ * repeating the numbers, so the prose cannot drift from the behaviour; moving any
+ * of them therefore moves a `tools/list` description, and the protocol baseline
+ * must be regenerated in the same change.
+ */
+export const MC_DEFAULT_PATH_COUNT = 200
+export const MC_DEFAULT_SEED = 42
+/** Annual return volatility, in percent, for the lognormal market model. */
+export const MC_DEFAULT_RETURN_VOL_PCT = 12
+
 export function runMonteCarlo(
   session: SessionState,
-  opts: { pathCount?: number; seed?: number } = {},
+  opts: { pathCount?: number; seed?: number; returnVolPct?: number } = {},
 ) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
-  const pathCount = opts.pathCount ?? 200
-  const seed = opts.seed ?? 42
+  const pathCount = opts.pathCount ?? MC_DEFAULT_PATH_COUNT
+  const seed = opts.seed ?? MC_DEFAULT_SEED
+  const returnVolPct = opts.returnVolPct ?? MC_DEFAULT_RETURN_VOL_PCT
   const model = createLognormalModel({
     type: 'lognormal',
     inflationMeanPct: session.plan.assumptions.inflationPct,
-    returnVolPct: 12,
+    returnVolPct,
   })
   const paths = runMonteCarloPaths(session.plan, {
     startYear: session.startYear,
@@ -238,6 +259,10 @@ export function runMonteCarlo(
     ok: true as const,
     pathCount,
     seed,
+    // Echoed like pathCount and seed: the volatility is a real input to the
+    // distribution below, and a response that reported percentiles without
+    // saying which volatility produced them is not reproducible.
+    returnVolPct,
     successRate: agg.successRate,
     requiredFloorSuccessRate: agg.requiredFloorSuccessRate,
     percentiles: {
@@ -268,18 +293,68 @@ export function batchEvaluate(
     caveats: string[]
   }> = []
 
-  const ssIncomeCount = session.plan.incomes.filter((inc) => inc.type === 'socialSecurity').length
+  // `claim_ages` is documented as "aligned to household.persons order", so the
+  // mapping is BY PERSON, not by the order Social Security incomes happen to sit
+  // in `plan.incomes`. Those two agree only for a plan this package built itself;
+  // an imported document (or one reshaped by update_plan) can list a spouse's
+  // benefit first, and the old positional walk then silently handed each person
+  // the other's claim age — a wrong answer with nothing on the wire admitting it.
+  //
+  // The person -> Social Security income index MAP is built once here: every row
+  // clones the same session plan, so those indices are stable across rows. The
+  // per-row `resolveClaimAgeTargets` call below still runs for EVERY policy,
+  // because the length check and the resulting error text depend on that row's
+  // own `claim_ages`.
+  const people = session.plan.household.people
+  const ssIncomeIndexByPerson = new Map<string, number[]>()
+  session.plan.incomes.forEach((inc, idx) => {
+    if (inc.type !== 'socialSecurity') return
+    const owner = inc.personId
+    if (owner == null) return
+    const seen = ssIncomeIndexByPerson.get(owner)
+    if (seen) seen.push(idx)
+    else ssIncomeIndexByPerson.set(owner, [idx])
+  })
+
+  /**
+   * The income index each person's claim age must be written to, or an error
+   * string when the plan cannot express a one-claim-age-per-person mapping.
+   * A row-level error, never a throw: one unmappable policy must not abort a sweep.
+   */
+  function resolveClaimAgeTargets(policy: PolicyParams): number[] | string {
+    if (policy.claim_ages.length !== people.length) {
+      const n = policy.claim_ages.length
+      return `claim_ages has ${n} ${n === 1 ? 'entry' : 'entries'} but the household has ${
+        people.length
+      } ${
+        people.length === 1 ? 'person' : 'people'
+      }; claim ages are aligned to household.persons order, one per person`
+    }
+    const targets: number[] = []
+    for (const person of people) {
+      const owned = ssIncomeIndexByPerson.get(person.id) ?? []
+      if (owned.length === 0) {
+        return `person '${person.id}' (${person.name}) has no Social Security income in the plan, so its claim age cannot be applied; add one via update_plan or rebuild the plan`
+      }
+      if (owned.length > 1) {
+        return `person '${person.id}' (${person.name}) owns ${owned.length} Social Security incomes; batch_evaluate maps exactly one claim age per person, so it cannot tell which to set`
+      }
+      targets.push(owned[0]!)
+    }
+    return targets
+  }
 
   for (let i = 0; i < policies.length; i++) {
     const policy = policies[i]!
     try {
-      if (policy.claim_ages.length < ssIncomeCount) {
+      const targets = resolveClaimAgeTargets(policy)
+      if (typeof targets === 'string') {
         results.push({
           index: i,
           policy,
           objective: null,
           ok: false,
-          error: `claim_ages has ${policy.claim_ages.length} entries but the plan has ${ssIncomeCount} Social Security incomes`,
+          error: targets,
           caveats: snapshotCaveats(session),
         })
         continue
@@ -291,11 +366,13 @@ export function batchEvaluate(
         planJson.strategies.withdrawalOrder = { mode: 'proportional' }
       } else {
         planJson.strategies.withdrawalOrder = { mode: 'sequential' }
-        if (policy.ordering === 'traditional-first') {
-          // Terser than the two buildPlan wordings, and deliberately left so:
-          // this exact string is recorded in the protocol baseline's
-          // batch_evaluate payload. @see TRADITIONAL_FIRST_TYPED_CAVEAT.
-          caveats.push(TRADITIONAL_FIRST_BATCH_CAVEAT)
+        if (policy.ordering === 'traditional-first' && !caveats.includes(TRADITIONAL_FIRST_CAVEAT)) {
+          // The same sentence the build path records, so a sweep that mixes
+          // orderings does not describe one limitation three ways. Guarded on
+          // presence because the session may already carry it (a plan BUILT
+          // traditional-first), and the row would otherwise say it twice.
+          // @see TRADITIONAL_FIRST_CAVEAT
+          caveats.push(TRADITIONAL_FIRST_CAVEAT)
         }
       }
 
@@ -313,13 +390,12 @@ export function batchEvaluate(
         planJson.strategies.rothConversion = { mode: 'none' }
       }
 
-      let personIdx = 0
-      for (const inc of planJson.incomes) {
-        if (inc.type === 'socialSecurity' && policy.claim_ages[personIdx] != null) {
-          inc.claimAge = { years: policy.claim_ages[personIdx]!, months: 0 }
-          personIdx++
-        }
-      }
+      targets.forEach((incomeIdx, personIdx) => {
+        const inc = planJson.incomes[incomeIdx]!
+        // Narrowing only — `targets` was built from socialSecurity incomes.
+        if (inc.type !== 'socialSecurity') return
+        inc.claimAge = { years: policy.claim_ages[personIdx]!, months: 0 }
+      })
 
       const parsed = parsePlan(planJson)
       if (!parsed.ok) {
@@ -428,6 +504,10 @@ export function solveMaxSpending(session: SessionState) {
       ok: false as const,
       error: 'SPENDING_SOLVER_FAILED',
       message: e instanceof Error ? e.message : String(e),
+      // Same as runOptimizer's failure arm: a solver that could not converge is
+      // exactly when the caveats explaining the plan's approximations matter, and
+      // omitting them here made the two failure shapes gratuitously different.
+      caveats: snapshotCaveats(session),
     }
   }
 }
@@ -496,13 +576,40 @@ export function explainModeledResult(session: SessionState) {
     caveats: snapshotCaveats(session),
     hasPlan: session.plan != null,
     lastProjectionSummary: snapshotJson(session.lastProjection?.summary ?? null),
-    limitations: [
-      'Engine may use a single IRMAA lookback MAGI scalar.',
-      'traditional-first withdrawal ordering is approximate under sequential drain.',
-      'Law-sunset freeze is best-effort pending engine knobs.',
-      'stateEffectiveTaxPct overrides the modeled state pack only when ABOVE 0; 0 means "use the modeled pack", not "no state income tax".',
-    ],
+    limitations: limitationsFor(session),
   }
+}
+
+/**
+ * What this build genuinely cannot model, for the CURRENT session.
+ *
+ * Through 0.9.1 this was a fixed four-item list, and two of the four were false:
+ *
+ * - "Engine may use a single IRMAA lookback MAGI scalar" — the build writes
+ *   `historicalAnnualMagiByYear` for BOTH lookback years and the engine prefers
+ *   that year-keyed map; `recentAnnualMagi` is only a compatibility fallback. The
+ *   replacement line says that instead of implying a lossy single scalar.
+ * - "Law-sunset freeze is best-effort pending engine knobs" — there is no such
+ *   knob, and 0.10.0 removed the input that pretended there was.
+ *
+ * The traditional-first line is real but CONDITIONAL: it applies only when that
+ * ordering is actually in effect, and listing it unconditionally told every
+ * taxable-first caller their ledger might be approximate for a reason that did
+ * not apply to them. Keyed on `TRADITIONAL_FIRST_CAVEAT` being present in the
+ * session's caveats — the one place that ordering records itself — so the two
+ * cannot disagree.
+ */
+function limitationsFor(session: SessionState): string[] {
+  const limitations = [
+    'IRMAA lookback MAGIs are written as year-keyed historicalAnnualMagiByYear for both lookback years, which the engine prefers; assumptions.recentAnnualMagi is kept only as a compatibility fallback.',
+  ]
+  if (session.caveats.includes(TRADITIONAL_FIRST_CAVEAT)) {
+    limitations.push('traditional-first withdrawal ordering is approximate under sequential drain.')
+  }
+  limitations.push(
+    'stateEffectiveTaxPct overrides the modeled state pack only when ABOVE 0; 0 means "use the modeled pack", not "no state income tax".',
+  )
+  return limitations
 }
 
 export function compareScenarios(

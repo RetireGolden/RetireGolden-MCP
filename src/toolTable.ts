@@ -10,12 +10,14 @@
 
 import { z } from 'zod'
 import * as adapter from './adapter.js'
-import { clearSession, type SessionState } from './session.js'
+import { clearSession, DEFAULT_START_YEAR, type SessionState } from './session.js'
 import {
   HouseholdParamsSchema,
   PolicyParamsSchema,
   ConversionSchema,
   AssumptionsSchema,
+  ConventionKnobsSchema,
+  validateTypedPathInputs,
   type BuildPlanInput,
   type PolicyParams,
 } from './buildPlan.js'
@@ -143,16 +145,9 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         .describe(
           'Provenance only: the `mcpVersion` sibling from an export_plan response, accepted so a whole export can be spread straight back into build_plan (including the null export_plan emits when the version is unresolvable). Recorded, never warned on — for a full plan document the document itself is the model.',
         ),
-      conventions: z
-        .object({
-          lawSunsetFreezeYear: z.number().int().nullable().optional(),
-          irmaaLookbackMagis: z.tuple([z.number(), z.number()]).nullable().optional(),
-          withdrawalOrdering: z
-            .enum(['taxable-first', 'traditional-first', 'proportional'])
-            .nullable()
-            .optional(),
-        })
-        .optional(),
+      conventions: ConventionKnobsSchema.optional().describe(
+        'Optional modeling-convention overrides applied on top of whatever the typed path or the supplied plan document already set: irmaaLookbackMagis (a [startYear-2, startYear-1] dollar pair written to the engine\'s year-keyed IRMAA lookback history) and withdrawalOrdering (which overrides policy.ordering, and the imported document\'s own strategy). Round-trips: export_plan returns the session\'s conventions as a sibling of `plan`, and this field takes them straight back.',
+      ),
       assumptions: AssumptionsSchema.optional().describe(
         "Optional overrides for default modeling assumptions (inflation, returns, SS COLA, state, taxes, qualified ratio, dob month-day, sex). Defaults follow the engine (~2.5% inflation, SS COLA tracking inflation, and the resident state's own modeled income tax — set stateEffectiveTaxPct above 0 only to override that with a flat rate); household state is a REQUIRED input, not an assumption. Set explicit values to override; omitted fields keep the engine defaults.",
       ),
@@ -161,21 +156,11 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     httpExposed: true,
     dataScope: 'session',
     arms: ['calculator', 'optimizer'],
-    crossFieldValidate: (args) => {
-      if (args.plan == null && (args.household == null || args.policy == null)) {
-        return 'Provide either `plan` JSON or both `household` and `policy`'
-      }
-      // Required-state is enforced only on the typed path: when a full `plan` is
-      // supplied the household is ignored, so do not demand its state. Mirrors the
-      // runtime rule in buildPlanFromParams for a clean gateway-level message.
-      if (args.plan == null && args.household != null) {
-        const state = (args.household as { state?: unknown }).state
-        if (state == null || (typeof state === 'string' && !/^[A-Za-z]{2}$/.test(state))) {
-          return 'household.state is required on the typed path: provide a 2-letter state-of-residence code (e.g. "CA")'
-        }
-      }
-      return null
-    },
+    // The same function buildPlanFromParams derives its issues from, so the two
+    // transports cannot report the same bad input in different words. Safe to
+    // cast: crossFieldValidate runs only after the shape parse succeeded.
+    // @see buildPlan.validateTypedPathInputs
+    crossFieldValidate: (args) => validateTypedPathInputs(args as unknown as BuildPlanInput),
   },
   {
     name: 'validate_plan',
@@ -211,13 +196,30 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'run_monte_carlo',
-    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it).`,
+    // The three defaults are INTERPOLATED from the constants the handler actually
+    // applies, so this prose cannot drift from the behaviour. It renders
+    // byte-identically to the literals it replaced, so the inventory hash in
+    // tests/protocol-baseline/baseline.json does not move; changing a constant
+    // moves this description and the baseline with it.
+    // @see adapter.MC_DEFAULT_PATH_COUNT
+    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). Defaults, all echoed back in the result: pathCount ${adapter.MC_DEFAULT_PATH_COUNT}, seed ${adapter.MC_DEFAULT_SEED}, returnVolPct ${adapter.MC_DEFAULT_RETURN_VOL_PCT}.`,
     inputShape: {
       pathCount: z.number().int().positive().max(5000).optional(),
       seed: z.number().int().optional(),
+      returnVolPct: z
+        .number()
+        .min(0)
+        .max(100)
+        .optional()
+        .describe(
+          `Annual return volatility for the lognormal market model, in PERCENT (12 = 12%). Default ${adapter.MC_DEFAULT_RETURN_VOL_PCT}. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation.`,
+        ),
     },
     handler: (session, args) =>
-      adapter.runMonteCarlo(session, args as { pathCount?: number; seed?: number }),
+      adapter.runMonteCarlo(
+        session,
+        args as { pathCount?: number; seed?: number; returnVolPct?: number },
+      ),
     httpExposed: false,
     dataScope: 'session',
     arms: [],
@@ -308,13 +310,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'export_plan',
-    // NOTE: this description spells "non-2026" as a literal, not as an
-    // interpolation of session.DEFAULT_START_YEAR. Deliberate: every
-    // description here is hashed into tests/protocol-baseline/baseline.json's
-    // inventory, so interpolating it is itself a wire-visible change. If
-    // DEFAULT_START_YEAR ever moves, this string moves in the SAME change and
-    // the baseline is regenerated deliberately. @see session.DEFAULT_START_YEAR
-    description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear, conventions and caveats, and the identity of the build that emitted it: schemaVersion (the engine's plan-schema version), engineVersion and mcpVersion (null if not resolvable). Round-trips via build_plan({ plan, startYear, conventions, schemaVersion, engineVersion }) — pass the exported startYear back or a non-2026 session's projection will diverge, and pass the version siblings back so a different build can warn on skew (a differing engineVersion, or a schemaVersion that disagrees with the document, is a caveat only — never a refusal). A document written against an OLDER plan schema is migrated forward by the engine before import and accepted with a plan-schema migration caveat naming both versions (re-export it from this build to persist the upgrade). Only a document the engine cannot migrate — one newer than this build, or one that fails validation after migration — is rejected with an explanatory message rather than silently mis-read. Returns a clone; mutating it does not affect the live session.`,
+    description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear, conventions and caveats, and the identity of the build that emitted it: schemaVersion (the engine's plan-schema version), engineVersion and mcpVersion (null if not resolvable). Round-trips via build_plan({ plan, startYear, conventions, schemaVersion, engineVersion }) — pass the exported startYear back or a non-${DEFAULT_START_YEAR} session's projection will diverge, and pass the version siblings back so a different build can warn on skew (a differing engineVersion, or a schemaVersion that disagrees with the document, is a caveat only — never a refusal). A document written against an OLDER plan schema is migrated forward by the engine before import and accepted with a plan-schema migration caveat naming both versions (re-export it from this build to persist the upgrade). Only a document the engine cannot migrate — one newer than this build, or one that fails validation after migration — is rejected with an explanatory message rather than silently mis-read. Returns a clone; mutating it does not affect the live session.`,
     inputShape: {},
     handler: (session) => adapter.exportPlan(session),
     httpExposed: false,
@@ -420,12 +416,40 @@ export function argsSchemaFor(entry: ToolEntry): z.ZodObject<z.ZodRawShape> {
 }
 
 /**
- * Validate gateway arguments against the tool's own zod shape (plus any
- * cross-field rule). Returns an error message, or null when valid.
+ * Validate arguments against the tool's own zod shape (plus any cross-field
+ * rule) AND return what the handler should actually be given.
+ *
+ * The parsed value matters, not just the verdict. `z.object(inputShape)` is
+ * non-strict, so parsing DROPS unknown and retired keys — that is how
+ * `conventions.lawSunsetFreezeYear` stops reaching session state in 0.10.0. The
+ * stdio transport gets this for free: the MCP SDK parses with the same compiled
+ * schema and hands the handler the result. The HTTP gateway called this function
+ * only for its verdict and then invoked the handler with the RAW body, so the
+ * two transports disagreed about what a handler sees — over HTTP a retired knob
+ * was cloned into `session.conventions` and round-tripped by `export_plan`.
+ * Both transports now run on parsed arguments.
+ *
+ * `plan` is `z.unknown()`, so a full plan document passes through untouched;
+ * only the declared object shapes are pruned.
+ */
+export function parseToolArgs(
+  entry: ToolEntry,
+  args: Record<string, unknown>,
+): { ok: true; args: Record<string, unknown> } | { ok: false; message: string } {
+  const parsed = argsSchemaFor(entry).safeParse(args)
+  if (!parsed.success) return { ok: false, message: zodIssues(parsed.error) }
+  if (entry.crossFieldValidate) {
+    const issue = entry.crossFieldValidate(parsed.data as Record<string, unknown>)
+    if (issue) return { ok: false, message: issue }
+  }
+  return { ok: true, args: parsed.data as Record<string, unknown> }
+}
+
+/**
+ * The verdict half of `parseToolArgs`, kept as the name every test and embedder
+ * already uses. Returns an error message, or null when valid.
  */
 export function validateToolArgs(entry: ToolEntry, args: Record<string, unknown>): string | null {
-  const parsed = argsSchemaFor(entry).safeParse(args)
-  if (!parsed.success) return zodIssues(parsed.error)
-  if (entry.crossFieldValidate) return entry.crossFieldValidate(args)
-  return null
+  const parsed = parseToolArgs(entry, args)
+  return parsed.ok ? null : parsed.message
 }

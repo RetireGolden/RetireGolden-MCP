@@ -423,8 +423,9 @@ describe('build_plan engineVersion skew (the skew that can really happen)', () =
       plan: currentDocument(),
       startYear: 2026,
       engineVersion: '0.1.3',
-      // lawSunsetFreezeYear has no engine knob yet: it mutates nothing, so the
-      // document really is unchanged.
+      // lawSunsetFreezeYear is the deprecated no-op knob (no engine equivalent
+      // exists, and 0.10.0 dropped it from the tool schema): it mutates nothing,
+      // so the document really is unchanged.
       conventions: { lawSunsetFreezeYear: 2030 },
     })
     expect(noKnobs.caveats.find((c) => c.startsWith('engineVersion skew:'))).toContain(
