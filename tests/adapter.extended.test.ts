@@ -59,7 +59,9 @@ describe('runProjection — ordering modes surface their caveats', () => {
     const proj = adapter.runProjection(session)
     expect(proj.ok).toBe(true)
     if (proj.ok) {
-      expect(proj.caveats.some((c) => c.includes('ordering=traditional-first'))).toBe(false)
+      expect(
+        proj.caveats.some((c) => c.includes('traditional-first has no exact engine equivalent')),
+      ).toBe(false)
     }
   })
 
@@ -83,7 +85,9 @@ describe('runProjection — ordering modes surface their caveats', () => {
     const proj = adapter.runProjection(session)
     expect(proj.ok).toBe(true)
     if (proj.ok) {
-      expect(proj.caveats.some((c) => c.includes('ordering=traditional-first'))).toBe(true)
+      expect(
+        proj.caveats.some((c) => c.includes('traditional-first has no exact engine equivalent')),
+      ).toBe(true)
     }
   })
 })
@@ -102,12 +106,16 @@ describe('batchEvaluate — ordering modes', () => {
     expect(batch.results.every((r) => r.ok)).toBe(true)
     expect(batch.results.every((r) => typeof r.objective === 'number')).toBe(true)
     // only the traditional-first cell records the approximate caveat
-    expect(batch.results[0]!.caveats.some((c) => c.includes('traditional-first approximate'))).toBe(
-      false,
-    )
-    expect(batch.results[2]!.caveats.some((c) => c.includes('traditional-first approximate'))).toBe(
-      true,
-    )
+    expect(
+      batch.results[0]!.caveats.some((c) =>
+        c.includes('traditional-first has no exact engine equivalent'),
+      ),
+    ).toBe(false)
+    expect(
+      batch.results[2]!.caveats.some((c) =>
+        c.includes('traditional-first has no exact engine equivalent'),
+      ),
+    ).toBe(true)
   })
 
   it('maps claim_ages by person, not by Social Security income order', () => {
@@ -174,7 +182,9 @@ describe('batchEvaluate — ordering modes', () => {
     expect(batch.ok).toBe(true)
     if (!batch.ok) return
     expect(batch.results[0]!.ok).toBe(false)
-    expect(batch.results[0]!.error).toContain('claim_ages has 1 entries but the household has 2 people')
+    expect(batch.results[0]!.error).toContain(
+      'claim_ages has 1 entries but the household has 2 people',
+    )
   })
 
   it('supports the cumulative_tax objective', () => {

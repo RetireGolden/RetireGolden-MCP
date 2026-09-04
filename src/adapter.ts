@@ -18,7 +18,7 @@ import { solveMaxSustainableSpending } from '@retiregolden/engine/decisions/spen
 import {
   buildPlanFromParams,
   stateTaxCaveat,
-  TRADITIONAL_FIRST_BATCH_CAVEAT,
+  TRADITIONAL_FIRST_CAVEAT,
   type BuildPlanInput,
   type PolicyParams,
 } from './buildPlan.js'
@@ -353,11 +353,13 @@ export function batchEvaluate(
         planJson.strategies.withdrawalOrder = { mode: 'proportional' }
       } else {
         planJson.strategies.withdrawalOrder = { mode: 'sequential' }
-        if (policy.ordering === 'traditional-first') {
-          // Terser than the two buildPlan wordings, and deliberately left so:
-          // this exact string is recorded in the protocol baseline's
-          // batch_evaluate payload. @see TRADITIONAL_FIRST_TYPED_CAVEAT.
-          caveats.push(TRADITIONAL_FIRST_BATCH_CAVEAT)
+        if (policy.ordering === 'traditional-first' && !caveats.includes(TRADITIONAL_FIRST_CAVEAT)) {
+          // The same sentence the build path records, so a sweep that mixes
+          // orderings does not describe one limitation three ways. Guarded on
+          // presence because the session may already carry it (a plan BUILT
+          // traditional-first), and the row would otherwise say it twice.
+          // @see TRADITIONAL_FIRST_CAVEAT
+          caveats.push(TRADITIONAL_FIRST_CAVEAT)
         }
       }
 

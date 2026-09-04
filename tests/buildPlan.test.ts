@@ -97,7 +97,9 @@ describe('buildPlanFromParams — withdrawal ordering modes', () => {
     expect(res.ok).toBe(true)
     expect(builtOk(res).plan.strategies.withdrawalOrder).toEqual({ mode: 'sequential' })
     expect(res.ordering_unsupported).toBe(true)
-    expect(res.caveats.some((c) => c.includes('ordering=traditional-first'))).toBe(true)
+    expect(
+      res.caveats.some((c) => c.includes('traditional-first has no exact engine equivalent')),
+    ).toBe(true)
   })
 })
 
@@ -354,7 +356,7 @@ describe('buildPlanFromParams — conventions and caveats', () => {
     expect(res.ok).toBe(true)
     expect(builtOk(res).plan.strategies.withdrawalOrder).toEqual({ mode: 'sequential' })
     expect(
-      res.caveats.some((c) => c.includes('convention withdrawalOrdering=traditional-first')),
+      res.caveats.some((c) => c.includes('traditional-first has no exact engine equivalent')),
     ).toBe(true)
   })
 

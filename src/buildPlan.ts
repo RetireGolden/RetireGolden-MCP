@@ -254,44 +254,28 @@ export type BuildPlanResult =
     }
 
 /**
- * The three `traditional-first` caveat wordings, in one place.
+ * The ONE `traditional-first` caveat, used at every site that records it.
  *
- * All three say the same thing — the engine's sequential drain cannot express
- * traditional-first, so the ledger is approximate — in three different sets of
- * words, because they grew at three different sites: the typed build path, the
- * conventions overlay, and the adapter's batch cell.
+ * It grew as three near-identical wordings, at three sites that all say the same
+ * thing — the engine's sequential drain cannot express traditional-first, so the
+ * ledger is approximate: the typed build path, the conventions overlay, and the
+ * adapter's batch cell. Three strings meant a caller sweeping orderings saw the
+ * same limitation described three ways, and any reader had to check all three to
+ * learn whether they really did mean the same thing.
  *
- * DO NOT UNIFY THE TEXT HERE — but be accurate about what pins them.
+ * It is WIRE-VISIBLE: it reaches a tool response whenever a caller actually asks
+ * for traditional-first ordering. It is NOT in
+ * tests/protocol-baseline/baseline.json — every fixture there uses
+ * `taxable-first`, so no ordering caveat is recorded — so what pins it is the
+ * unit suite, by the substring `'traditional-first has no exact engine
+ * equivalent'` in tests/buildPlan.test.ts and tests/adapter.extended.test.ts.
  *
- * They are NOT in tests/protocol-baseline/baseline.json. The baseline's
- * `batch_evaluate_fixture` step runs `singlePolicy`, whose `ordering` is
- * `taxable-first`, so the only caveat it records is the state-tax one; none of
- * these three strings appears anywhere in that file. What pins them is the unit
- * suite, by substring:
- *
- * - `TRADITIONAL_FIRST_TYPED_CAVEAT` — `'ordering=traditional-first'` in
- *   tests/buildPlan.test.ts and tests/adapter.extended.test.ts.
- * - `TRADITIONAL_FIRST_CONVENTION_CAVEAT` — `'convention
- *   withdrawalOrdering=traditional-first'` in tests/buildPlan.test.ts.
- * - `TRADITIONAL_FIRST_BATCH_CAVEAT` — `'traditional-first approximate'` in
- *   tests/adapter.extended.test.ts.
- *
- * They are still WIRE-VISIBLE: each reaches a tool response whenever a caller
- * actually asks for traditional-first ordering. So rewording one is a change a
- * client can see, and belongs in a deliberate commit that says so — it is just
- * not the protocol baseline that would catch it. Naming them is the part that
- * is safe: the three sites now point at one definition, so the next reader can
- * see they are duplicates rather than rediscovering it.
+ * `explain_modeled_result` keys its conditional traditional-first limitation on
+ * this exact constant being present in `session.caveats`, so rewording it is a
+ * single edit rather than four.
  */
-export const TRADITIONAL_FIRST_TYPED_CAVEAT =
-  'ordering=traditional-first has no full engine equivalent (sequential drains taxable before traditional); ledger is approximate'
-
-/** @see TRADITIONAL_FIRST_TYPED_CAVEAT — frozen wording, do not reword. */
-export const TRADITIONAL_FIRST_CONVENTION_CAVEAT =
-  'convention withdrawalOrdering=traditional-first: approximate under sequential'
-
-/** @see TRADITIONAL_FIRST_TYPED_CAVEAT — frozen wording, do not reword. */
-export const TRADITIONAL_FIRST_BATCH_CAVEAT = 'traditional-first approximate'
+export const TRADITIONAL_FIRST_CAVEAT =
+  'withdrawal ordering traditional-first has no exact engine equivalent; modeled as sequential drain (taxable before traditional), so the ledger is approximate'
 
 const FILING = { single: 'single', mfj: 'marriedFilingJointly' } as const
 
@@ -793,7 +777,7 @@ function buildTypedPlan(
   } else if (ordering === 'traditional-first') {
     plan.strategies.withdrawalOrder = { mode: 'sequential' }
     ordering_unsupported = true
-    caveats.push(TRADITIONAL_FIRST_TYPED_CAVEAT)
+    caveats.push(TRADITIONAL_FIRST_CAVEAT)
   } else {
     // Same as the filing guard above: the zod enum cannot produce this, a
     // programmatic caller can. See the guard note in buildPlanFromParams.
@@ -887,7 +871,7 @@ function applyConventions(
   } else if (conventions.withdrawalOrdering === 'traditional-first') {
     plan.strategies.withdrawalOrder = { mode: 'sequential' }
     mutated = true
-    caveats.push(TRADITIONAL_FIRST_CONVENTION_CAVEAT)
+    caveats.push(TRADITIONAL_FIRST_CAVEAT)
   }
   return mutated
 }
