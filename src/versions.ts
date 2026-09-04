@@ -14,48 +14,72 @@ import fs from 'node:fs'
 
 let cachedVersions: { mcpVersion: string | null; engineVersion: string | null } | null = null
 
+const require = createRequire(import.meta.url)
+
+/**
+ * Version of an installed package, resolved from its own package.json.
+ *
+ * Not every package exports `./package.json` (the v1 MCP SDK does not), so a
+ * failed subpath require falls back to resolving a real entry point and walking
+ * up to the owning manifest — verifying `name` on the way so a parent workspace
+ * manifest can never be mistaken for the package's own.
+ *
+ * Returns null rather than throwing when nothing resolves: callers here degrade
+ * to a null version field, and callers that must fail loudly (the protocol
+ * baseline capture) turn the null into their own error.
+ *
+ * @param packageName bare specifier, e.g. `@retiregolden/engine`
+ * @param entrySubpath entry to resolve for the walk-up, when the package root
+ *   is not itself resolvable (e.g. `@modelcontextprotocol/sdk/client/index.js`)
+ */
+export function resolveInstalledPackageVersion(
+  packageName: string,
+  entrySubpath?: string,
+): string | null {
+  try {
+    const manifest = require(`${packageName}/package.json`) as { version?: string }
+    if (typeof manifest?.version === 'string') return manifest.version
+  } catch {
+    // fall through to the walk-up below
+  }
+  try {
+    let dir = path.dirname(require.resolve(entrySubpath ?? packageName))
+    for (let i = 0; i < 8; i++) {
+      const candidate = path.join(dir, 'package.json')
+      try {
+        const manifest = JSON.parse(fs.readFileSync(candidate, 'utf8')) as {
+          name?: string
+          version?: string
+        }
+        if (manifest.name === packageName && typeof manifest.version === 'string') {
+          return manifest.version
+        }
+      } catch {
+        // keep walking up
+      }
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
 /**
  * Resolve the running @retiregolden/mcp and @retiregolden/engine versions.
  * Never throws — any resolution failure degrades to null for that field.
  */
 export function getVersions(): { mcpVersion: string | null; engineVersion: string | null } {
   if (cachedVersions) return cachedVersions
-  const require = createRequire(import.meta.url)
   let mcpVersion: string | null = null
-  let engineVersion: string | null = null
   try {
     mcpVersion = (require('../package.json') as { version?: string }).version ?? null
   } catch {
     mcpVersion = null
   }
-  try {
-    // Engine's exports map exposes ./package.json, so the subpath require normally works.
-    engineVersion =
-      (require('@retiregolden/engine/package.json') as { version?: string }).version ?? null
-  } catch {
-    try {
-      // Fallback: resolve the package root from a known entry and walk up to package.json.
-      let dir = path.dirname(require.resolve('@retiregolden/engine'))
-      for (let i = 0; i < 8; i++) {
-        const pj = path.join(dir, 'package.json')
-        if (fs.existsSync(pj)) {
-          const parsed = JSON.parse(fs.readFileSync(pj, 'utf8')) as {
-            name?: string
-            version?: string
-          }
-          if (parsed.name === '@retiregolden/engine') {
-            engineVersion = parsed.version ?? null
-            break
-          }
-        }
-        const parent = path.dirname(dir)
-        if (parent === dir) break
-        dir = parent
-      }
-    } catch {
-      engineVersion = null
-    }
-  }
+  const engineVersion = resolveInstalledPackageVersion('@retiregolden/engine')
   cachedVersions = { mcpVersion, engineVersion }
   return cachedVersions
 }
