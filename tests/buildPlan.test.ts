@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildPlanFromParams } from '../src/buildPlan.js'
 import { DEFAULT_START_YEAR } from '../src/session.js'
-import { getTool, validateToolArgs } from '../src/toolTable.js'
+import { argsSchemaFor, getTool, validateToolArgs } from '../src/toolTable.js'
 import {
   builtFailed,
   builtOk,
@@ -358,15 +358,43 @@ describe('buildPlanFromParams — conventions and caveats', () => {
     ).toBe(true)
   })
 
-  it('records a lawSunsetFreezeYear caveat', () => {
+  it('ignores a legacy lawSunsetFreezeYear without a caveat, and strips it at the tool boundary', () => {
+    // A conventions block saved by an older export_plan can still carry the key.
+    // The engine has no freeze knob, so 0.10.0 removed it from the tool schema and
+    // stopped emitting the caveat that implied one was attempted. Two things must
+    // remain true: the programmatic path still accepts (and ignores) it, and the
+    // zod object is non-strict, so the tool transports drop the unknown key rather
+    // than refusing the whole import.
     const res = buildPlanFromParams({
       household: singleHousehold,
       policy: singlePolicy,
       startYear: 2030,
-      conventions: { lawSunsetFreezeYear: 2031 },
+      conventions: { lawSunsetFreezeYear: 2030, irmaaLookbackMagis: [1, 2] },
     })
     expect(res.ok).toBe(true)
-    expect(res.caveats.some((c) => c.includes('lawSunsetFreezeYear=2031'))).toBe(true)
+    expect(res.caveats.some((c) => c.toLowerCase().includes('sunset'))).toBe(false)
+    expect(res.caveats.some((c) => c.toLowerCase().includes('freeze'))).toBe(false)
+    // The surviving knob still applied.
+    expect(builtOk(res).plan.assumptions.historicalAnnualMagiByYear).toEqual({
+      '2028': 1,
+      '2029': 2,
+    })
+
+    const entry = getTool('build_plan')!
+    const args = {
+      household: singleHousehold,
+      policy: singlePolicy,
+      startYear: 2030,
+      conventions: { lawSunsetFreezeYear: 2030, irmaaLookbackMagis: [1, 2] },
+    }
+    expect(validateToolArgs(entry, args)).toBeNull()
+    expect(
+      argsSchemaFor(entry).parse(args) as { conventions: Record<string, unknown> },
+    ).toMatchObject({ conventions: { irmaaLookbackMagis: [1, 2] } })
+    expect(
+      'lawSunsetFreezeYear' in
+        (argsSchemaFor(entry).parse(args) as { conventions: Record<string, unknown> }).conventions,
+    ).toBe(false)
   })
 
   it('maps a convention irmaaLookbackMagis pair without a lossy caveat', () => {

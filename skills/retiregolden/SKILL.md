@@ -62,7 +62,7 @@ See `references/examples.md` for a real-household MFJ call with overrides.
 ## Error & caveat semantics
 
 - Tools return their failures **as successful MCP results** with `ok: false` and an `error` code — inspect the JSON body, do not treat these as tool crashes. Codes include `NO_PLAN` (call `build_plan` first), `OPTIMIZER_FAILED`, `SPENDING_SOLVER_FAILED`, `INVALID_PLAN_A` / `INVALID_PLAN_B`. Invalid `build_plan` input returns `ok: false` with an `issues[]` array — including the two hard errors: a **missing/invalid `household.state`** and a **non-zero `wage`** (wages are not modeled).
-- **`caveats[]` accumulates approximations** (e.g. `traditional-first` ordering under sequential drain, a best-effort law-sunset freeze when you pass `conventions.lawSunsetFreezeYear`, state-tax and version-skew notes). It rides along on build, projection, and batch results — **surface it to the user**; never drop it.
+- **`caveats[]` accumulates approximations** (e.g. `traditional-first` ordering under sequential drain, state-tax and version-skew notes). It rides along on build, projection, and batch results — **surface it to the user**; never drop it.
 - `explain_modeled_result` returns `framing`, `assumptions`, `conventions`, `caveats`, and `limitations`. Call it when summarizing so the modeling boundaries stay visible.
 
 ## Typical calculator flow
@@ -75,7 +75,7 @@ See `references/examples.md` for a real-household MFJ call with overrides.
 
 ## Conventions knob
 
-Pass `conventions` on `build_plan` for law-sunset freeze, dual IRMAA lookback MAGIs, or a withdrawal-ordering override. Read returned `caveats` — some engine knobs are best-effort.
+Pass `conventions` on `build_plan` for dual IRMAA lookback MAGIs (`irmaaLookbackMagis: [Y-2, Y-1]`) or a withdrawal-ordering override (`withdrawalOrdering`), applied on top of whatever the typed path or the supplied plan document already set. Read the returned `caveats`: a `traditional-first` override records that the ledger is approximate.
 
 ## Building a plan from the user's documents (ingestion loop)
 

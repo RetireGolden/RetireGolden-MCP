@@ -841,12 +841,6 @@ function buildTypedPlan(
     [String(startYear - 1)]: pre[1] ?? pre[0] ?? 0,
   }
 
-  if (conventions.lawSunsetFreezeYear != null) {
-    caveats.push(
-      `lawSunsetFreezeYear=${conventions.lawSunsetFreezeYear} requested; engine freeze toggle is best-effort — verify parameter packs for that year`,
-    )
-  }
-
   applyConventions(plan, conventions, caveats, startYear)
 
   const parsed = parsePlan(plan)
@@ -866,9 +860,7 @@ function buildTypedPlan(
 
 /**
  * @returns whether any knob actually rewrote a field of `plan`. Callers use this
- * to describe an imported document honestly — see `acceptedHow`. Note
- * `lawSunsetFreezeYear` is deliberately not counted: it has no engine knob yet and
- * mutates nothing.
+ * to describe an imported document honestly — see `acceptedHow`.
  */
 function applyConventions(
   plan: Plan,

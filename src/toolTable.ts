@@ -145,7 +145,6 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         ),
       conventions: z
         .object({
-          lawSunsetFreezeYear: z.number().int().nullable().optional(),
           irmaaLookbackMagis: z.tuple([z.number(), z.number()]).nullable().optional(),
           withdrawalOrdering: z
             .enum(['taxable-first', 'traditional-first', 'proportional'])
