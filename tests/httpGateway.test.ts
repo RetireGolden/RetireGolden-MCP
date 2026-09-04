@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { singleHousehold, singlePolicy } from './fixtures.js'
 import { startTestGateway, type TestGateway } from './helpers/gateway.js'
 
@@ -196,5 +196,35 @@ describe('HTTP gateway (Phase 6 stub) integration', () => {
     expect(body.ok).toBe(false)
     expect(body.issues[0]).toContain('plan-schema skew:')
     expect(body.issues[0]).toContain(`v${PLAN_SCHEMA_VERSION + 1}`)
+  })
+
+  it('answers a throwing handler with a bare 500 TOOL_FAILED, detail to stderr only', async () => {
+    // No httpExposed handler throws today — they return `{ ok: false }` results
+    // — so the throw is injected. The contract under test is the transport's,
+    // not any one tool's: an unexpected exception must not put its message on
+    // the wire of an unauthenticated listener.
+    const { getTool } = await import('../src/toolTable.js')
+    const entry = getTool('explain_modeled_result')
+    if (!entry) throw new Error('explain_modeled_result missing from the tool table')
+    const secret = 'boom: /home/someone/plans/alice.json'
+    const handler = vi.spyOn(entry, 'handler').mockImplementation(() => {
+      throw new Error(secret)
+    })
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const r = await post({ tool: 'explain_modeled_result' }, { 'x-session-id': 'throwing' })
+      expect(r.status).toBe(500)
+      const text = await r.text()
+      expect(JSON.parse(text)).toEqual({ error: 'TOOL_FAILED' })
+      expect(text).not.toContain(secret)
+      expect(
+        stderr.mock.calls.some((args) =>
+          args.some((a) => a instanceof Error && a.message === secret),
+        ),
+      ).toBe(true)
+    } finally {
+      handler.mockRestore()
+      stderr.mockRestore()
+    }
   })
 })

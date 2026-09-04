@@ -223,8 +223,13 @@ export async function startHttpGateway(
       res.writeHead(200)
       res.end(JSON.stringify(result))
     } catch (e) {
+      // The response body carries a fixed code, never the exception text. An
+      // unexpected throw out of a handler can quote engine internals, a file
+      // path, or a fragment of the caller's own plan data, and this listener is
+      // unauthenticated. The detail goes to the operator's stderr instead.
+      console.error('RetireGolden HTTP gateway: tool handler threw', e)
       res.writeHead(500)
-      res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }))
+      res.end(JSON.stringify({ error: 'TOOL_FAILED' }))
     }
   })
 

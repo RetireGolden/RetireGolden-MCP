@@ -43,6 +43,9 @@ registry-parity test holds equal to `TOOL_TABLE`.
   clients reliably receive it; drain time is bounded by the 30s request timeout.
 - Tool arguments are validated with the same zod schemas as stdio (`household`/
   `policy` shapes, `batch_evaluate` policies 1–500, objective enum) → `400 INVALID_ARGS`.
+- An exception out of a tool handler answers `500 TOOL_FAILED` and nothing else.
+  The exception is written to the server's stderr; it is never echoed in the
+  response body, which would leak internals to an unauthenticated caller.
 - `GET /health` is unauthenticated and reports only `{ ok, transport, sessions }`
   (a session count, never another session's plan state).
 
