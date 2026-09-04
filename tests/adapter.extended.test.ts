@@ -308,6 +308,42 @@ describe('explainModeledResult', () => {
     expect(res.assumptions).toBeTruthy()
     expect(res.caveats.length).toBeGreaterThan(0)
   })
+
+  it('states only limitations that are true of this build', () => {
+    const res = adapter.explainModeledResult(createSession(2026))
+    const joined = res.limitations.join('\n')
+    // Both removed in 0.10.0: the build writes year-keyed lookback MAGIs for
+    // BOTH years, and no engine law-sunset/freeze knob exists.
+    expect(joined).not.toContain('single IRMAA lookback MAGI scalar')
+    expect(joined.toLowerCase()).not.toContain('sunset')
+    expect(joined).toContain('historicalAnnualMagiByYear')
+    expect(joined).toContain('compatibility fallback')
+    expect(joined).toContain('stateEffectiveTaxPct')
+  })
+
+  it('lists the traditional-first limitation only when that ordering is in effect', () => {
+    const taxableFirst = createSession(2026)
+    adapter.setPlanFromBuild(taxableFirst, {
+      household: singleHousehold,
+      policy: { ...singlePolicy, ordering: 'taxable-first' },
+    })
+    expect(
+      adapter
+        .explainModeledResult(taxableFirst)
+        .limitations.some((l) => l.includes('traditional-first')),
+    ).toBe(false)
+
+    const traditionalFirst = createSession(2026)
+    adapter.setPlanFromBuild(traditionalFirst, {
+      household: singleHousehold,
+      policy: { ...singlePolicy, ordering: 'traditional-first' },
+    })
+    expect(
+      adapter
+        .explainModeledResult(traditionalFirst)
+        .limitations.some((l) => l.includes('traditional-first')),
+    ).toBe(true)
+  })
 })
 
 describe('adapter NO_PLAN error branches', () => {

@@ -559,13 +559,40 @@ export function explainModeledResult(session: SessionState) {
     caveats: snapshotCaveats(session),
     hasPlan: session.plan != null,
     lastProjectionSummary: snapshotJson(session.lastProjection?.summary ?? null),
-    limitations: [
-      'Engine may use a single IRMAA lookback MAGI scalar.',
-      'traditional-first withdrawal ordering is approximate under sequential drain.',
-      'Law-sunset freeze is best-effort pending engine knobs.',
-      'stateEffectiveTaxPct overrides the modeled state pack only when ABOVE 0; 0 means "use the modeled pack", not "no state income tax".',
-    ],
+    limitations: limitationsFor(session),
   }
+}
+
+/**
+ * What this build genuinely cannot model, for the CURRENT session.
+ *
+ * Through 0.9.1 this was a fixed four-item list, and two of the four were false:
+ *
+ * - "Engine may use a single IRMAA lookback MAGI scalar" — the build writes
+ *   `historicalAnnualMagiByYear` for BOTH lookback years and the engine prefers
+ *   that year-keyed map; `recentAnnualMagi` is only a compatibility fallback. The
+ *   replacement line says that instead of implying a lossy single scalar.
+ * - "Law-sunset freeze is best-effort pending engine knobs" — there is no such
+ *   knob, and 0.10.0 removed the input that pretended there was.
+ *
+ * The traditional-first line is real but CONDITIONAL: it applies only when that
+ * ordering is actually in effect, and listing it unconditionally told every
+ * taxable-first caller their ledger might be approximate for a reason that did
+ * not apply to them. Keyed on `TRADITIONAL_FIRST_CAVEAT` being present in the
+ * session's caveats — the one place that ordering records itself — so the two
+ * cannot disagree.
+ */
+function limitationsFor(session: SessionState): string[] {
+  const limitations = [
+    'IRMAA lookback MAGIs are written as year-keyed historicalAnnualMagiByYear for both lookback years, which the engine prefers; assumptions.recentAnnualMagi is kept only as a compatibility fallback.',
+  ]
+  if (session.caveats.includes(TRADITIONAL_FIRST_CAVEAT)) {
+    limitations.push('traditional-first withdrawal ordering is approximate under sequential drain.')
+  }
+  limitations.push(
+    'stateEffectiveTaxPct overrides the modeled state pack only when ABOVE 0; 0 means "use the modeled pack", not "no state income tax".',
+  )
+  return limitations
 }
 
 export function compareScenarios(

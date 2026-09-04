@@ -62,8 +62,8 @@ See `references/examples.md` for a real-household MFJ call with overrides.
 ## Error & caveat semantics
 
 - Tools return their failures **as successful MCP results** with `ok: false` and an `error` code — inspect the JSON body, do not treat these as tool crashes. Codes include `NO_PLAN` (call `build_plan` first), `OPTIMIZER_FAILED`, `SPENDING_SOLVER_FAILED`, `INVALID_PLAN_A` / `INVALID_PLAN_B`. Invalid `build_plan` input returns `ok: false` with an `issues[]` array — including the two hard errors: a **missing/invalid `household.state`** and a **non-zero `wage`** (wages are not modeled).
-- **`caveats[]` accumulates approximations** (e.g. `traditional-first` ordering under sequential drain, state-tax and version-skew notes). It rides along on build, projection, and batch results — **surface it to the user**; never drop it.
-- `explain_modeled_result` returns `framing`, `assumptions`, `conventions`, `caveats`, and `limitations`. Call it when summarizing so the modeling boundaries stay visible.
+- **`caveats[]` accumulates approximations and provenance warnings** — `traditional-first` ordering modeled as sequential drain, state-tax footguns (`stateEffectiveTaxPct` at or below 0), typed fields ignored under full-plan precedence, plan-schema / engine-version skew on an imported document, and a stale-projection note after `update_plan`. It rides along on build, projection, and batch results — **surface it to the user**; never drop it.
+- `explain_modeled_result` returns `framing`, `assumptions`, `conventions`, `caveats`, and `limitations`. Call it when summarizing so the modeling boundaries stay visible. `limitations` is **session-dependent**: it always states that IRMAA lookback MAGIs are written year-keyed (`historicalAnnualMagiByYear` for both lookback years, with `recentAnnualMagi` kept only as a compatibility fallback) and that `stateEffectiveTaxPct` overrides the modeled pack only ABOVE 0; the `traditional-first` line appears only when that ordering is actually in effect.
 
 ## Typical calculator flow
 
