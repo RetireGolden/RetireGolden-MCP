@@ -291,8 +291,9 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       return {
         hasPlan: session.plan != null,
         startYear: session.startYear,
-        caveats: session.caveats,
-        conventions: session.conventions,
+        // Copies, not the live arrays/objects — see adapter.snapshotCaveats.
+        caveats: adapter.snapshotCaveats(session),
+        conventions: adapter.snapshotConventions(session),
         planName: session.plan?.name ?? null,
         mcpVersion,
         engineVersion,

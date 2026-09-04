@@ -22,7 +22,7 @@ import {
   type PolicyParams,
 } from './buildPlan.js'
 import { getVersions } from './versions.js'
-import type { SessionState } from './session.js'
+import type { ConventionKnobs, SessionState } from './session.js'
 
 /**
  * The tax stack EVERY simulating path runs. Deliberately identical to the
@@ -92,6 +92,29 @@ const SUPERSEDED_CAVEATS: Record<string, (caveat: string) => boolean> = {
 // import it as `adapter.getVersions`.
 export { getVersions }
 
+/**
+ * Snapshot the session-owned mutable state a response carries.
+ *
+ * Every handler but `exportPlan` used to put `session.caveats` /
+ * `session.conventions` on its result BY REFERENCE, so a programmatic consumer
+ * (Pro, an in-process host, a test) that pushed onto the caveats array it was
+ * handed was editing the live session — and two responses handed out the same
+ * array, so mutating one retroactively changed the other. `exportPlan`'s doc
+ * comment already states the rule ("must not be able to reach back into the live
+ * session through the exported object"); these helpers make it true everywhere.
+ *
+ * Deliberately invisible on the wire: JSON.stringify of a copy is byte-identical
+ * to JSON.stringify of the original, so the protocol baseline does not move.
+ */
+export function snapshotCaveats(session: SessionState): string[] {
+  return [...session.caveats]
+}
+
+/** @see snapshotCaveats */
+export function snapshotConventions(session: SessionState): ConventionKnobs {
+  return structuredClone(session.conventions)
+}
+
 export function validatePlanJson(input: unknown) {
   return parsePlan(input)
 }
@@ -131,7 +154,7 @@ export function runProjection(
     startYear: result.startYear,
     endYear: result.endYear,
     summary,
-    caveats: session.caveats,
+    caveats: snapshotCaveats(session),
   }
   if (opts.detail !== 'years') {
     // 'summary' (default): omit the per-year array; summary carries the totals.
@@ -191,7 +214,7 @@ export function runMonteCarlo(
       p75: pctl.p75,
       p90: pctl.p90,
     },
-    caveats: session.caveats,
+    caveats: snapshotCaveats(session),
   }
 }
 
@@ -224,12 +247,12 @@ export function batchEvaluate(
           objective: null,
           ok: false,
           error: `claim_ages has ${policy.claim_ages.length} entries but the plan has ${ssIncomeCount} Social Security incomes`,
-          caveats: session.caveats,
+          caveats: snapshotCaveats(session),
         })
         continue
       }
       const planJson = structuredClone(session.plan) as Plan
-      const caveats = [...session.caveats]
+      const caveats = snapshotCaveats(session)
 
       if (policy.ordering === 'proportional') {
         planJson.strategies.withdrawalOrder = { mode: 'proportional' }
@@ -300,7 +323,7 @@ export function batchEvaluate(
         objective: null,
         ok: false,
         error: e instanceof Error ? e.message : String(e),
-        caveats: session.caveats,
+        caveats: snapshotCaveats(session),
       })
     }
   }
@@ -326,14 +349,14 @@ export async function runOptimizer(session: SessionState) {
         policyId: result.tournament.policyId,
         winnerConversions: result.tournament.winnerConversions,
       },
-      caveats: session.caveats,
+      caveats: snapshotCaveats(session),
     }
   } catch (e) {
     return {
       ok: false as const,
       error: 'OPTIMIZER_FAILED',
       message: e instanceof Error ? e.message : String(e),
-      caveats: session.caveats,
+      caveats: snapshotCaveats(session),
     }
   }
 }
@@ -362,7 +385,7 @@ export function solveMaxSpending(session: SessionState) {
       spendingSlackDollars: result.spendingSlackDollars,
       converged: result.converged,
       limitingConstraint: result.limitingConstraint,
-      caveats: session.caveats,
+      caveats: snapshotCaveats(session),
     }
   } catch (e) {
     return {
@@ -407,8 +430,8 @@ export function exportPlan(session: SessionState) {
     ok: true as const,
     plan: structuredClone(session.plan),
     startYear: session.startYear,
-    conventions: structuredClone(session.conventions),
-    caveats: [...session.caveats],
+    conventions: snapshotConventions(session),
+    caveats: snapshotCaveats(session),
     schemaVersion: PLAN_SCHEMA_VERSION,
     engineVersion,
     mcpVersion,
@@ -431,8 +454,8 @@ export function explainModeledResult(session: SessionState) {
     taxStack:
       "Federal brackets combined with the resident state's modeled income tax, plus any flat stateEffectiveTaxPct / localIncomeTaxPct override. This is the same stack the RetireGolden web app runs, so a projection here agrees with what the app shows for the same plan and start year.",
     assumptions: session.plan?.assumptions ?? null,
-    conventions: session.conventions,
-    caveats: session.caveats,
+    conventions: snapshotConventions(session),
+    caveats: snapshotCaveats(session),
     hasPlan: session.plan != null,
     lastProjectionSummary:
       session.lastProjection &&
@@ -831,6 +854,6 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
     ok: true as const,
     appliedOperations: ops.length,
     plan: planSummary(parsed.plan),
-    caveats: session.caveats,
+    caveats: snapshotCaveats(session),
   }
 }
