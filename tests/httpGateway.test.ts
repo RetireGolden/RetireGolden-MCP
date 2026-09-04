@@ -12,7 +12,7 @@ const buildBody = {
   arguments: { household: singleHousehold, policy: singlePolicy, startYear: 2026 },
 }
 
-describe('HTTP gateway (Phase 6 stub) integration', () => {
+describe('HTTP gateway integration', () => {
   beforeAll(async () => {
     gateway = await startTestGateway()
     BASE = gateway.base
@@ -27,7 +27,7 @@ describe('HTTP gateway (Phase 6 stub) integration', () => {
     expect(r.status).toBe(200)
     const body = (await r.json()) as { ok: boolean; transport: string }
     expect(body.ok).toBe(true)
-    expect(body.transport).toBe('http-stub')
+    expect(body.transport).toBe('http-research')
   })
 
   it('rejects a request with no x-session-id header (400)', async () => {

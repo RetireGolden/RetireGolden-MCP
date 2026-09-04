@@ -1,9 +1,9 @@
 /**
- * Optional HTTP / Azure Functions-style gateway over the same tool handlers.
+ * Optional HTTP research transport over the same tool handlers.
  *
  * Official RetireBench scored runs stay on ephemeral stdio until this path
- * proves bit-identical results. This module is a cost/ops experiment surface:
- * same adapter, different transport.
+ * proves bit-identical results. This module is the same adapter behind a
+ * different transport, kept behind the fence described below.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -118,8 +118,9 @@ function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | n
 }
 
 /**
- * Minimal JSON-RPC-ish HTTP facade for smoke tests and future Azure Functions
- * wrapping. Not a full MCP Streamable HTTP implementation yet — Phase 6 stub.
+ * Minimal JSON-RPC-ish HTTP facade for smoke tests on the research transport.
+ * Not a full MCP Streamable HTTP implementation, and not a supported product
+ * API: unauthenticated, loopback-only, and opt-in (see the fence note above).
  *
  * The tool surface, arg schemas, and handlers are shared with stdio via the
  * declarative table (src/toolTable.ts); only the tools flagged httpExposed are
@@ -149,7 +150,7 @@ export async function startHttpGateway(
 
     if (req.method === 'GET' && req.url === '/health') {
       res.writeHead(200)
-      res.end(JSON.stringify({ ok: true, transport: 'http-stub', sessions: sessions.size }))
+      res.end(JSON.stringify({ ok: true, transport: 'http-research', sessions: sessions.size }))
       return
     }
     if (req.method !== 'POST' || req.url !== '/tool') {
@@ -254,7 +255,8 @@ export async function startHttpGateway(
       const addr = server.address()
       const boundPort = addr && typeof addr === 'object' ? addr.port : port
       console.error(
-        `RetireGolden MCP HTTP stub listening on ${host}:${boundPort} (Phase 6 transport experiment)`,
+        `RetireGolden MCP HTTP research transport listening on ${host}:${boundPort} ` +
+          `(unauthenticated, loopback-only, opt-in)`,
       )
       resolve()
     })
