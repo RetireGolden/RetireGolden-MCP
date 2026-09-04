@@ -11,26 +11,28 @@ import { join, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import {
-  Client as V2Client,
-  type ProtocolEra,
-  type VersionNegotiationOptions,
-} from '@modelcontextprotocol/client'
-import { StdioClientTransport as V2Stdio } from '@modelcontextprotocol/client/stdio'
 import { Client as V1Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport as V1Stdio } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { TOOL_TABLE } from '../src/toolTable.js'
 import { singleHousehold, singlePolicy } from './fixtures.js'
+import {
+  PINNED_MODERN,
+  TOOL_NAMES,
+  assertCanonicalEqual,
+  assertLane,
+  createEraHarness,
+  openStdio,
+  stripEraEnvelope,
+  type CallCapture,
+  type Canonicalize,
+  type EnvelopeView,
+  type LaneCapture,
+  type ToolClient,
+} from './helpers/eraHarness.js'
 
 const execFile = promisify(execFileCallback)
 const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 const baselinePath = fileURLToPath(new URL('./protocol-baseline/baseline.json', import.meta.url))
 const captureModuleUrl = new URL('../scripts/capture-protocol-baseline.mjs', import.meta.url).href
-
-const TOOL_NAMES = TOOL_TABLE.map((tool) => tool.name)
-const seed = { household: singleHousehold, policy: singlePolicy, startYear: 2026 }
-const PINNED_MODERN = '2026-07-28' as const
-const MODERN_SERVER_INFO_META = 'io.modelcontextprotocol/serverInfo'
 
 interface PackageManifest {
   name: string
@@ -96,54 +98,6 @@ interface CaptureLibrary {
     root: string
     fixtures: { singleHousehold: typeof singleHousehold; singlePolicy: typeof singlePolicy }
   }): Promise<StdioBaselineCapture>
-}
-
-interface CallCapture {
-  payload: unknown
-  envelope: unknown
-  // Raw pre-normalization cache hints: plan-bearing responses must never be
-  // publicly cacheable, so these are asserted before envelopeView drops them.
-  rawCacheScope: unknown
-  rawTtlMs: unknown
-}
-
-interface LaneCapture {
-  era: ProtocolEra
-  inventory: unknown
-  toolNames: string[]
-  resourceMimeType: string
-  resourceBody: unknown
-  calls: {
-    primary: CallCapture[]
-    malformed: CallCapture
-    isolatedNoPlan: CallCapture
-  }
-}
-
-interface ToolClient {
-  listTools(): Promise<{ tools: Array<{ name: string }> }>
-  listResources(): Promise<{ resources: Array<{ name?: string; uri: string }> }>
-  readResource(req: { uri: string }): Promise<{
-    contents: Array<{ mimeType?: string; text?: string; uri?: string }>
-  }>
-  callTool(req: { name: string; arguments?: Record<string, unknown> }): Promise<unknown>
-  close(): Promise<void>
-}
-
-interface StdioTransport {
-  pid?: number | null
-  onclose?: () => void
-  onerror?: (error: Error) => void
-}
-
-interface SessionHandle {
-  client: ToolClient
-  close(): Promise<void>
-}
-
-interface LaunchTarget {
-  cliPath: string
-  cwd: string
 }
 
 function requireDependencies(value: unknown, path: string): Record<string, string> {
@@ -304,86 +258,6 @@ function mcpDependencyClosure(packages: InstalledPackage[]): Set<string> {
   return names
 }
 
-function waitFor(promise: Promise<unknown>, milliseconds: number, description: string): Promise<unknown> {
-  let timer: ReturnType<typeof setTimeout>
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`Timed out waiting for ${description}`)), milliseconds)
-  })
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
-}
-
-async function openStdio(client: ToolClient, transport: StdioTransport): Promise<SessionHandle> {
-  let shuttingDown = false
-  let resolveClose!: () => void
-  let rejectClose!: (error: Error) => void
-  const childClosed = new Promise<void>((resolveClosePromise, rejectClosePromise) => {
-    resolveClose = resolveClosePromise
-    rejectClose = rejectClosePromise
-  })
-  const priorClose = transport.onclose
-  const priorError = transport.onerror
-  transport.onclose = () => {
-    priorClose?.()
-    resolveClose()
-  }
-  transport.onerror = (error) => {
-    priorError?.(error)
-    if (shuttingDown) resolveClose()
-    else rejectClose(error)
-  }
-  try {
-    await (client as unknown as { connect(transport: unknown): Promise<void> }).connect(transport)
-  } catch (connectError) {
-    // A rejected initialize/discover means no SessionHandle is returned, so
-    // the caller's finally can never close the child — do it here.
-    shuttingDown = true
-    try {
-      await (transport as unknown as { close?: () => Promise<void> }).close?.()
-    } catch {
-      // the connect failure is the signal
-    }
-    throw connectError
-  }
-  return {
-    client,
-    async close() {
-      shuttingDown = true
-      let closeError: unknown
-      try {
-        await client.close()
-      } catch (error) {
-        closeError = error
-      }
-      try {
-        await waitFor(childClosed, 5_000, 'the packed stdio child process to exit')
-      } catch (error) {
-        const pid = transport.pid
-        if (typeof pid === 'number') {
-          try {
-            process.kill(pid)
-          } catch {
-            // The child already exited or could not be signalled; the close timeout remains diagnostic.
-          }
-        }
-        if (!closeError) closeError = error
-      }
-      if (closeError) throw closeError
-    },
-  }
-}
-
-function parsePayload(result: unknown): unknown {
-  const content = (result as { content?: Array<{ type: string; text: string }> }).content
-  const text = content?.find((entry) => entry.type === 'text')?.text
-  expect(text, 'tool returned no text content').toBeTruthy()
-  try {
-    return JSON.parse(text as string)
-  } catch {
-    // SDK-authored validation errors are plain text, not JSON envelopes.
-    return { kind: 'text', text }
-  }
-}
-
 /**
  * On win32 the .cmd shims require shell: true (CVE-2024-27980), and cmd.exe
  * receives the argv joined with spaces UNQUOTED — a temp path containing a
@@ -394,215 +268,14 @@ function shellSafe(args: string[]): string[] {
   return args.map((arg) => (/[\s^&()%!"]/.test(arg) ? `"${arg}"` : arg))
 }
 
-async function captureCall(
-  client: ToolClient,
-  tool: string,
-  args: Record<string, unknown>,
-  canonicalize: (value: unknown) => unknown,
-  envelopeView: (result: unknown) => unknown,
-): Promise<CallCapture> {
-  const raw = await client.callTool({ name: tool, arguments: args })
-  const rawRecord = raw as { cacheScope?: unknown; ttlMs?: unknown }
-  return {
-    payload: canonicalize(parsePayload(raw)),
-    envelope: envelopeView(raw),
-    rawCacheScope: rawRecord.cacheScope,
-    rawTtlMs: rawRecord.ttlMs,
-  }
-}
-
-async function exercisePrimary(
-  client: ToolClient,
-  canonicalize: (value: unknown) => unknown,
-): Promise<Omit<LaneCapture, 'era' | 'calls'>> {
-  const listed = await client.listTools()
-  const inventory = canonicalize(listed)
-  const toolNames = listed.tools.map((tool) => tool.name)
-  const resources = await client.listResources()
-  const resource = resources.resources.find((candidate) => candidate.name === 'plan-schema')
-  expect(resource?.uri, 'resources/list did not advertise plan-schema').toBeTruthy()
-  const read = await client.readResource({ uri: resource!.uri })
-  expect(read.contents.length).toBeGreaterThan(0)
-  const content = read.contents[0]!
-  return {
-    inventory,
-    toolNames,
-    resourceMimeType: content.mimeType ?? '',
-    resourceBody: JSON.parse(content.text as string),
-  }
-}
-
-async function exercisePrimaryCalls(
-  client: ToolClient,
-  canonicalize: (value: unknown) => unknown,
-  envelopeView: (result: unknown) => unknown,
-): Promise<CallCapture[]> {
-  // State must cross these awaited calls on one connection; request concurrency
-  // would not prove the packaged server preserves a session deterministically.
-  const build = await captureCall(client, 'build_plan', seed, canonicalize, envelopeView)
-  const projection = await captureCall(
-    client,
-    'run_projection',
-    { detail: 'summary' },
-    canonicalize,
-    envelopeView,
-  )
-  const exported = await captureCall(client, 'export_plan', {}, canonicalize, envelopeView)
-  return [build, projection, exported]
-}
-
-async function exerciseIsolation(
-  client: ToolClient,
-  canonicalize: (value: unknown) => unknown,
-  envelopeView: (result: unknown) => unknown,
-): Promise<CallCapture> {
-  return captureCall(client, 'run_projection', { detail: 'summary' }, canonicalize, envelopeView)
-}
-
-async function runV1Lane(
-  target: LaunchTarget,
-  canonicalize: (value: unknown) => unknown,
-  envelopeView: (result: unknown) => unknown,
-): Promise<LaneCapture> {
-  const connect = async (label: string) => {
-    const transport = new V1Stdio({
-      command: process.execPath,
-      args: [target.cliPath],
-      cwd: target.cwd,
-    })
-    return openStdio(new V1Client({ name: label, version: '0.0.0' }) as ToolClient, transport)
-  }
-
-  const primary = await connect('packed-artifact-v1')
-  let captured: Omit<LaneCapture, 'era' | 'calls'>
-  let primaryCalls: CallCapture[]
-  let malformed: CallCapture
-  try {
-    // Malformed input first (stateless): every lane, including modern
-    // dispatch, must surface schema rejection as a structured isError result.
-    malformed = await captureCall(primary.client, 'build_plan', { household: 42 }, canonicalize, envelopeView)
-    captured = await exercisePrimary(primary.client, canonicalize)
-    primaryCalls = await exercisePrimaryCalls(primary.client, canonicalize, envelopeView)
-  } finally {
-    await primary.close()
-  }
-
-  const isolation = await connect('packed-artifact-v1-isolation')
-  let isolatedNoPlan: CallCapture
-  try {
-    isolatedNoPlan = await exerciseIsolation(isolation.client, canonicalize, envelopeView)
-  } finally {
-    await isolation.close()
-  }
-  return { era: 'legacy', ...captured, calls: { primary: primaryCalls, malformed, isolatedNoPlan } }
-}
-
-async function runV2Lane(
-  target: LaunchTarget,
-  options: { negotiation?: VersionNegotiationOptions; expectedEra: ProtocolEra },
-  canonicalize: (value: unknown) => unknown,
-  envelopeView: (result: unknown) => unknown,
-): Promise<LaneCapture> {
-  const connect = async (label: string) => {
-    const transport = new V2Stdio({
-      command: process.execPath,
-      args: [target.cliPath],
-      cwd: target.cwd,
-    })
-    const client = new V2Client(
-      { name: label, version: '0.0.0' },
-      options.negotiation ? { versionNegotiation: options.negotiation } : undefined,
-    )
-    const session = await openStdio(client as ToolClient, transport)
-    try {
-      expect(client.getProtocolEra(), `${label} protocol era`).toBe(options.expectedEra)
-      if (options.expectedEra === 'modern') {
-        expect(client.getNegotiatedProtocolVersion(), `${label} modern revision`).toBe(PINNED_MODERN)
-      }
-      if (options.negotiation?.mode === 'auto') {
-        expect(client.getDiscoverResult(), `${label} server/discover result`).toBeDefined()
-      }
-      if (options.negotiation == null) {
-        expect(client.getDiscoverResult(), `${label} must not probe`).toBeUndefined()
-      }
-      return session
-    } catch (error) {
-      await session.close()
-      throw error
-    }
-  }
-
-  const primary = await connect('packed-artifact-v2')
-  let captured: Omit<LaneCapture, 'era' | 'calls'>
-  let primaryCalls: CallCapture[]
-  let malformed: CallCapture
-  try {
-    // Malformed input first (stateless): every lane, including modern
-    // dispatch, must surface schema rejection as a structured isError result.
-    malformed = await captureCall(primary.client, 'build_plan', { household: 42 }, canonicalize, envelopeView)
-    captured = await exercisePrimary(primary.client, canonicalize)
-    primaryCalls = await exercisePrimaryCalls(primary.client, canonicalize, envelopeView)
-  } finally {
-    await primary.close()
-  }
-
-  const isolation = await connect('packed-artifact-v2-isolation')
-  let isolatedNoPlan: CallCapture
-  try {
-    isolatedNoPlan = await exerciseIsolation(isolation.client, canonicalize, envelopeView)
-  } finally {
-    await isolation.close()
-  }
-  return { era: options.expectedEra, ...captured, calls: { primary: primaryCalls, malformed, isolatedNoPlan } }
-}
-
-function assertLane(label: string, lane: LaneCapture, era: ProtocolEra): void {
-  expect(lane.era, `${label} era`).toBe(era)
-  expect(lane.toolNames, `${label} 14-tool inventory`).toEqual(TOOL_NAMES)
-  expect(TOOL_NAMES, 'TOOL_TABLE drifted from the 14-tool public contract').toHaveLength(14)
-  expect(lane.resourceMimeType, `${label} plan-schema mimeType`).toBe('application/json')
-  expect((lane.calls.primary[0]?.payload as { ok?: boolean }).ok, `${label} build_plan`).toBe(true)
-  expect((lane.calls.primary[1]?.payload as { ok?: boolean }).ok, `${label} run_projection`).toBe(true)
-  expect((lane.calls.primary[2]?.payload as { ok?: boolean }).ok, `${label} export_plan`).toBe(true)
-  expect(lane.calls.isolatedNoPlan.payload, `${label} second-connection isolation`).toMatchObject({
-    ok: false,
-    error: 'NO_PLAN',
-  })
-  const malformedEnvelope = lane.calls.malformed.envelope as { isError?: boolean; content?: unknown[] }
-  expect(malformedEnvelope.isError, `${label} malformed input isError`).toBe(true)
-  expect(malformedEnvelope.content?.length ?? 0, `${label} malformed input envelope`).toBeGreaterThan(0)
-  const malformedPayload = lane.calls.malformed.payload as { kind?: string; text?: string }
-  expect(malformedPayload.text ?? '', `${label} malformed input message`).toContain(
-    'Input validation error',
-  )
-}
-
-function canonicalJson(canonicalize: (value: unknown) => unknown, value: unknown): string {
-  return JSON.stringify(canonicalize(value))
-}
-
-function assertCanonicalEqual(
-  canonicalize: (value: unknown) => unknown,
-  left: unknown,
-  right: unknown,
-  label: string,
-): void {
-  expect(canonicalJson(canonicalize, left), label).toBe(canonicalJson(canonicalize, right))
-}
-
-function stripEraEnvelope(value: unknown): unknown {
-  if (value == null || typeof value !== 'object' || Array.isArray(value)) return value
-  const clone = JSON.parse(JSON.stringify(value)) as Record<string, unknown>
-  delete clone.cacheScope
-  delete clone.ttlMs
-  for (const metaKey of ['_meta', 'meta']) {
-    const meta = clone[metaKey]
-    if (meta != null && typeof meta === 'object' && !Array.isArray(meta)) {
-      delete (meta as Record<string, unknown>)[MODERN_SERVER_INFO_META]
-      if (Object.keys(meta as Record<string, unknown>).length === 0) delete clone[metaKey]
-    }
-  }
-  return clone
+/**
+ * The harness captures the malformed call only when asked to, and this gate
+ * always asks; a missing capture is a harness wiring bug, not a lane result.
+ */
+function requireMalformed(lane: LaneCapture): CallCapture {
+  const malformed = lane.calls.malformed
+  if (!malformed) throw new Error('the packed harness did not capture a malformed call')
+  return malformed
 }
 
 describe('packed npm artifact', () => {
@@ -613,8 +286,8 @@ describe('packed npm artifact', () => {
   let installedPackageRoot!: string
   let packedBaseline!: StdioBaselineCapture
   let expectedBaseline!: ProtocolBaseline
-  let canonicalize!: (value: unknown) => unknown
-  let envelopeView!: (result: unknown) => unknown
+  let canonicalize!: Canonicalize
+  let envelopeView!: EnvelopeView
   let v1Legacy!: LaneCapture
   let v2Default!: LaneCapture
   let v2Auto!: LaneCapture
@@ -673,21 +346,21 @@ describe('packed npm artifact', () => {
     const capture = (await import(captureModuleUrl)) as CaptureLibrary
     canonicalize = capture.canonicalize
     envelopeView = capture.envelopeView
-    const target = { cliPath: join(installedPackageRoot, 'dist', 'cli.js'), cwd: consumerDirectory }
-    v1Legacy = await runV1Lane(target, canonicalize, envelopeView)
-    v2Default = await runV2Lane(target, { expectedEra: 'legacy' }, canonicalize, envelopeView)
-    v2Auto = await runV2Lane(
-      target,
-      { negotiation: { mode: 'auto' }, expectedEra: 'modern' },
+    const harness = createEraHarness({
+      target: { cliPath: join(installedPackageRoot, 'dist', 'cli.js'), cwd: consumerDirectory },
+      labelPrefix: 'packed-artifact',
+      captureMalformed: true,
+      childDescription: 'the packed stdio child process to exit',
       canonicalize,
       envelopeView,
-    )
-    v2Pinned = await runV2Lane(
-      target,
-      { negotiation: { mode: { pin: PINNED_MODERN } }, expectedEra: 'modern' },
-      canonicalize,
-      envelopeView,
-    )
+    })
+    v1Legacy = await harness.runV1Lane()
+    v2Default = await harness.runV2Lane({ expectedEra: 'legacy' })
+    v2Auto = await harness.runV2Lane({ negotiation: { mode: 'auto' }, expectedEra: 'modern' })
+    v2Pinned = await harness.runV2Lane({
+      negotiation: { mode: { pin: PINNED_MODERN } },
+      expectedEra: 'modern',
+    })
     capture.drainObservedMcpVersions()
     packedBaseline = await capture.captureStdioLane({
       root: installedPackageRoot,
@@ -816,6 +489,7 @@ describe('packed npm artifact', () => {
     const session = await openStdio(
       new V1Client({ name: 'packed-bin-shim', version: '0.0.0' }) as ToolClient,
       transport,
+      'the packed stdio child process to exit',
     )
     try {
       const listed = await session.client.listTools()
@@ -826,19 +500,19 @@ describe('packed npm artifact', () => {
   }, 120_000)
 
   it('a. lets the frozen v1 client use legacy initialize', () => {
-    assertLane('packed v1 SDK', v1Legacy, 'legacy')
+    assertLane('packed v1 SDK', v1Legacy, 'legacy', { expectMalformed: true })
   }, 120_000)
 
   it('b. keeps the v2 default client on legacy initialize without probing', () => {
-    assertLane('packed v2 default', v2Default, 'legacy')
+    assertLane('packed v2 default', v2Default, 'legacy', { expectMalformed: true })
   }, 120_000)
 
   it('c. lets v2 auto negotiation select modern server/discover', () => {
-    assertLane('packed v2 auto', v2Auto, 'modern')
+    assertLane('packed v2 auto', v2Auto, 'modern', { expectMalformed: true })
   }, 120_000)
 
   it('d. lets v2 pinned negotiation select modern without fallback', () => {
-    assertLane('packed v2 pinned', v2Pinned, 'modern')
+    assertLane('packed v2 pinned', v2Pinned, 'modern', { expectMalformed: true })
   }, 120_000)
 
   it('matches the committed stdio baseline hashes through the installed CLI', () => {
@@ -893,7 +567,11 @@ describe('packed npm artifact', () => {
       expect(inventory.ttlMs ?? 0, `packed ${label} tools/list ttlMs`).toBe(0)
       // Plan-bearing tool results must never be publicly cacheable — the
       // hints are asserted raw, before envelope normalization drops them.
-      const calls = [...lane.calls.primary, lane.calls.malformed, lane.calls.isolatedNoPlan]
+      const calls = [
+        ...lane.calls.primary,
+        requireMalformed(lane),
+        lane.calls.isolatedNoPlan,
+      ]
       for (const [index, call] of calls.entries()) {
         expect(call.rawCacheScope ?? 'private', `packed ${label} call ${index} cacheScope`).toBe(
           'private',
@@ -946,14 +624,14 @@ describe('packed npm artifact', () => {
     // so the malformed result must be era-invariant too.
     assertCanonicalEqual(
       canonicalize,
-      v1Legacy.calls.malformed.payload,
-      v2Pinned.calls.malformed.payload,
+      requireMalformed(v1Legacy).payload,
+      requireMalformed(v2Pinned).payload,
       'malformed build_plan payload',
     )
     assertCanonicalEqual(
       canonicalize,
-      stripEraEnvelope(v1Legacy.calls.malformed.envelope),
-      stripEraEnvelope(v2Pinned.calls.malformed.envelope),
+      stripEraEnvelope(requireMalformed(v1Legacy).envelope),
+      stripEraEnvelope(requireMalformed(v2Pinned).envelope),
       'malformed build_plan envelope',
     )
   }, 120_000)
