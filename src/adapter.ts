@@ -8,7 +8,7 @@ import {
   planJsonSchema,
   PLAN_SCHEMA_VERSION,
   PLAN_SCHEMA_ID,
-} from '@retiregolden/engine/schema'
+} from '@retiregolden/engine/schema/current'
 import { combineTaxCalculators, createFederalTaxCalculator } from '@retiregolden/engine/tax/federalTax'
 import { createStateTaxCalculator } from '@retiregolden/engine/tax/stateTax'
 import { runMonteCarloPaths, aggregateMonteCarlo } from '@retiregolden/engine/montecarlo/run'

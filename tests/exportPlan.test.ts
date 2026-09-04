@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema'
+import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema/current'
 import { createSession } from '../src/session.js'
 import * as adapter from '../src/adapter.js'
 import { buildPlanFromParams } from '../src/buildPlan.js'

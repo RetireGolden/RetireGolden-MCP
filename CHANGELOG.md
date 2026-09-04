@@ -3,6 +3,52 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.9.1
+
+**Updates the exact `@retiregolden/engine` dependency from 0.2.0 to 0.3.0, and
+the `@retiregolden/planner-ui` dev dependency from 0.9.0 to 0.10.0.** A patch,
+because nothing this server publishes changes shape: the plan schema stays v5,
+the tool inventory hash and the `plan-schema` resource hash are unchanged, and
+every engine-numeric step in the protocol baseline is byte-identical.
+
+### Changed
+
+- Keep MCP calculations aligned with engine 0.3.0.
+- The engine's Plan JSON Schema is now read from
+  `@retiregolden/engine/schema/current`, the entry point the engine documents
+  for the common case, rather than the legacy `/schema` compatibility barrel
+  (which now evaluates every historical generated schema on import). Same
+  constants, same bytes; `describe_plan_schema` and the resource are unaffected.
+- The dev tree carries exactly one engine copy again: planner-ui 0.10.0
+  resolves `^0.3.0`, which this package's exact pin satisfies. The round-trip
+  test's engine-lag and schema-migration branches are therefore idle rather
+  than live; the test keeps both, and its comments now say which state is
+  current and why both survive.
+
+### Verified
+
+- The protocol baseline was regenerated **deliberately** and inspected leaf by
+  leaf before being trusted. Of 25 recorded envelopes, exactly six moved
+  (`get_session` ×3, `export_plan` ×2, `explain_modeled_result`), and in each
+  the only differing leaf is `engineVersion: "0.2.0" → "0.3.0"`; the
+  `build_plan` round-trip step's argument digest moved for the same reason
+  (it spreads that stamp back in). `run_projection`, `run_monte_carlo`,
+  `batch_evaluate`, `run_optimizer`, `solve_max_spending`, `compare_scenarios`,
+  `update_plan`, both `describe_plan_schema` payloads, and the round-trip
+  summaries are unchanged. The golden-number suite passes without
+  regeneration.
+
+### Why this release exists
+
+Engine 0.3.0 publishes two additive `YearResult` fields (`netPortfolioNeed`,
+and `refusalCode` on inherited-account evidence), prunes 29 unused
+`./actions/<name>` export subpaths (this package imports none of them; every
+subpath it does import still resolves), and moves `decisionFixtures` to
+`./testing/`. None of that reaches this server's wire surface, so this is a
+coordination release: RetireGolden Pro can advance its shared engine copy to
+0.3.0 without the MCP sidecar retaining a nested 0.2.0, and the 0.9.0 note
+about planner-ui lagging on `^0.1.12` is closed.
+
 ## 0.9.0
 
 **Updates the exact `@retiregolden/engine` dependency from 0.1.12 to 0.2.0,
