@@ -30,6 +30,11 @@ export default defineConfig({
     // default and would hand raw `.ts` to Node's ESM loader, so the parity
     // round-trip needs it pulled through the transform pipeline.
     server: { deps: { inline: ['@retiregolden/planner-ui'] } },
+    // Builds `dist/` once, before any test file loads. The dist-backed suites
+    // used to each spawn `pnpm run build` in `beforeAll`, which raced on CI
+    // (where `pnpm test` runs before `pnpm run build`, so `dist/` is absent and
+    // two `tsc` emits land on one directory). See tests/globalSetup.ts.
+    globalSetup: ['./tests/globalSetup.ts'],
     include: ['tests/**/*.test.ts'],
     exclude: [
       '**/node_modules/**',

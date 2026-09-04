@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Client as V1Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport as V1Stdio } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { singleHousehold, singlePolicy } from './fixtures.js'
+import { ensureBuild } from './helpers/build.js'
 import {
   PINNED_MODERN,
   TOOL_NAMES,
@@ -299,13 +300,9 @@ describe('packed npm artifact', () => {
     packageManifest = await readPackageManifest(join(packageRoot, 'package.json'))
     packDirectory = await mkdtemp(join(tmpdir(), 'retiregolden-mcp-pack-'))
 
-    // Windows Node needs a shell for pnpm's .cmd shim after the CVE-2024-27980 hardening.
-    await execFile('pnpm', ['run', 'build'], {
-      cwd: packageRoot,
-      windowsHide: true,
-      maxBuffer: 10 * 1024 * 1024,
-      shell: process.platform === 'win32',
-    })
+    // `pnpm pack` publishes dist/, so it must be current — but the build itself
+    // belongs to tests/globalSetup.ts, which has already run. Assert only.
+    await ensureBuild(packageRoot)
     expectedFiles = await expectedTarballFiles(packageManifest)
     await execFile('pnpm', shellSafe(['pack', '--pack-destination', packDirectory]), {
       cwd: packageRoot,
