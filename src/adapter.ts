@@ -459,12 +459,7 @@ export function explainModeledResult(session: SessionState) {
     conventions: snapshotConventions(session),
     caveats: snapshotCaveats(session),
     hasPlan: session.plan != null,
-    lastProjectionSummary:
-      session.lastProjection &&
-      typeof session.lastProjection === 'object' &&
-      'summary' in session.lastProjection
-        ? (session.lastProjection as { summary: unknown }).summary
-        : null,
+    lastProjectionSummary: session.lastProjection?.summary ?? null,
     limitations: [
       'Engine may use a single IRMAA lookback MAGI scalar.',
       'traditional-first withdrawal ordering is approximate under sequential drain.',
