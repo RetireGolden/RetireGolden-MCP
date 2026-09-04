@@ -13,10 +13,17 @@
  * lane occasionally read a half-written `dist/` (it bit
  * `test (windows-latest, 24)` on PR #64 and passed on rerun).
  *
- * So the spawn happens exactly once, in `tests/globalSetup.ts`, before any test
- * file is loaded: `buildIfStale()` is the only function here that runs a build.
- * `ensureBuild()` — what the suites call — only ASSERTS freshness, so no test
- * file can race another.
+ * So the spawn happens exactly once PER VITEST RUN, in `tests/globalSetup.ts`,
+ * before any test file is loaded: `buildIfStale()` is the only function here
+ * that runs a build. `ensureBuild()` — what the suites call — only ASSERTS
+ * freshness, so no test file can race another.
+ *
+ * The scope of that guarantee is one vitest process tree, which is the scope of
+ * the race that was actually observed. Two vitest invocations started against
+ * the same checkout at the same time could still both decide to build; nothing
+ * here takes a cross-process lock. `pnpm test` and `pnpm run test:packed` are
+ * separate invocations but are never run concurrently — CI runs them in
+ * sequence — so that case is documented rather than defended against.
  */
 
 import { execFile as execFileCallback } from 'node:child_process'
@@ -57,22 +64,66 @@ export async function sourceFiles(directory: string): Promise<string[]> {
   return nested.flat()
 }
 
+/** Bytes of `file`, or a fixed marker when it is absent/unreadable. */
+async function digestInput(hash: ReturnType<typeof createHash>, label: string, file: string) {
+  hash.update(`${label}\n`)
+  try {
+    hash.update(await readFile(file))
+  } catch {
+    hash.update('<absent>')
+  }
+  hash.update('\n')
+}
+
 /**
- * A content digest of everything `tsc -p tsconfig.build.json` reads from this
- * repo: every `src/**\/*.ts` (path and bytes) plus the package version, which
- * `src/version.ts`-style lookups and the packed gate both depend on.
+ * A content digest of BOTH sides of the build: what `tsc -p
+ * tsconfig.build.json` reads, and what it produced.
+ *
+ * Inputs are every `src/**\/*.ts` (path and bytes), the package version — which
+ * `src/versions.ts` and the packed gate both depend on — and the two tsconfigs
+ * plus the compiler version, because a config-only edit or a TypeScript upgrade
+ * changes the emit without touching a single source byte.
+ *
+ * Outputs are hashed too, so the stamp records the `dist/` it was written for
+ * rather than only the sources it was computed from. Without that, a `dist/`
+ * REPLACED behind the stamp — build commit A through the tests, check out B,
+ * run a bare `pnpm run build` (which writes no stamp), check A back out — would
+ * still match on inputs alone and be trusted, which is precisely the
+ * wrong-`dist/` trap the content stamp exists to close.
  */
-async function computeBuildStamp(packageRoot: string, sources: string[]): Promise<string> {
+export async function computeBuildStamp(
+  packageRoot: string,
+  sources: string[],
+  outputs: string[],
+): Promise<string> {
   const hash = createHash('sha256')
   const manifest = JSON.parse(await readFile(`${packageRoot}/package.json`, 'utf8')) as {
     version?: unknown
   }
   hash.update(`version:${String(manifest.version)}\n`)
+  hash.update(`typescript:${await typescriptVersion(packageRoot)}\n`)
+  // tsconfig.build.json extends tsconfig.json, so both shape the emit.
+  await digestInput(hash, 'config:tsconfig.json', `${packageRoot}/tsconfig.json`)
+  await digestInput(hash, 'config:tsconfig.build.json', `${packageRoot}/tsconfig.build.json`)
   for (const source of [...sources].sort()) {
-    hash.update(`${source.slice(packageRoot.length)}\n`)
-    hash.update(await readFile(source))
+    await digestInput(hash, `src:${source.slice(packageRoot.length)}`, source)
+  }
+  for (const output of [...outputs].sort()) {
+    await digestInput(hash, `out:${output.slice(packageRoot.length)}`, output)
   }
   return hash.digest('hex')
+}
+
+/** Installed compiler version, or a marker when it cannot be read. */
+async function typescriptVersion(packageRoot: string): Promise<string> {
+  try {
+    const manifest = JSON.parse(
+      await readFile(`${packageRoot}/node_modules/typescript/package.json`, 'utf8'),
+    ) as { version?: unknown }
+    return String(manifest.version)
+  } catch {
+    return 'unknown'
+  }
 }
 
 async function readBuildStamp(packageRoot: string): Promise<string | null> {
@@ -96,8 +147,10 @@ async function readBuildStamp(packageRoot: string): Promise<string | null> {
  * is available, because mtimes lie in one specific way this repo hits often: a
  * `dist/` left over from a different HEAD (a branch switch, a rebase) can be
  * newer than every `src/` file while having been emitted from other source.
- * Without the stamp — a `dist/` built by a bare `pnpm run build`, or a cleared
- * `node_modules/.cache` — the old mtime comparison still applies.
+ * The stamp covers the emitted files as well as the sources and the build
+ * configuration, so a `dist/` swapped out behind an unchanged stamp is caught
+ * too. Without the stamp — a `dist/` built by a bare `pnpm run build`, or a
+ * cleared `node_modules/.cache` — the old mtime comparison still applies.
  */
 export async function buildIsCurrent(packageRoot: string = PACKAGE_ROOT): Promise<boolean> {
   const sources = (await sourceFiles(`${packageRoot}/src`)).filter((file) => file.endsWith('.ts'))
@@ -115,7 +168,9 @@ export async function buildIsCurrent(packageRoot: string = PACKAGE_ROOT): Promis
     return false
   }
   const stamp = await readBuildStamp(packageRoot)
-  if (stamp !== null) return stamp === (await computeBuildStamp(packageRoot, sources))
+  if (stamp !== null) {
+    return stamp === (await computeBuildStamp(packageRoot, sources, expectedOutputs))
+  }
   const newestSource = Math.max(...sourceStats.map((s) => s.mtimeMs))
   const oldestOutput = Math.min(...outputStats.map((s) => s.mtimeMs))
   return newestSource < oldestOutput
@@ -137,9 +192,12 @@ export async function buildIfStale(packageRoot: string = PACKAGE_ROOT): Promise<
     shell: process.platform === 'win32',
   })
   const sources = (await sourceFiles(`${packageRoot}/src`)).filter((file) => file.endsWith('.ts'))
+  const outputs = sources.map((file) =>
+    file.replace(`${packageRoot}/src`, `${packageRoot}/dist`).replace(/\.ts$/, '.js'),
+  )
   const stampFile = stampPath(packageRoot)
   await mkdir(dirname(stampFile), { recursive: true })
-  await writeFile(stampFile, `${await computeBuildStamp(packageRoot, sources)}\n`, 'utf8')
+  await writeFile(stampFile, `${await computeBuildStamp(packageRoot, sources, outputs)}\n`, 'utf8')
   return true
 }
 

@@ -10,8 +10,10 @@
  * on `test (windows-latest, 24)` (PR #64).
  *
  * Global setup runs once, in the main vitest process, and every test file waits
- * for it — so the build happens exactly once and the suites only assert
- * freshness (`ensureBuild()`). An already-current `dist/` is not rebuilt.
+ * for it — so the build happens exactly once per vitest run and the suites only
+ * assert freshness (`ensureBuild()`). An already-current `dist/` is not
+ * rebuilt. Concurrency across separate vitest invocations is out of scope; see
+ * the note in tests/helpers/build.ts.
  */
 
 import { buildIfStale } from './helpers/build.js'
