@@ -10,7 +10,7 @@ import { migratePlanToCurrent } from '@retiregolden/engine/model/migrations'
 import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema/current'
 import { stateParamsFor } from '@retiregolden/engine/params/state'
 import { getVersions } from './versions.js'
-import { DEFAULT_START_YEAR, type ConventionKnobs } from './session.js'
+import { DEFAULT_START_YEAR } from './session.js'
 
 export const PersonParamsSchema = z.object({
   birth_year: z.number().int().min(1900).max(2100).describe('4-digit birth year, e.g. 1960'),
@@ -66,6 +66,72 @@ export const HouseholdParamsSchema = z.object({
 })
 export type HouseholdParams = z.infer<typeof HouseholdParamsSchema>
 
+/**
+ * The withdrawal-ordering vocabulary, in ONE place.
+ *
+ * It was spelled out three times — `PolicyParamsSchema.ordering`, the
+ * `build_plan` `conventions` shape in src/toolTable.ts, and the union on
+ * `ConventionKnobs.withdrawalOrdering` — so adding an ordering mode meant
+ * finding all three, and any one of them could quietly fall behind.
+ */
+export const WithdrawalOrderingSchema = z.enum([
+  'taxable-first',
+  'traditional-first',
+  'proportional',
+])
+export type WithdrawalOrdering = z.infer<typeof WithdrawalOrderingSchema>
+
+/**
+ * Modeling-convention overrides, in ONE place.
+ *
+ * The same three knobs were declared twice: as a zod object inline in
+ * `build_plan.inputShape.conventions`, and as the `ConventionKnobs` interface in
+ * src/session.ts. The tool schema and the shape the session stores (and
+ * `export_plan` hands back for a round trip) could therefore disagree, and
+ * `conventions` was the only `build_plan` field that reached the model with no
+ * description at all.
+ *
+ * `ConventionKnobs` is now derived from this schema, and the tool input uses the
+ * schema itself.
+ */
+export const ConventionKnobsSchema = z
+  .object({
+    irmaaLookbackMagis: z
+      .tuple([z.number(), z.number()])
+      .nullable()
+      .optional()
+      .describe(
+        "Two pre-projection IRMAA lookback MAGIs in dollars, [startYear-2, startYear-1]. Written to the engine's year-keyed historicalAnnualMagiByYear for exactly those two years (assumptions.recentAnnualMagi keeps the first value as a compatibility fallback), overriding household.pre_horizon_magi and whatever an imported document carried.",
+      ),
+    withdrawalOrdering: WithdrawalOrderingSchema.nullable()
+      .optional()
+      .describe(
+        'Withdrawal ordering override, applied on top of policy.ordering and of an imported document\'s own strategy. "traditional-first" has no exact engine equivalent and is modeled as sequential drain, with a caveat saying so.',
+      ),
+  })
+  .describe(
+    'Optional modeling-convention overrides applied on top of the built or imported plan.',
+  )
+
+/**
+ * The session-stored convention knobs: the schema above, plus one deprecated
+ * field that is no longer part of the tool input.
+ */
+export type ConventionKnobs = z.infer<typeof ConventionKnobsSchema> & {
+  /**
+   * @deprecated no engine knob exists; ignored. Removed from the tool schema in
+   * 0.10.0.
+   *
+   * It never froze anything: `@retiregolden/engine` has no law-sunset or
+   * parameter-freeze option (its only `sunsetting` is a volatility LABEL on tax
+   * rule records), so the build merely pushed a caveat implying a best-effort
+   * freeze that was not attempted. The field survives on this type only so a
+   * programmatic consumer that still sets it keeps compiling; nothing reads it,
+   * and the (non-strict) `conventions` tool schema drops the key on the wire.
+   */
+  lawSunsetFreezeYear?: number | null
+}
+
 export const PolicyParamsSchema = z.object({
   claim_ages: z
     .array(z.number().int().min(0).max(120))
@@ -86,9 +152,9 @@ export const PolicyParamsSchema = z.object({
     .nullable()
     .optional()
     .describe('Number of years to run fill-to-bracket conversions from startYear, or null'),
-  ordering: z
-    .enum(['taxable-first', 'traditional-first', 'proportional'])
-    .describe('Withdrawal ordering; traditional-first is approximate under sequential drain'),
+  ordering: WithdrawalOrderingSchema.describe(
+    'Withdrawal ordering; traditional-first is approximate under sequential drain',
+  ),
 })
 export type PolicyParams = z.infer<typeof PolicyParamsSchema>
 

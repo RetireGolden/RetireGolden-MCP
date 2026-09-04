@@ -4,6 +4,16 @@
  */
 
 import type { Plan, ProjectionResult, summarizeProjection } from '@retiregolden/engine'
+import type { ConventionKnobs } from './buildPlan.js'
+
+/**
+ * The convention knobs a session stores. Defined in src/buildPlan.ts, next to
+ * the zod schema `build_plan` validates them with and that they are derived
+ * from, and re-exported here (type-only, so nothing is imported at runtime)
+ * because `SessionState` and the package root have always named it from this
+ * module.
+ */
+export type { ConventionKnobs }
 
 /**
  * The engine's projection summary. Named here via `ReturnType` because the
@@ -12,32 +22,6 @@ import type { Plan, ProjectionResult, summarizeProjection } from '@retiregolden/
  * from the engine is pulled in at runtime.
  */
 type ProjectionSummary = ReturnType<typeof summarizeProjection>
-
-export interface ConventionKnobs {
-  /**
-   * @deprecated no engine knob exists; ignored. Removed from the tool schema in
-   * 0.10.0.
-   *
-   * It never froze anything: `@retiregolden/engine` has no law-sunset or
-   * parameter-freeze option (its only `sunsetting` is a volatility LABEL on tax
-   * rule records), so the build merely pushed a caveat implying a best-effort
-   * freeze that was not attempted. The field survives on this interface only so a
-   * programmatic consumer that still sets it keeps compiling; nothing reads it,
-   * and the (non-strict) `conventions` tool schema drops the key on the wire.
-   */
-  lawSunsetFreezeYear?: number | null
-  /**
-   * Two distinct pre-projection IRMAA lookback MAGIs [Y-2, Y-1].
-   * These are mapped to the engine's year-keyed historical MAGI assumptions;
-   * recentAnnualMagi retains the first value as a compatibility fallback.
-   */
-  irmaaLookbackMagis?: [number, number] | null
-  /**
-   * Withdrawal sequence preference. `traditional-first` is not fully supported
-   * by the engine sequential drain; adapter records caveats.
-   */
-  withdrawalOrdering?: 'taxable-first' | 'traditional-first' | 'proportional' | null
-}
 
 export interface SessionState {
   plan: Plan | null

@@ -16,6 +16,7 @@ import {
   PolicyParamsSchema,
   ConversionSchema,
   AssumptionsSchema,
+  ConventionKnobsSchema,
   type BuildPlanInput,
   type PolicyParams,
 } from './buildPlan.js'
@@ -143,15 +144,9 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         .describe(
           'Provenance only: the `mcpVersion` sibling from an export_plan response, accepted so a whole export can be spread straight back into build_plan (including the null export_plan emits when the version is unresolvable). Recorded, never warned on — for a full plan document the document itself is the model.',
         ),
-      conventions: z
-        .object({
-          irmaaLookbackMagis: z.tuple([z.number(), z.number()]).nullable().optional(),
-          withdrawalOrdering: z
-            .enum(['taxable-first', 'traditional-first', 'proportional'])
-            .nullable()
-            .optional(),
-        })
-        .optional(),
+      conventions: ConventionKnobsSchema.optional().describe(
+        'Optional modeling-convention overrides applied on top of whatever the typed path or the supplied plan document already set: irmaaLookbackMagis (a [startYear-2, startYear-1] dollar pair written to the engine\'s year-keyed IRMAA lookback history) and withdrawalOrdering (which overrides policy.ordering, and the imported document\'s own strategy). Round-trips: export_plan returns the session\'s conventions as a sibling of `plan`, and this field takes them straight back.',
+      ),
       assumptions: AssumptionsSchema.optional().describe(
         "Optional overrides for default modeling assumptions (inflation, returns, SS COLA, state, taxes, qualified ratio, dob month-day, sex). Defaults follow the engine (~2.5% inflation, SS COLA tracking inflation, and the resident state's own modeled income tax — set stateEffectiveTaxPct above 0 only to override that with a flat rate); household state is a REQUIRED input, not an assumption. Set explicit values to override; omitted fields keep the engine defaults.",
       ),
