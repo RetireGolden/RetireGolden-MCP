@@ -2,7 +2,10 @@
  * Single declarative tool registry — the one source of truth for the MCP tool
  * surface. Both the stdio registration (registerTools) and the HTTP gateway
  * drive off this table, and schemas/tools.v1.json is kept honest against it by
- * tests/registry-parity.test.ts. Add or change a tool here and nowhere else.
+ * tests/registry-parity.test.ts — names, arm groupings, and the per-tool
+ * `inputSchemas` block generated from these `inputShape`s. Add or change a tool
+ * here and nowhere else, then run `pnpm run contract:generate` so the published
+ * contract reflects the new shape.
  */
 
 import { z } from 'zod'

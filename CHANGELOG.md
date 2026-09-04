@@ -57,7 +57,7 @@ Internal adapter hygiene. **No change to any tool's wire output or to
 - `GET /health` reports `transport: 'http-research'` (was `'http-stub'`), and
   the undocumented `azure` alias for `http` is gone from `src/cli.ts` — which is
   the published `retiregolden-mcp` bin. The repo-root `bin/retiregolden-mcp.js`
-  launcher still accepts it; that file is deleted separately. The stdio server
+  launcher also accepted it; that file is removed below. The stdio server
   and every MCP tool are untouched.
 
 ### Changed (tooling and tests only)
@@ -89,6 +89,47 @@ same null-on-failure contract — and it is not re-exported from the package roo
   from — or swapped in by — another HEAD is rebuilt rather than trusted.
 - `tests/buildFreshness.test.ts` pins that stamp's behaviour and the
   null-on-failure contract of `resolveInstalledPackageVersion`.
+
+### Changed (docs, skill, and tool contract)
+
+- `bin/retiregolden-mcp.js` is gone. It was a dead duplicate of `dist/cli.js`
+  that had already drifted from `src/cli.ts`: the `bin` field in
+  `package.json` points at `dist/cli.js`, `files` never shipped `bin/`, and
+  only one README line kept the script alive. README now documents
+  `pnpm run mcp` for running from a checkout, and `docs/hosted-transport.md`
+  no longer sends readers to the launcher or its `azure` alias.
+- `schemas/tools.v1.json` now publishes an `inputSchemas` block: one JSON
+  Schema (draft 2020-12) per tool, generated from the zod `inputShape`s in
+  `src/toolTable.ts`, plus a `contractVersion: 1` marker. The document-level
+  `$schema` key is dropped — the file is a tool contract, not a JSON Schema
+  document, and claiming otherwise was misleading. Every key the contract
+  already had (`$id`, `title`, `description`, the tool list, the arm
+  groupings) is kept, and no tool name, description, or input shape changed.
+  The block is generated in zod's INPUT mode (`io: 'input'`), which is what
+  makes each entry deep-equal to the `inputSchema` `tools/list` actually
+  advertises; output mode closes the top-level object with
+  `additionalProperties: false`, a constraint neither the wire schema nor the
+  runtime imposes.
+- `pnpm run contract:generate` (`scripts/gen-tool-contract.mjs`) regenerates
+  that block from the live table, and `tests/registry-parity.test.ts` now
+  fails if the committed contract drifts from it — or from the recorded
+  `tools/list` inventory in `tests/protocol-baseline/baseline.json`, so the
+  published schema cannot quietly diverge from the one clients are sent.
+- `docs/clients.md` no longer carries the units-and-assumptions block twice.
+  The Cursor rule keeps the full version; the Codex `AGENTS.md` alternative is
+  cut down to the rules that are expensive to get wrong and sends the reader to
+  the shipped `SKILL.md` for the rest. The two still overlap on framing, rate
+  units, required `state`, and the wage error, so they can still drift — there
+  is just one copy of the detail now instead of two, and each says which it is.
+- `skills/retiregolden/SKILL.md` states current behavior instead of narrating
+  release history ("as of v0.3.0", "v0.5.0 corrected this"), and the sample
+  export in `skills/retiregolden/references/plan-json.md` is a current
+  (plan-schema v5) export rather than a stale one.
+
+### Removed
+
+- `bin/retiregolden-mcp.js`. Run the published `retiregolden-mcp` bin
+  (`dist/cli.js`), or `pnpm run mcp` from a checkout.
 
 ## 0.9.1
 

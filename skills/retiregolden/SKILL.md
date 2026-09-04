@@ -38,15 +38,15 @@ Household/policy rates are **fractions** (`0.05` = 5%); passing `5` where `0.05`
 
 > Full worked `build_plan` calls (single filer, MFJ with pension, batch sweep): **`references/examples.md`**.
 
-## Typed-path defaults and assumptions (v0.3.0)
+## Typed-path defaults and assumptions
 
-As of **v0.3.0** the typed `household`/`policy` path defaults to **end-user-appropriate, real-world modeling** — no more baked-in RetireBench conventions. With no `assumptions` block the ENGINE's own defaults flow through:
+The typed `household`/`policy` path models **real-world, end-user-appropriate** defaults. With no `assumptions` block the ENGINE's own defaults flow through:
 
-- **~2.5%/yr inflation** (was 0%), **SS COLA tracking inflation** (was fixed 0%), **+3%/yr healthcare inflation above general**, **5.5% fallback return** (for accounts without an explicit rate).
+- **~2.5%/yr inflation**, **SS COLA tracking inflation**, **+3%/yr healthcare inflation above general**, **5.5% fallback return** (for accounts without an explicit rate).
 - **The resident state's real modeled income tax.** Every US jurisdiction has a modeled pack, and `household.state` is what selects it — naming the state *is* how state tax gets switched on. **`stateEffectiveTaxPct` is an override, not a switch: it applies only when set ABOVE 0.** Omitting it, or passing `0`, means "use the modeled pack" — **not** "no state income tax". Nine states levy none (AK, FL, NH, NV, SD, TN, TX, WA, WY); everywhere else, expect state tax in the answer. Local income tax stays 0 until you set `localIncomeTaxPct`.
 - Neutral, overridable placeholders: **June-15 birthdays**, `sex` **average**, `qualifiedRatio` **0.85**.
 
-Two things are now **required / hard errors**, not silent assumptions:
+Two things are **required / hard errors**, not silent assumptions:
 
 1. **`household.state` is REQUIRED** (2-letter code). A typed build that omits it is rejected with a clear issue. `assumptions.state` can override the value used, but the household must still declare one.
 2. **Wages are not modeled.** A non-zero `wage` on any person is a **hard build error** (`wages are not modeled; remove wage or use full plan JSON`) — the typed path is a retired-household contract. Model pre-retirement earnings via full plan JSON.
@@ -55,14 +55,14 @@ When to still pass an **`assumptions`** block: to model a specific inflation/ret
 
 `inflationPct`, `ssColaPct`, `defaultReturnPct`, `healthcareExtraInflationPct`, `stateEffectiveTaxPct`, `localIncomeTaxPct` — all **percents** (`2.5` = 2.5%) · `state` (2-letter override; omitted uses `household.state`) · `qualifiedRatio` (fraction 0–1) · `dobMonthDay` (`"MM-DD"`, e.g. `"06-15"`) · `sex` (`male` / `female` / `average`).
 
-> RetireBench replication: as of **v0.5.0** the bench conventions no longer reproduce the older growth-neutral numbers. `stateEffectiveTaxPct: 0` used to mean "no state tax" and now selects **KY's modeled income tax** — and there is no knob that zeroes out a taxing state. The bench harness pins the package version, so historical numbers stay reproducible on the version that produced them; regenerate against 0.5.0 to compare on the current stack.
+> RetireBench replication: there are no growth-neutral bench conventions to reach for here — the typed path models the engine's real-world defaults, and `stateEffectiveTaxPct: 0` selects the modeled income tax of whatever `household.state` names rather than switching state tax off. No knob zeroes out a taxing state; name a state that levies none if that is what you want to model. The bench harness pins the package version, so any historical number stays reproducible on the version that produced it — regenerate against the pinned version to compare on the same stack.
 
 See `references/examples.md` for a real-household MFJ call with overrides.
 
 ## Error & caveat semantics
 
-- Tools return their failures **as successful MCP results** with `ok: false` and an `error` code — inspect the JSON body, do not treat these as tool crashes. Codes include `NO_PLAN` (call `build_plan` first), `OPTIMIZER_FAILED`, `SPENDING_SOLVER_FAILED`, `INVALID_PLAN_A` / `INVALID_PLAN_B`. Invalid `build_plan` input returns `ok: false` with an `issues[]` array — including the two v0.3.0 hard errors: a **missing/invalid `household.state`** and a **non-zero `wage`** (wages are not modeled).
-- **`caveats[]` accumulates approximations** (e.g. IRMAA single-scalar MAGI, `traditional-first` ordering under sequential drain, best-effort law-sunset freeze). It rides along on build, projection, and batch results — **surface it to the user**; never drop it.
+- Tools return their failures **as successful MCP results** with `ok: false` and an `error` code — inspect the JSON body, do not treat these as tool crashes. Codes include `NO_PLAN` (call `build_plan` first), `OPTIMIZER_FAILED`, `SPENDING_SOLVER_FAILED`, `INVALID_PLAN_A` / `INVALID_PLAN_B`. Invalid `build_plan` input returns `ok: false` with an `issues[]` array — including the two hard errors: a **missing/invalid `household.state`** and a **non-zero `wage`** (wages are not modeled).
+- **`caveats[]` accumulates approximations** (e.g. `traditional-first` ordering under sequential drain, a best-effort law-sunset freeze when you pass `conventions.lawSunsetFreezeYear`, state-tax and version-skew notes). It rides along on build, projection, and batch results — **surface it to the user**; never drop it.
 - `explain_modeled_result` returns `framing`, `assumptions`, `conventions`, `caveats`, and `limitations`. Call it when summarizing so the modeling boundaries stay visible.
 
 ## Typical calculator flow

@@ -34,6 +34,17 @@ Configure your MCP client to launch `retiregolden-mcp` (or
 (legacy `initialize`) and 2026-07-28 (modern `server/discover`) clients —
 existing configs do not change.
 
+### Run from a checkout
+
+Working on this repository instead of installing the package? Build once, then
+launch the same stdio server the published `bin` entry point runs:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm run mcp
+```
+
 ### Example Claude Desktop / Cursor snippet
 
 ```json
@@ -82,12 +93,6 @@ and product runners should pin the skill file digest used for scored runs.
 
 Releases are tag-driven: pushing a `mcp-v<version>` tag triggers the publish
 workflow (see [`.github/workflows/publish-mcp.yml`](.github/workflows/publish-mcp.yml)).
-
-To run locally after `pnpm run build`:
-
-```bash
-node bin/retiregolden-mcp.js
-```
 
 ## Related
 
