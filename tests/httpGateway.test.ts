@@ -1,40 +1,25 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import type { Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { singleHousehold, singlePolicy } from './fixtures.js'
+import { startTestGateway, type TestGateway } from './helpers/gateway.js'
 
-let server: Server
+let gateway: TestGateway
 let BASE = ''
 
-function post(
-  body: unknown,
-  headers: Record<string, string> = {},
-): Promise<Response> {
-  return fetch(`${BASE}/tool`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...headers },
-    body: typeof body === 'string' ? body : JSON.stringify(body),
-  })
-}
+const post: TestGateway['post'] = (body, headers) => gateway.post(body, headers)
 
 const buildBody = {
   tool: 'build_plan',
   arguments: { household: singleHousehold, policy: singlePolicy, startYear: 2026 },
 }
 
-describe('HTTP gateway (Phase 6 stub) integration', () => {
+describe('HTTP gateway integration', () => {
   beforeAll(async () => {
-    // The gateway is a fenced research surface and refuses to start without an
-    // explicit opt-in; these suites are exercising it deliberately.
-    process.env.RETIREGOLDEN_HTTP_GATEWAY = '1'
-    const { startHttpGateway } = await import('../src/http/gateway.js')
-    server = await startHttpGateway({ port: 0, host: '127.0.0.1' })
-    const addr = server.address() as AddressInfo
-    BASE = `http://127.0.0.1:${addr.port}`
+    gateway = await startTestGateway()
+    BASE = gateway.base
   })
 
   afterAll(async () => {
-    await new Promise<void>((res) => server.close(() => res()))
+    await gateway.close()
   })
 
   it('serves /health', async () => {
@@ -42,7 +27,7 @@ describe('HTTP gateway (Phase 6 stub) integration', () => {
     expect(r.status).toBe(200)
     const body = (await r.json()) as { ok: boolean; transport: string }
     expect(body.ok).toBe(true)
-    expect(body.transport).toBe('http-stub')
+    expect(body.transport).toBe('http-research')
   })
 
   it('rejects a request with no x-session-id header (400)', async () => {
@@ -211,5 +196,39 @@ describe('HTTP gateway (Phase 6 stub) integration', () => {
     expect(body.ok).toBe(false)
     expect(body.issues[0]).toContain('plan-schema skew:')
     expect(body.issues[0]).toContain(`v${PLAN_SCHEMA_VERSION + 1}`)
+  })
+
+  it('answers a throwing handler with a bare 500 TOOL_FAILED, detail to stderr only', async () => {
+    // No httpExposed handler throws today — they return `{ ok: false }` results
+    // — so the throw is injected. The contract under test is the transport's,
+    // not any one tool's: an unexpected exception must not put its message on
+    // the wire of an unauthenticated listener.
+    const { getTool } = await import('../src/toolTable.js')
+    const entry = getTool('explain_modeled_result')
+    if (!entry) throw new Error('explain_modeled_result missing from the tool table')
+    const secret = 'boom: /home/someone/plans/alice.json'
+    const handler = vi.spyOn(entry, 'handler').mockImplementation(() => {
+      throw new Error(secret)
+    })
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const r = await post({ tool: 'explain_modeled_result' }, { 'x-session-id': 'throwing' })
+      expect(r.status).toBe(500)
+      const text = await r.text()
+      expect(JSON.parse(text)).toEqual({ error: 'TOOL_FAILED' })
+      expect(text).not.toContain(secret)
+      // Pin the operator-facing call exactly: a labelled line plus the thrown
+      // error itself. A looser check would pass if a future change dropped the
+      // label, logged a stringified stand-in, or moved the detail elsewhere.
+      expect(stderr).toHaveBeenCalledTimes(1)
+      expect(stderr).toHaveBeenCalledWith(
+        'RetireGolden HTTP gateway: tool handler threw',
+        expect.objectContaining({ message: secret }),
+      )
+      expect(stderr.mock.calls[0][1]).toBeInstanceOf(Error)
+    } finally {
+      handler.mockRestore()
+      stderr.mockRestore()
+    }
   })
 })

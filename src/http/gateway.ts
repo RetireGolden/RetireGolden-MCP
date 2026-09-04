@@ -1,9 +1,9 @@
 /**
- * Optional HTTP / Azure Functions-style gateway over the same tool handlers.
+ * Optional HTTP research transport over the same tool handlers.
  *
  * Official RetireBench scored runs stay on ephemeral stdio until this path
- * proves bit-identical results. This module is a cost/ops experiment surface:
- * same adapter, different transport.
+ * proves bit-identical results. This module is the same adapter behind a
+ * different transport, kept behind the fence described below.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -61,15 +61,14 @@ const MAX_BODY_BYTES = 1024 * 1024
 const MAX_SESSIONS = 100
 const MAX_SESSION_ID_LENGTH = 128
 const SESSION_TTL_MS = 30 * 60 * 1000
+const SESSION_SWEEP_INTERVAL_MS = 60 * 1000
 
 interface SessionEntry {
   state: SessionState
   lastSeen: number
 }
 
-const sessions = new Map<string, SessionEntry>()
-
-function sweepExpired(now: number): void {
+function sweepExpired(sessions: Map<string, SessionEntry>, now: number): void {
   for (const [id, entry] of sessions) {
     if (now - entry.lastSeen > SESSION_TTL_MS) sessions.delete(id)
   }
@@ -119,8 +118,9 @@ function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | n
 }
 
 /**
- * Minimal JSON-RPC-ish HTTP facade for smoke tests and future Azure Functions
- * wrapping. Not a full MCP Streamable HTTP implementation yet — Phase 6 stub.
+ * Minimal JSON-RPC-ish HTTP facade for smoke tests on the research transport.
+ * Not a full MCP Streamable HTTP implementation, and not a supported product
+ * API: unauthenticated, loopback-only, and opt-in (see the fence note above).
  *
  * The tool surface, arg schemas, and handlers are shared with stdio via the
  * declarative table (src/toolTable.ts); only the tools flagged httpExposed are
@@ -136,14 +136,21 @@ export async function startHttpGateway(
   const port = opts.port ?? DEFAULT_PORT
   const host = assertLoopback(opts.host ?? DEFAULT_HOST)
 
+  // One store per gateway instance, not per module. Plan state is in-memory and
+  // must not outlive the listener that accepted it: a module-global map is
+  // shared by every instance started in the process (so two gateways would see
+  // each other's sessions) and survives close(), leaving plan data resident in a
+  // process that no longer has a listener.
+  const sessions = new Map<string, SessionEntry>()
+
   const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json')
     const now = Date.now()
-    sweepExpired(now)
+    sweepExpired(sessions, now)
 
     if (req.method === 'GET' && req.url === '/health') {
       res.writeHead(200)
-      res.end(JSON.stringify({ ok: true, transport: 'http-stub', sessions: sessions.size }))
+      res.end(JSON.stringify({ ok: true, transport: 'http-research', sessions: sessions.size }))
       return
     }
     if (req.method !== 'POST' || req.url !== '/tool') {
@@ -217,19 +224,52 @@ export async function startHttpGateway(
       res.writeHead(200)
       res.end(JSON.stringify(result))
     } catch (e) {
+      // The response body carries a fixed code, never the exception text. An
+      // unexpected throw out of a handler can quote engine internals, a file
+      // path, or a fragment of the caller's own plan data, and this listener is
+      // unauthenticated. The detail goes to the operator's stderr instead.
+      console.error('RetireGolden HTTP gateway: tool handler threw', e)
       res.writeHead(500)
-      res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }))
+      res.end(JSON.stringify({ error: 'TOOL_FAILED' }))
     }
   })
 
   server.requestTimeout = 30_000
 
-  await new Promise<void>((resolve) => {
+  // The per-request sweep only runs while traffic arrives, so an idle gateway
+  // would hold expired plan state indefinitely. This timer expires it anyway.
+  // unref() so it never by itself keeps the process alive.
+  const sweepTimer = setInterval(
+    () => sweepExpired(sessions, Date.now()),
+    SESSION_SWEEP_INTERVAL_MS,
+  )
+  sweepTimer.unref()
+
+  server.on('close', () => {
+    clearInterval(sweepTimer)
+    sessions.clear()
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    // A bind failure (EADDRINUSE on the default port is the likely one) arrives
+    // as an 'error' event, not a throw. With no listener that is an uncaught
+    // exception, and the caller never learns the gateway is not listening. Fail
+    // the start instead, and release what the start already allocated — the
+    // sweep timer is armed above and the 'close' handler that would clear it
+    // never runs for a server that never listened.
+    const onListenError = (err: Error): void => {
+      clearInterval(sweepTimer)
+      sessions.clear()
+      reject(err)
+    }
+    server.once('error', onListenError)
     server.listen(port, host, () => {
+      server.removeListener('error', onListenError)
       const addr = server.address()
       const boundPort = addr && typeof addr === 'object' ? addr.port : port
       console.error(
-        `RetireGolden MCP HTTP stub listening on ${host}:${boundPort} (Phase 6 transport experiment)`,
+        `RetireGolden MCP HTTP research transport listening on ${host}:${boundPort} ` +
+          `(unauthenticated, loopback-only, opt-in)`,
       )
       resolve()
     })

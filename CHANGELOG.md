@@ -40,6 +40,26 @@ Internal adapter hygiene. **No change to any tool's wire output or to
   `unknown | null`.
 - `DEFAULT_START_YEAR` (2026) is exported from the package root.
 
+### Changed (HTTP research transport only — opt-in, loopback-only)
+
+- Each `startHttpGateway()` instance now owns its session store and releases
+  it when the server closes; sessions are also swept on a 60-second timer
+  (`unref()`'d) in addition to the existing per-request sweep. Two gateways
+  in one process no longer share sessions or a `MAX_SESSIONS` cap. Error
+  codes, TTL, and cap semantics are unchanged.
+- A tool handler that throws now answers `500 { error: 'TOOL_FAILED' }` and
+  logs the exception to stderr, instead of echoing the exception text on the
+  wire.
+- A failed bind (`EADDRINUSE` on the default port, say) now rejects the
+  `startHttpGateway()` promise and releases the sweep timer, instead of raising
+  an unhandled `'error'` event that takes down the process without telling the
+  caller the gateway is not listening.
+- `GET /health` reports `transport: 'http-research'` (was `'http-stub'`), and
+  the undocumented `azure` alias for `http` is gone from `src/cli.ts` — which is
+  the published `retiregolden-mcp` bin. The repo-root `bin/retiregolden-mcp.js`
+  launcher still accepts it; that file is deleted separately. The stdio server
+  and every MCP tool are untouched.
+
 ## 0.9.1
 
 **Updates the exact `@retiregolden/engine` dependency from 0.2.0 to 0.3.0, and
