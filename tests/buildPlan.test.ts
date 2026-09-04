@@ -1,16 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { buildPlanFromParams } from '../src/buildPlan.js'
 import { getTool, validateToolArgs } from '../src/toolTable.js'
-import { mfjHousehold, mfjPolicy, singleHousehold, singlePolicy } from './fixtures.js'
+import {
+  builtFailed,
+  builtOk,
+  mfjHousehold,
+  mfjPolicy,
+  singleHousehold,
+  singlePolicy,
+} from './fixtures.js'
 
 describe('buildPlanFromParams — typed household branch', () => {
   it('builds an MFJ two-person household with a pension', () => {
     const res = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
     expect(res.ok).toBe(true)
-    expect(res.plan).toBeTruthy()
-    const plan = res.plan!
+    const plan = builtOk(res).plan
     expect(res.startYear).toBe(2026)
-    expect(res.endYear).toBe(2040) // 2026 + 15 - 1
+    expect(builtOk(res).endYear).toBe(2040) // 2026 + 15 - 1
     expect(plan.household.filingStatus).toBe('marriedFilingJointly')
     expect(plan.household.people).toHaveLength(2)
     // one traditional + one roth per person, plus a single brokerage account
@@ -30,7 +36,7 @@ describe('buildPlanFromParams — typed household branch', () => {
   it('does not emit a pension income when no person has a pension', () => {
     const res = buildPlanFromParams({ household: singleHousehold, policy: singlePolicy })
     expect(res.ok).toBe(true)
-    expect(res.plan!.incomes.filter((i) => i.type === 'recurring')).toHaveLength(0)
+    expect(builtOk(res).plan.incomes.filter((i) => i.type === 'recurring')).toHaveLength(0)
   })
 })
 
@@ -41,7 +47,7 @@ describe('buildPlanFromParams — withdrawal ordering modes', () => {
       policy: { ...singlePolicy, ordering: 'taxable-first' },
     })
     expect(res.ok).toBe(true)
-    expect(res.plan!.strategies.withdrawalOrder).toEqual({ mode: 'sequential' })
+    expect(builtOk(res).plan.strategies.withdrawalOrder).toEqual({ mode: 'sequential' })
     expect(res.ordering_unsupported).toBe(false)
   })
 
@@ -51,7 +57,7 @@ describe('buildPlanFromParams — withdrawal ordering modes', () => {
       policy: { ...singlePolicy, ordering: 'proportional' },
     })
     expect(res.ok).toBe(true)
-    expect(res.plan!.strategies.withdrawalOrder).toEqual({ mode: 'proportional' })
+    expect(builtOk(res).plan.strategies.withdrawalOrder).toEqual({ mode: 'proportional' })
     expect(res.ordering_unsupported).toBe(false)
   })
 
@@ -61,7 +67,7 @@ describe('buildPlanFromParams — withdrawal ordering modes', () => {
       policy: { ...singlePolicy, ordering: 'traditional-first' },
     })
     expect(res.ok).toBe(true)
-    expect(res.plan!.strategies.withdrawalOrder).toEqual({ mode: 'sequential' })
+    expect(builtOk(res).plan.strategies.withdrawalOrder).toEqual({ mode: 'sequential' })
     expect(res.ordering_unsupported).toBe(true)
     expect(res.caveats.some((c) => c.includes('ordering=traditional-first'))).toBe(true)
   })
@@ -71,23 +77,23 @@ describe('buildPlanFromParams — full plan JSON branch', () => {
   it('accepts a validated engine plan JSON round-tripped through the typed builder', () => {
     const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
     expect(built.ok).toBe(true)
-    const planJson = JSON.parse(JSON.stringify(built.plan))
+    const planJson = JSON.parse(JSON.stringify(builtOk(built).plan))
     const res = buildPlanFromParams({ plan: planJson })
     expect(res.ok).toBe(true)
-    expect(res.plan).toBeTruthy()
-    expect(res.issues).toBeUndefined()
+    expect(builtOk(res).plan).toBeTruthy()
+    expect('issues' in res).toBe(false)
   })
 
   it('rejects malformed plan JSON with issues', () => {
     const res = buildPlanFromParams({ plan: { not: 'a plan' } })
     expect(res.ok).toBe(false)
-    expect(res.issues).toBeTruthy()
-    expect(res.issues!.length).toBeGreaterThan(0)
+    expect(builtFailed(res).issues).toBeTruthy()
+    expect(builtFailed(res).issues.length).toBeGreaterThan(0)
   })
 
   it('pushes a caveat listing typed fields ignored because plan JSON takes precedence', () => {
     const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
-    const planJson = JSON.parse(JSON.stringify(built.plan))
+    const planJson = JSON.parse(JSON.stringify(builtOk(built).plan))
     const res = buildPlanFromParams({
       plan: planJson,
       household: mfjHousehold,
@@ -108,7 +114,7 @@ describe('buildPlanFromParams — full plan JSON branch', () => {
     // JSON is supplied it takes precedence and the household is ignored, so a
     // stateless household must NOT block the build.
     const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
-    const planJson = JSON.parse(JSON.stringify(built.plan))
+    const planJson = JSON.parse(JSON.stringify(builtOk(built).plan))
     const { state: _dropped, ...noStateHousehold } = mfjHousehold
     const res = buildPlanFromParams({
       plan: planJson,
@@ -116,7 +122,7 @@ describe('buildPlanFromParams — full plan JSON branch', () => {
       policy: mfjPolicy,
     })
     expect(res.ok).toBe(true)
-    expect(res.issues).toBeUndefined()
+    expect('issues' in res).toBe(false)
     expect(res.caveats.some((c) => c.includes('full plan JSON was supplied'))).toBe(true)
   })
 
@@ -125,19 +131,19 @@ describe('buildPlanFromParams — full plan JSON branch', () => {
     // full-plan precedence rule runs. State format is validated only on the typed
     // path, so a bad `state` on an ignored household must not block a valid plan.
     const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
-    const planJson = JSON.parse(JSON.stringify(built.plan))
+    const planJson = JSON.parse(JSON.stringify(builtOk(built).plan))
     const res = buildPlanFromParams({
       plan: planJson,
       household: { ...mfjHousehold, state: 'California' }, // malformed, but ignored
       policy: mfjPolicy,
     })
     expect(res.ok).toBe(true)
-    expect(res.issues).toBeUndefined()
+    expect('issues' in res).toBe(false)
   })
 
   it('plan JSON alone produces no ignored-fields caveat', () => {
     const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
-    const planJson = JSON.parse(JSON.stringify(built.plan))
+    const planJson = JSON.parse(JSON.stringify(builtOk(built).plan))
     const res = buildPlanFromParams({ plan: planJson })
     expect(res.ok).toBe(true)
     expect(res.caveats.some((c) => c.includes('full plan JSON was supplied'))).toBe(false)
@@ -145,21 +151,23 @@ describe('buildPlanFromParams — full plan JSON branch', () => {
 
   it('rejects a full plan when a convention makes its MAGI history invalid', () => {
     const built = buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy })
-    const planJson = JSON.parse(JSON.stringify(built.plan))
+    const planJson = JSON.parse(JSON.stringify(builtOk(built).plan))
     const res = buildPlanFromParams({
       plan: planJson,
       conventions: { irmaaLookbackMagis: [100_000, -1] },
     })
 
     expect(res.ok).toBe(false)
-    expect(res.plan).toBeUndefined()
-    expect(res.issues?.some((issue) => issue.includes('historicalAnnualMagiByYear'))).toBe(true)
+    expect('plan' in res).toBe(false)
+    expect(
+      builtFailed(res).issues.some((issue) => issue.includes('historicalAnnualMagiByYear')),
+    ).toBe(true)
   })
 
   it('requires either plan JSON or both household and policy', () => {
     const res = buildPlanFromParams({ startYear: 2026 })
     expect(res.ok).toBe(false)
-    expect(res.issues).toEqual(['Provide either `plan` JSON or both `household` and `policy`'])
+    expect(builtFailed(res).issues).toEqual(['Provide either `plan` JSON or both `household` and `policy`'])
   })
 })
 
@@ -170,8 +178,8 @@ describe('buildPlanFromParams — validation guards', () => {
       policy: singlePolicy,
     })
     expect(res.ok).toBe(false)
-    expect(res.issues).toEqual(['horizon must be >= 1'])
-    expect(res.plan).toBeUndefined()
+    expect(builtFailed(res).issues).toEqual(['horizon must be >= 1'])
+    expect('plan' in res).toBe(false)
   })
 
   it('rejects an empty persons array', () => {
@@ -180,7 +188,7 @@ describe('buildPlanFromParams — validation guards', () => {
       policy: singlePolicy,
     })
     expect(res.ok).toBe(false)
-    expect(res.issues).toEqual(['household.persons must not be empty'])
+    expect(builtFailed(res).issues).toEqual(['household.persons must not be empty'])
   })
 
   it('rejects claim_ages shorter than persons', () => {
@@ -189,7 +197,7 @@ describe('buildPlanFromParams — validation guards', () => {
       policy: { ...mfjPolicy, claim_ages: [67] }, // only one
     })
     expect(res.ok).toBe(false)
-    expect(res.issues).toEqual(['policy.claim_ages must have an entry for each person'])
+    expect(builtFailed(res).issues).toEqual(['policy.claim_ages must have an entry for each person'])
   })
 
   it('rejects a typed build with no household.state (WS1.3: state is required)', () => {
@@ -199,10 +207,10 @@ describe('buildPlanFromParams — validation guards', () => {
       policy: singlePolicy,
     })
     expect(res.ok).toBe(false)
-    expect(res.plan).toBeUndefined()
-    expect(res.issues).toHaveLength(1)
-    expect(res.issues![0]).toContain('household.state is required')
-    expect(res.issues![0]).toContain('2-letter')
+    expect('plan' in res).toBe(false)
+    expect(builtFailed(res).issues).toHaveLength(1)
+    expect(builtFailed(res).issues[0]).toContain('household.state is required')
+    expect(builtFailed(res).issues[0]).toContain('2-letter')
   })
 
   it('rejects an invalid (non-2-letter) household.state as malformed, not missing', () => {
@@ -213,9 +221,9 @@ describe('buildPlanFromParams — validation guards', () => {
     expect(res.ok).toBe(false)
     // A malformed value must not read as "required/missing" (that invites re-adding
     // the same bad value); it names the format problem and echoes the bad value.
-    expect(res.issues![0]).toContain('household.state must be a 2-letter code')
-    expect(res.issues![0]).toContain('California')
-    expect(res.issues![0]).not.toContain('is required')
+    expect(builtFailed(res).issues[0]).toContain('household.state must be a 2-letter code')
+    expect(builtFailed(res).issues[0]).toContain('California')
+    expect(builtFailed(res).issues[0]).not.toContain('is required')
   })
 
   it('rejects a malformed assumptions.state override before it reaches the engine', () => {
@@ -225,8 +233,8 @@ describe('buildPlanFromParams — validation guards', () => {
       assumptions: { state: '9!' },
     })
     expect(res.ok).toBe(false)
-    expect(res.issues![0]).toContain('assumptions.state must be a 2-letter code')
-    expect(res.issues![0]).toContain('9!')
+    expect(builtFailed(res).issues[0]).toContain('assumptions.state must be a 2-letter code')
+    expect(builtFailed(res).issues[0]).toContain('9!')
   })
 
   it('rejects a non-zero wage as a hard error (WS1.3: wages are not modeled)', () => {
@@ -238,8 +246,8 @@ describe('buildPlanFromParams — validation guards', () => {
       policy: singlePolicy,
     })
     expect(res.ok).toBe(false)
-    expect(res.plan).toBeUndefined()
-    expect(res.issues).toEqual(['person 0: wages are not modeled; remove wage or use full plan JSON'])
+    expect('plan' in res).toBe(false)
+    expect(builtFailed(res).issues).toEqual(['person 0: wages are not modeled; remove wage or use full plan JSON'])
   })
 
   it('allows an explicit zero wage (no wage is being modeled)', () => {
@@ -291,11 +299,11 @@ describe('buildPlanFromParams — conventions and caveats', () => {
       startYear: 2030,
     })
     expect(res.ok).toBe(true)
-    expect(res.plan!.assumptions.historicalAnnualMagiByYear).toEqual({
+    expect(builtOk(res).plan.assumptions.historicalAnnualMagiByYear).toEqual({
       '2028': 80_000,
       '2029': 82_000,
     })
-    expect(res.plan!.assumptions.recentAnnualMagi).toBe(80_000)
+    expect(builtOk(res).plan.assumptions.recentAnnualMagi).toBe(80_000)
     expect(res.caveats.some((c) => c.startsWith('IRMAA-lookback'))).toBe(false)
   })
 
@@ -306,7 +314,7 @@ describe('buildPlanFromParams — conventions and caveats', () => {
       conventions: { withdrawalOrdering: 'proportional' },
     })
     expect(res.ok).toBe(true)
-    expect(res.plan!.strategies.withdrawalOrder).toEqual({ mode: 'proportional' })
+    expect(builtOk(res).plan.strategies.withdrawalOrder).toEqual({ mode: 'proportional' })
   })
 
   it('records a caveat for a traditional-first withdrawalOrdering convention', () => {
@@ -316,7 +324,7 @@ describe('buildPlanFromParams — conventions and caveats', () => {
       conventions: { withdrawalOrdering: 'traditional-first' },
     })
     expect(res.ok).toBe(true)
-    expect(res.plan!.strategies.withdrawalOrder).toEqual({ mode: 'sequential' })
+    expect(builtOk(res).plan.strategies.withdrawalOrder).toEqual({ mode: 'sequential' })
     expect(
       res.caveats.some((c) => c.includes('convention withdrawalOrdering=traditional-first')),
     ).toBe(true)
@@ -340,8 +348,8 @@ describe('buildPlanFromParams — conventions and caveats', () => {
       conventions: { irmaaLookbackMagis: [111_000, 222_000] },
     })
     expect(res.ok).toBe(true)
-    expect(res.plan!.assumptions.recentAnnualMagi).toBe(111_000)
-    expect(res.plan!.assumptions.historicalAnnualMagiByYear).toEqual({
+    expect(builtOk(res).plan.assumptions.recentAnnualMagi).toBe(111_000)
+    expect(builtOk(res).plan.assumptions.historicalAnnualMagiByYear).toEqual({
       '2024': 111_000,
       '2025': 222_000,
     })

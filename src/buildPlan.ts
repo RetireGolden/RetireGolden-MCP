@@ -224,15 +224,34 @@ export interface BuildPlanInput {
   mcpVersion?: string | null
 }
 
-export interface BuildPlanResult {
-  ok: boolean
-  plan?: Plan
-  startYear: number
-  endYear?: number
-  caveats: string[]
-  issues?: string[]
-  ordering_unsupported?: boolean
-}
+/**
+ * A build either produced a plan or produced issues — never both, and never
+ * neither. Expressing that as a discriminated union on `ok` lets `result.ok`
+ * alone narrow to a non-optional `plan`, so callers stop writing the
+ * `!result.ok || !result.plan` belt-and-braces check (and stop reaching for
+ * `result.plan!`, which asserted away a real invariant instead of stating it).
+ *
+ * `startYear`, `caveats` and `ordering_unsupported` are on both arms: a failed
+ * build still resolved a start year and may have accumulated caveats before it
+ * failed, and the typed path reports ordering support even when parsePlan
+ * rejects the plan it built.
+ */
+export type BuildPlanResult =
+  | {
+      ok: true
+      plan: Plan
+      startYear: number
+      endYear?: number
+      caveats: string[]
+      ordering_unsupported?: boolean
+    }
+  | {
+      ok: false
+      startYear: number
+      caveats: string[]
+      issues: string[]
+      ordering_unsupported?: boolean
+    }
 
 const FILING = { single: 'single', mfj: 'marriedFilingJointly' } as const
 

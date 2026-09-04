@@ -50,6 +50,7 @@ import { serializeSinglePlan, type SinglePlanExport } from '@retiregolden/planne
 import * as adapter from '../src/adapter.js'
 import { buildPlanFromParams, type BuildPlanInput } from '../src/buildPlan.js'
 import { createSession } from '../src/session.js'
+import { builtOk } from './fixtures.js'
 import { TOOL_TABLE } from '../src/toolTable.js'
 
 /**
@@ -203,9 +204,9 @@ describe('copied plan → build_plan', () => {
     const payload = copiedPayload(plan, view.startYear)
     const built = buildFrom(payload)
 
-    expect(built.issues ?? []).toEqual([])
+    expect('issues' in built ? built.issues : []).toEqual([])
     expect(built.ok).toBe(true)
-    expect(built.plan).toEqual(asThisBuildStoresIt(plan))
+    expect(builtOk(built).plan).toEqual(asThisBuildStoresIt(plan))
     expect(built.startYear).toBe(view.startYear)
     // Filtered to skew rather than asserting no caveats at all — since 0.5.0 an
     // imported document also reports that the resident state's income tax is
@@ -218,11 +219,11 @@ describe('copied plan → build_plan', () => {
     const plan = createSamplePlan()
     const shown = projectPlan(plan)
     const built = buildFrom(copiedPayload(plan, shown.startYear))
-    expect(built.ok && built.plan).toBeTruthy()
+    expect(builtOk(built).plan).toBeTruthy()
 
     // Re-project the REBUILT plan at the REBUILT start year. Same ledger, year
     // for year, not just the same headline number.
-    const currentPlan = parsePlan(built.plan)
+    const currentPlan = parsePlan(builtOk(built).plan)
     expect(currentPlan.ok, currentPlan.ok ? '' : currentPlan.issues.join('; ')).toBe(true)
     // `currentPlan.plan` is this build's `Plan`; `projectPlan` is the published
     // browser's and is typed for the plan ITS engine produces. The cast is the
@@ -264,7 +265,7 @@ describe('copied plan → build_plan', () => {
     const stored = asThisBuildStoresIt(plan)
     const built = buildFrom(payload)
     expect(built.ok).toBe(true)
-    expect(built.plan).toEqual(stored)
+    expect(builtOk(built).plan).toEqual(stored)
     expect(built.startYear).toBe(2029)
     expectNoPayloadSkew(built.caveats, payload.engineVersion, documentSchemaVersion(payload))
   })

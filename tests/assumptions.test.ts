@@ -11,9 +11,9 @@ import { describe, expect, it } from 'vitest'
 import { buildPlanFromParams, AssumptionsSchema } from '../src/buildPlan.js'
 import { createSession } from '../src/session.js'
 import * as adapter from '../src/adapter.js'
-import { singleHousehold, singlePolicy, mfjHousehold, mfjPolicy } from './fixtures.js'
+import { builtOk, singleHousehold, singlePolicy, mfjHousehold, mfjPolicy } from './fixtures.js'
 
-function taxableAccount(plan: NonNullable<ReturnType<typeof buildPlanFromParams>['plan']>) {
+function taxableAccount(plan: Extract<ReturnType<typeof buildPlanFromParams>, { ok: true }>['plan']) {
   const acct = plan.accounts.find((a) => a.type === 'taxable')
   if (!acct) throw new Error('no taxable account')
   return acct as { type: 'taxable'; qualifiedRatio: number }
@@ -34,7 +34,7 @@ describe('assumptions overrides reach the plan', () => {
       assumptions: { inflationPct: 6 },
     })
     expect(built.ok).toBe(true)
-    expect(built.plan!.assumptions.inflationPct).toBe(6)
+    expect(builtOk(built).plan.assumptions.inflationPct).toBe(6)
     const inflProj = adapter.runProjection(infl)
     expect(inflProj.ok).toBe(true)
     if (baseProj.ok && inflProj.ok) {
@@ -52,14 +52,14 @@ describe('assumptions overrides reach the plan', () => {
       assumptions: { state: 'CA' },
     })
     expect(res.ok).toBe(true)
-    expect(res.plan!.household.state).toBe('CA')
+    expect(builtOk(res).plan.household.state).toBe('CA')
   })
 
   it('omitted assumptions.state uses the required household.state', () => {
     // singleHousehold declares state: 'KY'; with no override it flows through.
     const res = buildPlanFromParams({ household: singleHousehold, policy: singlePolicy })
     expect(res.ok).toBe(true)
-    expect(res.plan!.household.state).toBe('KY')
+    expect(builtOk(res).plan.household.state).toBe('KY')
   })
 
   it('assumptions.state overrides the household state', () => {
@@ -69,7 +69,7 @@ describe('assumptions overrides reach the plan', () => {
       assumptions: { state: 'TX' },
     })
     expect(res.ok).toBe(true)
-    expect(res.plan!.household.state).toBe('TX')
+    expect(builtOk(res).plan.household.state).toBe('TX')
   })
 
   it('qualifiedRatio override lands on the taxable account', () => {
@@ -79,13 +79,13 @@ describe('assumptions overrides reach the plan', () => {
       assumptions: { qualifiedRatio: 0.5 },
     })
     expect(res.ok).toBe(true)
-    expect(taxableAccount(res.plan!).qualifiedRatio).toBe(0.5)
+    expect(taxableAccount(builtOk(res).plan).qualifiedRatio).toBe(0.5)
   })
 
   it('omitted qualifiedRatio keeps the neutral default 0.85', () => {
     const res = buildPlanFromParams({ household: singleHousehold, policy: singlePolicy })
     expect(res.ok).toBe(true)
-    expect(taxableAccount(res.plan!).qualifiedRatio).toBe(0.85)
+    expect(taxableAccount(builtOk(res).plan).qualifiedRatio).toBe(0.85)
   })
 
   it('dobMonthDay and sex overrides land on every person', () => {
@@ -95,7 +95,7 @@ describe('assumptions overrides reach the plan', () => {
       assumptions: { dobMonthDay: '03-22', sex: 'male' },
     })
     expect(res.ok).toBe(true)
-    for (const person of res.plan!.household.people) {
+    for (const person of builtOk(res).plan.household.people) {
       expect(person.dob.endsWith('-03-22')).toBe(true)
       expect(person.sex).toBe('male')
     }
@@ -104,7 +104,7 @@ describe('assumptions overrides reach the plan', () => {
   it('omitted dobMonthDay and sex keep neutral defaults (06-15 / average)', () => {
     const res = buildPlanFromParams({ household: singleHousehold, policy: singlePolicy })
     expect(res.ok).toBe(true)
-    for (const person of res.plan!.household.people) {
+    for (const person of builtOk(res).plan.household.people) {
       expect(person.dob.endsWith('-06-15')).toBe(true)
       expect(person.sex).toBe('average')
     }
@@ -123,7 +123,7 @@ describe('assumptions overrides reach the plan', () => {
       },
     })
     expect(res.ok).toBe(true)
-    const a = res.plan!.assumptions
+    const a = builtOk(res).plan.assumptions
     expect(a.healthcareExtraInflationPct).toBe(2)
     expect(a.defaultReturnPct).toBe(4.5)
     expect(a.ssCola).toEqual({ mode: 'fixed', annualPct: 2.5 })
@@ -167,10 +167,10 @@ describe('assumption-interaction caveats (footguns)', () => {
       assumptions: { state: 'CA' },
     })
     expect(res.ok).toBe(true)
-    expect(res.plan!.household.state).toBe('CA')
+    expect(builtOk(res).plan.household.state).toBe('CA')
     // The stored override stays 0 — and 0 is exactly what the engine reads as "use
     // CA's modeled pack", so the caveat must not call this a 0% state tax.
-    expect(res.plan!.assumptions.stateEffectiveTaxPct).toBe(0)
+    expect(builtOk(res).plan.assumptions.stateEffectiveTaxPct).toBe(0)
     const caveat = res.caveats.find((c) => c.includes('stateEffectiveTaxPct'))
     expect(caveat).toContain('state=CA')
     expect(caveat).toContain('modeled CA income tax applies')

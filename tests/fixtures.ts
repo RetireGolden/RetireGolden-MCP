@@ -3,7 +3,26 @@
  * Not a test file (no *.test.ts suffix), so vitest does not execute it directly.
  */
 
-import type { HouseholdParams, PolicyParams } from '../src/buildPlan.js'
+import type { BuildPlanResult, HouseholdParams, PolicyParams } from '../src/buildPlan.js'
+
+/**
+ * Narrow a {@link BuildPlanResult} to its success arm.
+ *
+ * `BuildPlanResult` is a discriminated union on `ok`, so `plan` and `endYear`
+ * live only on the success arm. Tests used to reach for `res.plan!`, which
+ * asserted the invariant away instead of checking it; this throws with the
+ * build's own issues when the build did not in fact succeed.
+ */
+export function builtOk(result: BuildPlanResult): Extract<BuildPlanResult, { ok: true }> {
+  if (!result.ok) throw new Error(`expected a built plan, got issues: ${result.issues.join('; ')}`)
+  return result
+}
+
+/** The mirror of {@link builtOk}: narrow to the failure arm, which owns `issues`. */
+export function builtFailed(result: BuildPlanResult): Extract<BuildPlanResult, { ok: false }> {
+  if (result.ok) throw new Error('expected the build to fail, but it produced a plan')
+  return result
+}
 
 export const singleHousehold: HouseholdParams = {
   filing: 'single',

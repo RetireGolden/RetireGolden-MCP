@@ -121,7 +121,9 @@ export function validatePlanJson(input: unknown) {
 
 export function setPlanFromBuild(session: SessionState, input: BuildPlanInput) {
   const result = buildPlanFromParams(input)
-  if (!result.ok || !result.plan) {
+  // `ok` alone narrows: BuildPlanResult is a discriminated union, so the success
+  // arm's `plan` is non-optional and needs no second guard.
+  if (!result.ok) {
     return result
   }
   session.plan = result.plan

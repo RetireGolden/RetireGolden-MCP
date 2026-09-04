@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { createSession } from '../src/session.js'
 import * as adapter from '../src/adapter.js'
 import { buildPlanFromParams } from '../src/buildPlan.js'
-import { mfjHousehold, mfjPolicy, singleHousehold, singlePolicy } from './fixtures.js'
+import {
+  builtOk,
+  mfjHousehold,
+  mfjPolicy,
+  singleHousehold,
+  singlePolicy,
+} from './fixtures.js'
 
 function mfjSession() {
   const session = createSession(2026)
@@ -171,7 +177,7 @@ describe('compareScenarios', () => {
   it('reports a zero delta for two identical plans', () => {
     const session = mfjSession()
     const planJson = JSON.parse(
-      JSON.stringify(buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy }).plan),
+      JSON.stringify(builtOk(buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy })).plan),
     )
     const cmp = adapter.compareScenarios(session, planJson, planJson)
     expect(cmp.ok).toBe(true)
@@ -184,7 +190,7 @@ describe('compareScenarios', () => {
   it('rejects an invalid plan A', () => {
     const session = mfjSession()
     const validPlan = JSON.parse(
-      JSON.stringify(buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy }).plan),
+      JSON.stringify(builtOk(buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy })).plan),
     )
     const cmp = adapter.compareScenarios(session, { bad: true }, validPlan)
     expect(cmp.ok).toBe(false)
@@ -195,7 +201,7 @@ describe('compareScenarios', () => {
 describe('validatePlanJson', () => {
   it('accepts a valid engine plan', () => {
     const planJson = JSON.parse(
-      JSON.stringify(buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy }).plan),
+      JSON.stringify(builtOk(buildPlanFromParams({ household: mfjHousehold, policy: mfjPolicy })).plan),
     )
     const res = adapter.validatePlanJson(planJson)
     expect(res.ok).toBe(true)

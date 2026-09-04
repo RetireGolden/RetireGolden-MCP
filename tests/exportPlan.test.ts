@@ -10,7 +10,7 @@ import { createSession } from '../src/session.js'
 import * as adapter from '../src/adapter.js'
 import { buildPlanFromParams } from '../src/buildPlan.js'
 import { getTool, validateToolArgs } from '../src/toolTable.js'
-import { mfjHousehold, mfjPolicy } from './fixtures.js'
+import { builtFailed, builtOk, mfjHousehold, mfjPolicy } from './fixtures.js'
 
 describe('export_plan round-trip', () => {
   it('exports a plan that validates and rebuilds to an identical projection', () => {
@@ -40,7 +40,7 @@ describe('export_plan round-trip', () => {
     expect(rebuild.ok).toBe(true)
 
     const session2 = createSession(2026)
-    session2.plan = rebuild.plan!
+    session2.plan = builtOk(rebuild).plan
     session2.startYear = rebuild.startYear
     const reprojected = adapter.runProjection(session2)
     expect(reprojected.ok).toBe(true)
@@ -82,7 +82,7 @@ describe('export_plan round-trip', () => {
     expect(rebuild.ok).toBe(true)
 
     const session2 = createSession(exported.startYear)
-    session2.plan = rebuild.plan!
+    session2.plan = builtOk(rebuild).plan
     session2.startYear = rebuild.startYear
     const reprojected = adapter.runProjection(session2)
     expect(reprojected.ok).toBe(true)
@@ -261,8 +261,8 @@ describe('build_plan provenance skew (sibling labels warn, never refuse)', () =>
 
       // Accepted: a provenance label is never a refusal.
       expect(res.ok).toBe(true)
-      expect(res.plan).toBeTruthy()
-      expect(res.issues).toBeUndefined()
+      expect(builtOk(res).plan).toBeTruthy()
+      expect('issues' in res).toBe(false)
 
       // Exact text, not substrings: a message that transposes the two versions
       // tells the agent the opposite of the truth about which side is stale.
@@ -310,7 +310,7 @@ describe('build_plan provenance skew (sibling labels warn, never refuse)', () =>
     const without = buildPlanFromParams({ plan: planJson, startYear: 2026 })
     expect(without.ok).toBe(true)
     expect(skew(without.caveats)).toEqual([])
-    expect(without.issues).toBeUndefined()
+    expect('issues' in without).toBe(false)
     // An unversioned import is indistinguishable from a matching one.
     expect(without.caveats).toEqual(matching.caveats)
   })
@@ -392,7 +392,7 @@ describe('build_plan engineVersion skew (the skew that can really happen)', () =
       engineVersion: '0.1.3',
     })
     expect(res.ok).toBe(true)
-    expect(res.issues).toBeUndefined()
+    expect('issues' in res).toBe(false)
     expect(skew(res.caveats)).toEqual([
       'engineVersion skew: the supplied plan document was exported under @retiregolden/engine 0.1.3 ' +
         `but this build runs ${installed}; the document was imported unchanged, but engine defaults ` +
@@ -468,7 +468,7 @@ describe('build_plan engineVersion skew (the skew that can really happen)', () =
     const res = buildPlanFromParams({ plan: currentDocument(), startYear: 2026 })
     expect(res.ok).toBe(true)
     const stateCaveat = res.caveats.find((c) => c.includes('stateEffectiveTaxPct'))
-    expect(stateCaveat).toContain(`state=${res.plan!.household.state}`)
+    expect(stateCaveat).toContain(`state=${builtOk(res).plan.household.state}`)
     expect(stateCaveat).toContain('income tax applies')
   })
 
@@ -477,7 +477,7 @@ describe('build_plan engineVersion skew (the skew that can really happen)', () =
     // indistinguishable from an omitted one. The accusatory "you set 0" wording
     // belongs to the typed path, where the caller's intent is actually observable.
     const res = buildPlanFromParams({ plan: currentDocument(), startYear: 2026 })
-    expect(res.plan!.assumptions.stateEffectiveTaxPct).toBe(0)
+    expect(builtOk(res).plan.assumptions.stateEffectiveTaxPct).toBe(0)
     expect(res.caveats.some((c) => c.includes('does NOT disable'))).toBe(false)
   })
 
@@ -486,7 +486,7 @@ describe('build_plan engineVersion skew (the skew that can really happen)', () =
     ;(doc.assumptions as Record<string, unknown>).stateEffectiveTaxPct = 7
     const res = buildPlanFromParams({ plan: doc, startYear: 2026 })
     expect(res.ok).toBe(true)
-    expect(res.plan!.assumptions.stateEffectiveTaxPct).toBe(7)
+    expect(builtOk(res).plan.assumptions.stateEffectiveTaxPct).toBe(7)
     expect(res.caveats.some((c) => c.includes('stateEffectiveTaxPct'))).toBe(false)
   })
 })
@@ -517,8 +517,8 @@ describe('build_plan cross-schema documents (the engine validator, explained)', 
     // The engine's validator cannot read another schema — that refusal is real and
     // is NOT dressed up as an acceptance.
     expect(res.ok).toBe(false)
-    expect(res.plan).toBeUndefined()
-    const issues = res.issues ?? []
+    expect('plan' in res).toBe(false)
+    const issues = builtFailed(res).issues
     // The explanation comes FIRST, names both versions and the remedy...
     expect(issues[0]).toMatch(
       new RegExp(
@@ -541,7 +541,7 @@ describe('build_plan cross-schema documents (the engine validator, explained)', 
     const doc = { ...currentDocument(), schemaVersion: 0 }
     const res = buildPlanFromParams({ plan: doc, startYear: 2026 })
     expect(res.ok).toBe(false)
-    const first = (res.issues ?? [])[0] ?? ''
+    const first = builtFailed(res).issues[0] ?? ''
     expect(first).toMatch(/^plan-schema skew: the supplied document declares plan-schema v0/)
     expect(first).toContain('could not upgrade it')
     // Read off the DOCUMENT — no sibling argument was supplied at all.
@@ -554,7 +554,7 @@ describe('build_plan cross-schema documents (the engine validator, explained)', 
     const doc = { ...currentDocument(), accounts: 'not-an-array' }
     const res = buildPlanFromParams({ plan: doc, startYear: 2026 })
     expect(res.ok).toBe(false)
-    expect((res.issues ?? []).some((i) => i.includes('plan-schema skew'))).toBe(false)
+    expect(builtFailed(res).issues.some((i) => i.includes('plan-schema skew'))).toBe(false)
     expect(res.caveats).toEqual([])
 
     // ...and a document with NO schemaVersion field at all is likewise untouched:
@@ -563,7 +563,7 @@ describe('build_plan cross-schema documents (the engine validator, explained)', 
     delete unversioned.schemaVersion
     const res2 = buildPlanFromParams({ plan: unversioned, startYear: 2026 })
     expect(res2.ok).toBe(false)
-    expect(res2.issues).toEqual([`schemaVersion: Invalid input: expected ${PLAN_SCHEMA_VERSION}`])
+    expect(builtFailed(res2).issues).toEqual([`schemaVersion: Invalid input: expected ${PLAN_SCHEMA_VERSION}`])
   })
 })
 
