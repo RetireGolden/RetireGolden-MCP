@@ -13,7 +13,11 @@ every engine-numeric step in the protocol baseline is byte-identical.
 
 ### Changed
 
-- Keep MCP calculations aligned with engine 0.3.0.
+- The exact engine pin moves 0.2.0 → 0.3.0, and no modeled number moves with
+  it: the golden-number suite passes unchanged and every engine-numeric step
+  in the protocol baseline is byte-identical across the bump (see
+  **Verified**). Neither new engine field (`netPortfolioNeed`, `refusalCode`)
+  is read or served anywhere in this package.
 - The engine's Plan JSON Schema is now read from
   `@retiregolden/engine/schema/current`, the entry point the engine documents
   for the common case, rather than the legacy `/schema` compatibility barrel
@@ -40,8 +44,8 @@ every engine-numeric step in the protocol baseline is byte-identical.
 
 ### Why this release exists
 
-Engine 0.3.0 publishes two additive `YearResult` fields (`netPortfolioNeed`,
-and `refusalCode` on inherited-account evidence), prunes 29 unused
+Engine 0.3.0 publishes two additive `YearResult` fields (`netPortfolioNeed`
+and a `refusalCode` on inherited-account evidence), prunes 29 unused
 `./actions/<name>` export subpaths (this package imports none of them; every
 subpath it does import still resolves), and moves `decisionFixtures` to
 `./testing/`. None of that reaches this server's wire surface, so this is a
