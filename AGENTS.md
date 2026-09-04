@@ -21,7 +21,9 @@ Do not add private planning, strategy, or competitor material here.
 - Session state is in memory. No disk persistence, no telemetry, no
   exfiltration of plan data.
 - Tool surface lives in `src/toolTable.ts`. Keep `schemas/tools.v1.json`
-  in parity. Keep schemas and auth/secrets tight: do not put plan
+  in parity — it publishes the tool names, the arm groupings, and an
+  `inputSchemas` block generated from the table; regenerate it with
+  `pnpm run contract:generate`. Keep schemas and auth/secrets tight: do not put plan
   arguments on authorization callbacks; do not add credentials to tool
   input.
 - The HTTP gateway is an unauthenticated research stub. It stays opt-in

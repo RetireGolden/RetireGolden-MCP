@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "contractVersion": 1,
   "$id": "https://retiregolden.org/schemas/mcp-tools/v1.json",
   "title": "RetireGolden MCP tool surface v1",
   "description": "Versioned tool contract for stdio and future HTTP transports. Educational decision-support only.",
@@ -19,6 +19,788 @@
     "update_plan",
     "clear_session"
   ],
-  "calculator_arm": ["build_plan", "run_projection", "batch_evaluate"],
-  "optimizer_arm": ["build_plan", "run_projection", "batch_evaluate", "run_optimizer", "solve_max_spending"]
+  "calculator_arm": [
+    "build_plan",
+    "run_projection",
+    "batch_evaluate"
+  ],
+  "optimizer_arm": [
+    "build_plan",
+    "run_projection",
+    "batch_evaluate",
+    "run_optimizer",
+    "solve_max_spending"
+  ],
+  "inputSchemas": {
+    "build_plan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "plan": {
+          "description": "Full RetireGolden plan JSON (validated by the engine)"
+        },
+        "household": {
+          "description": "Typed household params: filing, REQUIRED 2-letter state, persons[] (retired — a non-zero wage is a hard error), taxable/basis, spending, horizon, growth rates, IRMAA lookback MAGIs, heir rate",
+          "type": "object",
+          "properties": {
+            "filing": {
+              "type": "string",
+              "enum": [
+                "single",
+                "mfj"
+              ],
+              "description": "Tax filing status: single or married-filing-jointly"
+            },
+            "state": {
+              "description": "2-letter state-of-residence code — REQUIRED on the typed path (omitting it, or providing a malformed value, fails the build when no full `plan` is supplied), e.g. \"CA\". The engine requires a residence state — there is no hardcoded default. `assumptions.state` can override the value used. This state's modeled income tax IS applied: every US jurisdiction has a pack, so naming a state is what selects its tax rules. Set `assumptions.stateEffectiveTaxPct` above 0 only to override them with a flat effective rate.",
+              "type": "string"
+            },
+            "persons": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "birth_year": {
+                    "type": "integer",
+                    "minimum": 1900,
+                    "maximum": 2100,
+                    "description": "4-digit birth year, e.g. 1960"
+                  },
+                  "trad": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Traditional/pre-tax IRA+401k balance in dollars"
+                  },
+                  "roth": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Roth balance in dollars"
+                  },
+                  "pia": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Social Security primary insurance amount, monthly dollars at FRA"
+                  },
+                  "pension": {
+                    "description": "Annual pension income in dollars (ordinary-taxed)",
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "wage": {
+                    "description": "Annual wage — NOT modeled. A non-zero wage is a hard build error (retired household is the explicit contract of the typed path); remove it or use the full plan JSON path.",
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "fra_years": {
+                    "description": "Full retirement age in years",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 120
+                  }
+                },
+                "required": [
+                  "birth_year",
+                  "trad",
+                  "roth",
+                  "pia"
+                ],
+                "additionalProperties": false
+              },
+              "description": "One entry per household member"
+            },
+            "taxable": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Taxable brokerage balance in dollars"
+            },
+            "taxable_basis": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Cost basis of the taxable brokerage account in dollars"
+            },
+            "spending": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Base annual household spending in dollars"
+            },
+            "horizon": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Number of projection years (1-100)"
+            },
+            "growth": {
+              "type": "object",
+              "properties": {
+                "trad": {
+                  "type": "number",
+                  "description": "Traditional NOMINAL annual return as a fraction, e.g. 0.05"
+                },
+                "roth": {
+                  "type": "number",
+                  "description": "Roth NOMINAL annual return as a fraction, e.g. 0.05"
+                },
+                "taxable": {
+                  "type": "number",
+                  "description": "Taxable NOMINAL annual return as a fraction, e.g. 0.05"
+                }
+              },
+              "required": [
+                "trad",
+                "roth",
+                "taxable"
+              ],
+              "additionalProperties": false,
+              "description": "Per-bucket NOMINAL annual return rates (fractions, not percents). These are written straight into the engine's nominal annualReturnPct — real return is roughly this minus inflationPct. Use nominal figures (e.g. 0.05 for a 5% headline return), not inflation-adjusted ones."
+            },
+            "pre_horizon_magi": {
+              "description": "IRMAA lookback MAGIs for [startYear-2, startYear-1]",
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "heir_ordinary_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Heir ordinary income tax rate as a fraction"
+            }
+          },
+          "required": [
+            "filing",
+            "persons",
+            "taxable",
+            "taxable_basis",
+            "spending",
+            "horizon",
+            "growth",
+            "heir_ordinary_rate"
+          ],
+          "additionalProperties": false
+        },
+        "policy": {
+          "description": "Typed policy params: claim_ages[], optional conversion_bracket/conversion_years, withdrawal ordering",
+          "type": "object",
+          "properties": {
+            "claim_ages": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 120
+              },
+              "description": "Social Security claim age per person (whole years), aligned to household.persons order"
+            },
+            "conversion_bracket": {
+              "description": "Top-of-bracket target for Roth conversions as a fraction (e.g. 0.24), or null",
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "conversion_years": {
+              "description": "Number of years to run fill-to-bracket conversions from startYear, or null",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ordering": {
+              "type": "string",
+              "enum": [
+                "taxable-first",
+                "traditional-first",
+                "proportional"
+              ],
+              "description": "Withdrawal ordering; traditional-first is approximate under sequential drain"
+            }
+          },
+          "required": [
+            "claim_ages",
+            "ordering"
+          ],
+          "additionalProperties": false
+        },
+        "conversion": {
+          "description": "Optional manual Roth conversion schedule (overrides bracket-fill conversions)",
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "manual"
+            },
+            "conversions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "amount": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "year",
+                  "amount"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "mode",
+            "conversions"
+          ],
+          "additionalProperties": false
+        },
+        "startYear": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "schemaVersion": {
+          "description": "Provenance only: the `schemaVersion` sibling from an export_plan response. A value differing from this build's version adds a caveat and NOTHING else — the document is still imported. Note this is your CLAIM about the document; the version the engine actually gates on is the `schemaVersion` field inside the document itself. Omit it and no caveat is emitted.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "engineVersion": {
+          "description": "Provenance only: the `engineVersion` sibling from an export_plan response, i.e. the @retiregolden/engine build that exported the supplied `plan`. Differing from the running engine adds a caveat (defaults and modeling semantics can move between engine versions) and NOTHING else — the document is still imported. This is the version skew that can actually occur between two builds that can exchange documents at all. Accepts null, which is what export_plan emits when it cannot resolve the installed version; null is treated as 'unknown' and warns on nothing.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mcpVersion": {
+          "description": "Provenance only: the `mcpVersion` sibling from an export_plan response, accepted so a whole export can be spread straight back into build_plan (including the null export_plan emits when the version is unresolvable). Recorded, never warned on — for a full plan document the document itself is the model.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conventions": {
+          "type": "object",
+          "properties": {
+            "lawSunsetFreezeYear": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "irmaaLookbackMagis": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "withdrawalOrdering": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "taxable-first",
+                    "traditional-first",
+                    "proportional"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "assumptions": {
+          "description": "Optional overrides for default modeling assumptions (inflation, returns, SS COLA, state, taxes, qualified ratio, dob month-day, sex). Defaults follow the engine (~2.5% inflation, SS COLA tracking inflation, and the resident state's own modeled income tax — set stateEffectiveTaxPct above 0 only to override that with a flat rate); household state is a REQUIRED input, not an assumption. Set explicit values to override; omitted fields keep the engine defaults.",
+          "type": "object",
+          "properties": {
+            "inflationPct": {
+              "description": "General price inflation, in percent per year (e.g. 2.5 for 2.5%)",
+              "type": "number"
+            },
+            "healthcareExtraInflationPct": {
+              "description": "Healthcare inflation above general inflation, in percent per year (e.g. 2 for +2%)",
+              "type": "number"
+            },
+            "defaultReturnPct": {
+              "description": "Fallback nominal annual return for accounts without an explicit rate, in percent",
+              "type": "number"
+            },
+            "ssColaPct": {
+              "description": "Social Security COLA as a fixed annual percent (e.g. 2.5 for 2.5%/yr)",
+              "type": "number"
+            },
+            "state": {
+              "description": "2-letter state-of-residence OVERRIDE (e.g. \"CA\"); when omitted or null, the required household.state is used. This selects which state's modeled income tax applies — that is how state tax is switched on, not stateEffectiveTaxPct",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "stateEffectiveTaxPct": {
+              "description": "Flat effective state income tax rate, in percent — an OVERRIDE of the state's modeled tax rules, applied only when ABOVE 0. Omitting it (or passing 0) does NOT mean \"no state income tax\": the engine then applies the modeled pack for household.state. There is no knob that zeroes out a taxing state; pick a state that levies no income tax (AK, FL, NH, NV, SD, TN, TX, WA, WY) instead.",
+              "type": "number",
+              "minimum": 0
+            },
+            "localIncomeTaxPct": {
+              "description": "Flat local income tax rate, in percent, applied on top of whatever state rules are in force. Unlike stateEffectiveTaxPct this is genuinely 0 until set — no pack models local tax.",
+              "type": "number",
+              "minimum": 0
+            },
+            "qualifiedRatio": {
+              "description": "Fraction (0-1) of taxable-account dividends taxed at qualified rates. Default 0.85 (a reasonable neutral value, overridable) — not a bench artifact.",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "dobMonthDay": {
+              "description": "Birth month-day as \"MM-DD\", combined with each person birth_year (e.g. \"06-15\"). Default \"06-15\" (a reasonable neutral value, overridable) — not a bench artifact. Calendar-validated (month 01-12, day within that month; 02-29 allowed). Leap-year interaction with each person birth_year is left to the engine.",
+              "type": "string",
+              "pattern": "^\\d{2}-\\d{2}$"
+            },
+            "sex": {
+              "description": "Person sex for mortality/longevity: female, male, or average (percent-free enum). Default 'average' (a reasonable neutral value, overridable) — not a bench artifact.",
+              "type": "string",
+              "enum": [
+                "female",
+                "male",
+                "average"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "validate_plan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "plan": {}
+      },
+      "additionalProperties": false
+    },
+    "run_projection": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "detail": {
+          "description": "Response detail: 'summary' (default, omits the per-year array) or 'years' (full per-year ledger)",
+          "type": "string",
+          "enum": [
+            "summary",
+            "years"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "run_monte_carlo": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "pathCount": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 5000
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "batch_evaluate": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "policies": {
+          "minItems": 1,
+          "maxItems": 500,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "claim_ages": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 120
+                },
+                "description": "Social Security claim age per person (whole years), aligned to household.persons order"
+              },
+              "conversion_bracket": {
+                "description": "Top-of-bracket target for Roth conversions as a fraction (e.g. 0.24), or null",
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "conversion_years": {
+                "description": "Number of years to run fill-to-bracket conversions from startYear, or null",
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "ordering": {
+                "type": "string",
+                "enum": [
+                  "taxable-first",
+                  "traditional-first",
+                  "proportional"
+                ],
+                "description": "Withdrawal ordering; traditional-first is approximate under sequential drain"
+              }
+            },
+            "required": [
+              "claim_ages",
+              "ordering"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Typed policy params to sweep: claim_ages[], conversion_bracket/years, ordering"
+        },
+        "objective": {
+          "type": "string",
+          "enum": [
+            "after_tax_estate",
+            "cumulative_tax",
+            "ending_trad"
+          ]
+        }
+      },
+      "required": [
+        "policies"
+      ],
+      "additionalProperties": false
+    },
+    "run_optimizer": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "solve_max_spending": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "compare_scenarios": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "planA": {},
+        "planB": {},
+        "startYear": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "planA",
+        "planB"
+      ],
+      "additionalProperties": false
+    },
+    "explain_modeled_result": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "get_session": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "export_plan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "describe_plan_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Optional dotted path or JSON pointer into the schema; omit for the full document",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "update_plan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "operations": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "const": "add_account"
+                  },
+                  "account": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "op",
+                  "account"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "const": "replace_account"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "account": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "account"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "const": "remove_account"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "op",
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "const": "add_income"
+                  },
+                  "income": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "op",
+                  "income"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "const": "replace_income"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "income": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "income"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "const": "remove_income"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "op",
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "const": "set_assumption"
+                  },
+                  "field": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {}
+                },
+                "required": [
+                  "op",
+                  "field",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "const": "set_expense"
+                  },
+                  "field": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {}
+                },
+                "required": [
+                  "op",
+                  "field",
+                  "value"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "description": "Ordered list of merge operations applied atomically (all-or-nothing)."
+        }
+      },
+      "required": [
+        "operations"
+      ],
+      "additionalProperties": false
+    },
+    "clear_session": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  }
 }
