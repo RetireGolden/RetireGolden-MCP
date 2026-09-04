@@ -196,7 +196,13 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'run_monte_carlo',
-    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). Defaults, all echoed back in the result: pathCount 200, seed 42, returnVolPct 12.`,
+    // The three defaults are INTERPOLATED from the constants the handler actually
+    // applies, so this prose cannot drift from the behaviour. It renders
+    // byte-identically to the literals it replaced, so the inventory hash in
+    // tests/protocol-baseline/baseline.json does not move; changing a constant
+    // moves this description and the baseline with it.
+    // @see adapter.MC_DEFAULT_PATH_COUNT
+    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). Defaults, all echoed back in the result: pathCount ${adapter.MC_DEFAULT_PATH_COUNT}, seed ${adapter.MC_DEFAULT_SEED}, returnVolPct ${adapter.MC_DEFAULT_RETURN_VOL_PCT}.`,
     inputShape: {
       pathCount: z.number().int().positive().max(5000).optional(),
       seed: z.number().int().optional(),
@@ -206,7 +212,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         .max(100)
         .optional()
         .describe(
-          'Annual return volatility for the lognormal market model, in PERCENT (12 = 12%). Default 12. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation.',
+          `Annual return volatility for the lognormal market model, in PERCENT (12 = 12%). Default ${adapter.MC_DEFAULT_RETURN_VOL_PCT}. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation.`,
         ),
     },
     handler: (session, args) =>
@@ -410,12 +416,40 @@ export function argsSchemaFor(entry: ToolEntry): z.ZodObject<z.ZodRawShape> {
 }
 
 /**
- * Validate gateway arguments against the tool's own zod shape (plus any
- * cross-field rule). Returns an error message, or null when valid.
+ * Validate arguments against the tool's own zod shape (plus any cross-field
+ * rule) AND return what the handler should actually be given.
+ *
+ * The parsed value matters, not just the verdict. `z.object(inputShape)` is
+ * non-strict, so parsing DROPS unknown and retired keys — that is how
+ * `conventions.lawSunsetFreezeYear` stops reaching session state in 0.10.0. The
+ * stdio transport gets this for free: the MCP SDK parses with the same compiled
+ * schema and hands the handler the result. The HTTP gateway called this function
+ * only for its verdict and then invoked the handler with the RAW body, so the
+ * two transports disagreed about what a handler sees — over HTTP a retired knob
+ * was cloned into `session.conventions` and round-tripped by `export_plan`.
+ * Both transports now run on parsed arguments.
+ *
+ * `plan` is `z.unknown()`, so a full plan document passes through untouched;
+ * only the declared object shapes are pruned.
+ */
+export function parseToolArgs(
+  entry: ToolEntry,
+  args: Record<string, unknown>,
+): { ok: true; args: Record<string, unknown> } | { ok: false; message: string } {
+  const parsed = argsSchemaFor(entry).safeParse(args)
+  if (!parsed.success) return { ok: false, message: zodIssues(parsed.error) }
+  if (entry.crossFieldValidate) {
+    const issue = entry.crossFieldValidate(parsed.data as Record<string, unknown>)
+    if (issue) return { ok: false, message: issue }
+  }
+  return { ok: true, args: parsed.data as Record<string, unknown> }
+}
+
+/**
+ * The verdict half of `parseToolArgs`, kept as the name every test and embedder
+ * already uses. Returns an error message, or null when valid.
  */
 export function validateToolArgs(entry: ToolEntry, args: Record<string, unknown>): string | null {
-  const parsed = argsSchemaFor(entry).safeParse(args)
-  if (!parsed.success) return zodIssues(parsed.error)
-  if (entry.crossFieldValidate) return entry.crossFieldValidate(args)
-  return null
+  const parsed = parseToolArgs(entry, args)
+  return parsed.ok ? null : parsed.message
 }

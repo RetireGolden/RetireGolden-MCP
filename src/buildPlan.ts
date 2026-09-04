@@ -34,10 +34,12 @@ export const HouseholdParamsSchema = z.object({
   // Deliberately no format constraint (no `.length(2)`) at the Zod layer: both
   // transports parse HouseholdParamsSchema before buildPlanFromParams runs, so any
   // schema-level rule here would reject mixed-mode `build_plan({ plan, household })`
-  // even though full plan JSON takes precedence and the household is ignored. Both
-  // presence AND 2-letter format are enforced on the typed path in
-  // buildPlanFromParams, and mirrored in the gateway crossFieldValidate when no
-  // `plan` is supplied.
+  // even though full plan JSON takes precedence and the household is ignored.
+  // Presence AND 2-letter format are enforced on the typed path by
+  // `validateTypedPathInputs`, which is the SINGLE definition both transports
+  // read: `buildPlanFromParams` calls it, and so does the gateway's
+  // `crossFieldValidate`. Do not re-add a mirrored copy here or in either caller.
+  // @see validateTypedPathInputs
   state: z
     .string()
     .optional()
@@ -93,6 +95,12 @@ export type WithdrawalOrdering = z.infer<typeof WithdrawalOrderingSchema>
  *
  * `ConventionKnobs` is now derived from this schema, and the tool input uses the
  * schema itself.
+ *
+ * NO object-level `.describe()` here, deliberately. `build_plan` wires this in as
+ * `ConventionKnobsSchema.optional().describe(...)`, and the OUTER description is
+ * the one that reaches `tools/list`; a description set here would be unpublished
+ * dead text, free to drift from what consumers actually receive. The per-field
+ * descriptions below ARE published; the object-level one lives in src/toolTable.ts.
  */
 export const ConventionKnobsSchema = z
   .object({
@@ -109,9 +117,6 @@ export const ConventionKnobsSchema = z
         'Withdrawal ordering override, applied on top of policy.ordering and of an imported document\'s own strategy. "traditional-first" has no exact engine equivalent and is modeled as sequential drain, with a caveat saying so.',
       ),
   })
-  .describe(
-    'Optional modeling-convention overrides applied on top of the built or imported plan.',
-  )
 
 /**
  * The session-stored convention knobs: the schema above, plus one deprecated
@@ -686,12 +691,17 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   if (hh.persons.length === 0) {
     return { ok: false, startYear, caveats, issues: ['household.persons must not be empty'] }
   }
-  if (policy.claim_ages.length < hh.persons.length) {
+  // EXACT length, not `<`. `claim_ages` is documented as "aligned to
+  // household.persons order", i.e. one age per person, and a `<` check let a
+  // longer array through and then silently dropped the surplus — the same
+  // positional-drift class of bug `batch_evaluate` fixes in 0.10.0. The two
+  // paths now agree: a policy that `batch_evaluate` rejects cannot build either.
+  if (policy.claim_ages.length !== hh.persons.length) {
     return {
       ok: false,
       startYear,
       caveats,
-      issues: ['policy.claim_ages must have an entry for each person'],
+      issues: ['policy.claim_ages must have exactly one entry per person'],
     }
   }
   // Wages are not modeled by the typed path — a retired household is the explicit
@@ -951,7 +961,12 @@ function applyConventions(
   } else if (conventions.withdrawalOrdering === 'traditional-first') {
     plan.strategies.withdrawalOrder = { mode: 'sequential' }
     mutated = true
-    caveats.push(TRADITIONAL_FIRST_CAVEAT)
+    // Guarded on presence, like the batch cell. On the typed path `ordering`
+    // is `conventions.withdrawalOrdering ?? policy.ordering`, so a build with
+    // this convention has ALREADY recorded the caveat before we get here, and
+    // an unguarded push repeated the identical sentence in every later
+    // projection, export, explain and batch row. @see TRADITIONAL_FIRST_CAVEAT
+    if (!caveats.includes(TRADITIONAL_FIRST_CAVEAT)) caveats.push(TRADITIONAL_FIRST_CAVEAT)
   }
   return mutated
 }

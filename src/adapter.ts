@@ -219,13 +219,15 @@ export function runProjection(
  *
  * All three are ECHOED in the response and stated in the `run_monte_carlo` tool
  * description, so a caller can tell a defaulted run from a configured one without
- * reading this file. Moving any of them moves the tool description and the
- * protocol baseline with it.
+ * reading this file. The description INTERPOLATES these constants rather than
+ * repeating the numbers, so the prose cannot drift from the behaviour; moving any
+ * of them therefore moves a `tools/list` description, and the protocol baseline
+ * must be regenerated in the same change.
  */
-const MC_DEFAULT_PATH_COUNT = 200
-const MC_DEFAULT_SEED = 42
+export const MC_DEFAULT_PATH_COUNT = 200
+export const MC_DEFAULT_SEED = 42
 /** Annual return volatility, in percent, for the lognormal market model. */
-const MC_DEFAULT_RETURN_VOL_PCT = 12
+export const MC_DEFAULT_RETURN_VOL_PCT = 12
 
 export function runMonteCarlo(
   session: SessionState,
@@ -298,8 +300,11 @@ export function batchEvaluate(
   // benefit first, and the old positional walk then silently handed each person
   // the other's claim age — a wrong answer with nothing on the wire admitting it.
   //
-  // Resolved once from the session plan (every row clones the same plan, so the
-  // income indices are stable across rows).
+  // The person -> Social Security income index MAP is built once here: every row
+  // clones the same session plan, so those indices are stable across rows. The
+  // per-row `resolveClaimAgeTargets` call below still runs for EVERY policy,
+  // because the length check and the resulting error text depend on that row's
+  // own `claim_ages`.
   const people = session.plan.household.people
   const ssIncomeIndexByPerson = new Map<string, number[]>()
   session.plan.incomes.forEach((inc, idx) => {
@@ -318,7 +323,10 @@ export function batchEvaluate(
    */
   function resolveClaimAgeTargets(policy: PolicyParams): number[] | string {
     if (policy.claim_ages.length !== people.length) {
-      return `claim_ages has ${policy.claim_ages.length} entries but the household has ${people.length} ${
+      const n = policy.claim_ages.length
+      return `claim_ages has ${n} ${n === 1 ? 'entry' : 'entries'} but the household has ${
+        people.length
+      } ${
         people.length === 1 ? 'person' : 'people'
       }; claim ages are aligned to household.persons order, one per person`
     }

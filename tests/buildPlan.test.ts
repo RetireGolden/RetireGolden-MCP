@@ -227,7 +227,38 @@ describe('buildPlanFromParams — validation guards', () => {
       policy: { ...mfjPolicy, claim_ages: [67] }, // only one
     })
     expect(res.ok).toBe(false)
-    expect(builtFailed(res).issues).toEqual(['policy.claim_ages must have an entry for each person'])
+    expect(builtFailed(res).issues).toEqual([
+      'policy.claim_ages must have exactly one entry per person',
+    ])
+  })
+
+  // The build path used to check `<`, so a LONGER array was accepted and the
+  // surplus silently dropped, while batch_evaluate rejected the same policy.
+  // Exact length, both paths. @see adapter.batchEvaluate
+  it('rejects claim_ages longer than persons', () => {
+    const res = buildPlanFromParams({
+      household: mfjHousehold, // two persons
+      policy: { ...mfjPolicy, claim_ages: [67, 70, 62] }, // one too many
+    })
+    expect(res.ok).toBe(false)
+    expect(builtFailed(res).issues).toEqual([
+      'policy.claim_ages must have exactly one entry per person',
+    ])
+  })
+
+  // validateTypedPathInputs runs BEFORE the horizon/persons/claim_ages guards, so
+  // an input that is invalid several ways reports the state issue first. Pinned
+  // because the error text is wire-visible and the precedence is deliberate, not
+  // incidental to statement order.
+  it('reports the state issue first when several typed-path rules fail at once', () => {
+    const res = buildPlanFromParams({
+      household: { ...mfjHousehold, state: 'California', horizon: 0 },
+      policy: { ...mfjPolicy, claim_ages: [67] },
+    })
+    expect(res.ok).toBe(false)
+    expect(builtFailed(res).issues).toEqual([
+      'household.state must be a 2-letter code (A–Z), got "California"',
+    ])
   })
 
   it('rejects a typed build with no household.state (WS1.3: state is required)', () => {

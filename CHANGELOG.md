@@ -56,14 +56,30 @@ wire themselves.
   conventions overlay and `batch_evaluate` each said the same thing differently.
   All three now emit "withdrawal ordering traditional-first has no exact engine
   equivalent; modeled as sequential drain (taxable before traditional), so the
-  ledger is approximate", and a batch row no longer repeats it when the session
-  already carries it.
+  ledger is approximate", and no site repeats it: a batch row does not re-add a
+  caveat the session already carries, and the conventions overlay does not re-add
+  the one the typed ordering just recorded (with a single wording, an unguarded
+  push would have printed the identical sentence twice for every typed build
+  using `conventions.withdrawalOrdering: "traditional-first"`).
 - **Both transports word a bad `build_plan` argument identically.** One exported
   `validateTypedPathInputs` now owns the plan-or-both rule, `household.state`
   presence and 2-letter format, and `assumptions.state` format. The HTTP gateway
   previously reported a MALFORMED state as "household.state is required" — telling
   a caller who supplied `"California"` that they had supplied nothing — and
   checked `assumptions.state` not at all.
+- **`build_plan` rejects a `claim_ages` array LONGER than `persons`.** The typed
+  path checked `claim_ages.length < persons.length` and silently discarded the
+  surplus, so the same policy that `batch_evaluate` now rejects could still
+  build. Both paths require exactly one age per person; the message is
+  "policy.claim_ages must have exactly one entry per person".
+- **The HTTP gateway hands handlers PARSED arguments.** It validated with the
+  tool's zod shape and then invoked the handler with the raw request body, so
+  unknown and retired keys survived on that transport only — an HTTP
+  `build_plan` could still push `conventions.lawSunsetFreezeYear` into session
+  state and round-trip it through `export_plan`, which the stdio path (where the
+  MCP SDK parses with the same compiled schema) never did. `parseToolArgs` now
+  returns the parsed value and the gateway uses it. `plan` is `z.unknown()`, so
+  full plan documents are untouched; only the declared object shapes are pruned.
 - **`solve_max_spending`'s `SPENDING_SOLVER_FAILED` arm carries `caveats`**, as
   `run_optimizer`'s failure arm already did. A solver that could not converge is
   exactly when the plan's approximations matter.
@@ -92,9 +108,11 @@ wire themselves.
   - **`run_monte_carlo_seeded`**, one leaf: `returnVolPct: 12` added. `successRate`,
     `requiredFloorSuccessRate` and all five percentiles are byte-identical.
   - **`explain_modeled_result`**, four leaves, all inside `limitations`, which goes
-    from four entries to three: the IRMAA line replaced, the law-sunset line
-    removed, the traditional-first line absent because the fixture plan is
-    `taxable-first`, and the `stateEffectiveTaxPct` line unchanged at a new index.
+    from four entries to **two** for this fixture: the IRMAA line replaced
+    (index 0), the law-sunset line removed, the traditional-first line absent
+    because the fixture plan is `taxable-first`, and the `stateEffectiveTaxPct`
+    line unchanged in content but moved from index 3 to index 1. A session that
+    IS running `traditional-first` gets three.
 - Byte-identical: `meta`; `resource` (both URIs and all four digests); and every
   other matrix step, including `batch_evaluate_fixture` (person-ordered, one
   person, one claim age — the claim-age fix cannot reach it), `build_plan_invalid`

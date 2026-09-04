@@ -182,8 +182,22 @@ describe('batchEvaluate — ordering modes', () => {
     expect(batch.ok).toBe(true)
     if (!batch.ok) return
     expect(batch.results[0]!.ok).toBe(false)
+    // Singular "entry", not "1 entries".
     expect(batch.results[0]!.error).toContain(
-      'claim_ages has 1 entries but the household has 2 people',
+      'claim_ages has 1 entry but the household has 2 people',
+    )
+  })
+
+  // The equality check must reject BOTH directions. Without this, reverting it to
+  // the old `<` test would silently re-enable extra ages and CI would stay green.
+  it('fails the row when claim_ages has MORE entries than the household has people', () => {
+    const session = mfjSession() // two people
+    const batch = adapter.batchEvaluate(session, [{ ...mfjPolicy, claim_ages: [67, 70, 62] }])
+    expect(batch.ok).toBe(true)
+    if (!batch.ok) return
+    expect(batch.results[0]!.ok).toBe(false)
+    expect(batch.results[0]!.error).toContain(
+      'claim_ages has 3 entries but the household has 2 people',
     )
   })
 
