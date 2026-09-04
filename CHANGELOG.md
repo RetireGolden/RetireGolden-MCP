@@ -12,8 +12,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 sections of the protocol baseline were regenerated deliberately and inspected
 leaf by leaf (see **Verified**); every engine-numeric leaf, and every literal in
 `tests/goldens.test.ts`, is byte-identical. The earlier subsections below —
-adapter hygiene, the HTTP research transport, tooling and tests — ship in the
-same release and moved nothing on the wire.
+adapter hygiene, the HTTP research transport, tooling and tests, and the docs /
+skill / tool-contract pass — ship in the same release and moved nothing on the
+wire themselves.
 
 ### Changed (wire-visible)
 
@@ -228,7 +229,10 @@ same null-on-failure contract — and it is not re-exported from the package roo
   `$schema` key is dropped — the file is a tool contract, not a JSON Schema
   document, and claiming otherwise was misleading. Every key the contract
   already had (`$id`, `title`, `description`, the tool list, the arm
-  groupings) is kept, and no tool name, description, or input shape changed.
+  groupings) is kept, and publishing the block changed no tool name,
+  description, or input shape — the two shapes that do move in this release
+  are the wire-visible section's, and the committed block is regenerated to
+  match them.
   The block is generated in zod's INPUT mode (`io: 'input'`), which is what
   makes each entry deep-equal to the `inputSchema` `tools/list` actually
   advertises; output mode closes the top-level object with
