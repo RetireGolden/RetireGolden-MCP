@@ -163,7 +163,12 @@ Same server block:
 Cursor has no skill format, so translate the skill into a **project rule**.
 Create `.cursor/rules/retiregolden.mdc`. Rather than duplicating all of
 `SKILL.md`, point the model at the tool surface and the non-negotiable units /
-framing rules:
+framing rules.
+
+> This rule is the **single full hand-translation of `SKILL.md`** in this
+> repository — the copy to keep in sync when the skill's units, defaults, or
+> framing change. Everywhere else (including the Codex `AGENTS.md` alternative
+> below) points here or at `SKILL.md` rather than restating it.
 
 ```md
 ---
@@ -194,15 +199,17 @@ Units & assumptions (easy to get wrong):
   `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them. `growth.*` is a
   NOMINAL return (not inflation-adjusted); real return ≈ growth − inflation.
 - Typed-path defaults follow the engine's real-world defaults: ~2.5% inflation,
-  SS COLA tracking inflation, +3% healthcare inflation, June-15 DOBs, sex
-  'average'. `household.state` is REQUIRED (2-letter code); a non-zero `wage` is a
-  hard error (retired household). Override any default via the `assumptions` block
-  (e.g. `inflationPct`, `ssColaPct`, `dobMonthDay`).
-- State income tax IS modeled, from `household.state` — every US jurisdiction has
-  a pack. `stateEffectiveTaxPct` is an OVERRIDE that applies only above 0; passing
-  `0` means "use the modeled pack", not "no state tax" (v0.5.0 corrected this —
-  before it, projections here were federal-only and disagreed with the web app).
-  `localIncomeTaxPct` is 0 unless set.
+  SS COLA tracking inflation, +3% healthcare inflation, 5.5% fallback return,
+  June-15 DOBs, sex 'average', `qualifiedRatio` 0.85. `household.state` is
+  REQUIRED (2-letter code); a non-zero `wage` is a hard error (retired
+  household). Override any default via the `assumptions` block (e.g.
+  `inflationPct`, `ssColaPct`, `dobMonthDay`).
+- State income tax IS modeled, from `household.state` — all 51 US jurisdictions
+  have a pack, and naming the state is what switches its rules on.
+  `stateEffectiveTaxPct` is an OVERRIDE that applies only above 0; passing `0`
+  means "use the modeled pack", not "no state tax". Nine states levy no income
+  tax (AK, FL, NH, NV, SD, TN, TX, WA, WY); everywhere else, expect state tax in
+  the answer. `localIncomeTaxPct` is 0 unless set.
 - `run_projection` returns summary-only by default; pass `detail: 'years'` when
   you need the per-year ledger (taxes, conversions, withdrawals, IRMAA by year).
 ```
@@ -268,43 +275,40 @@ Codex loads the full `SKILL.md` only when it decides to use the skill.
 
 #### Alternative: AGENTS.md snippet
 
-If you would rather keep instructions inline, put the same guidance in an
+If you would rather keep instructions inline, put a short pointer in an
 `AGENTS.md` at your repo root (Codex reads it automatically, walking from the
-project root down to the working directory):
+project root down to the working directory). Point at the skill for the detail
+and inline only the rules that are expensive to get wrong:
 
 ```md
 # RetireGolden calculator tools
 
 For US retirement-planning math (projections, Roth conversions, claiming ages,
-IRMAA, RMDs), use the `retiregolden` MCP tools.
+IRMAA, RMDs), use the `retiregolden` MCP tools. The full guidance — units
+table, worked calls, ingestion loop — is in the shipped skill at
+`node_modules/@retiregolden/mcp/skills/retiregolden/SKILL.md`; read it before
+the first call.
 
+Non-negotiables:
 - Educational / decision-support only — never present results as financial
   advice or prescribe securities trades.
 - Start with `build_plan` (typed `household` + `policy`, or full plan JSON),
-  then `run_projection` / `batch_evaluate`.
-- Use `batch_evaluate` (modest policy list) for combinatorial search instead of
-  many single projections.
-- Call `explain_modeled_result` when summarizing so caveats stay visible.
-- Money is nominal USD; ages in years. Honor returned `caveats`.
-
-Units & assumptions (easy to get wrong):
-- Rate units differ by field: `household.growth.*`, `household.heir_ordinary_rate`,
-  and `policy.conversion_bracket` are FRACTIONS (0.05 = 5%); everything under
-  `assumptions.*Pct` is a PERCENT (2.5 = 2.5%). Do not mix them. `growth.*` is a
-  NOMINAL return (not inflation-adjusted); real return ≈ growth − inflation.
-- Typed-path defaults follow the engine's real-world defaults: ~2.5% inflation,
-  SS COLA tracking inflation, +3% healthcare inflation, June-15 DOBs, sex
-  'average'. `household.state` is REQUIRED (2-letter code); a non-zero `wage` is a
-  hard error (retired household). Override any default via the `assumptions` block
-  (e.g. `inflationPct`, `ssColaPct`, `dobMonthDay`).
-- State income tax IS modeled, from `household.state` — every US jurisdiction has
-  a pack. `stateEffectiveTaxPct` is an OVERRIDE that applies only above 0; passing
-  `0` means "use the modeled pack", not "no state tax" (v0.5.0 corrected this —
-  before it, projections here were federal-only and disagreed with the web app).
-  `localIncomeTaxPct` is 0 unless set.
-- `run_projection` returns summary-only by default; pass `detail: 'years'` when
-  you need the per-year ledger.
+  then `run_projection` / `batch_evaluate`; use one `batch_evaluate` with a
+  modest policy list for combinatorial search, not many single projections.
+- Rate units differ by field: `household.growth.*`,
+  `household.heir_ordinary_rate`, and `policy.conversion_bracket` are FRACTIONS
+  (0.05 = 5%); everything under `assumptions.*Pct` is a PERCENT (2.5 = 2.5%).
+- `household.state` is REQUIRED (2-letter code) and is what switches on that
+  state's modeled income tax; `stateEffectiveTaxPct` overrides it only when
+  ABOVE 0, so `0` means "use the modeled pack", not "no state tax".
+- A non-zero `wage` is a hard error — the typed path is a retired household.
+- Call `explain_modeled_result` when summarizing, and surface the returned
+  `caveats`; never drop them.
 ```
+
+This snippet is deliberately shorter than the Cursor rule above, which is the
+one full hand-translation of `SKILL.md` here. Copy from that rule if you want
+inline instructions with the complete units and defaults detail.
 
 ---
 
