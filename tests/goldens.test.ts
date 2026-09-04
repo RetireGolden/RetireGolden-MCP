@@ -49,7 +49,8 @@
  * for these fixtures — the protocol baseline's engine-numeric steps were
  * byte-identical across both bumps).
  *
- * Generation recipe (scratchpad/gen-goldens.mjs on this branch):
+ * Generation recipe — `pnpm run goldens:print` (scripts/gen-goldens.mjs) prints
+ * these literals from a fresh build; it never edits this file:
  *   session = createSession()
  *   setPlanFromBuild(session, { household, policy, startYear: 2026, assumptions? })
  *   proj  = runProjection(session, { detail: 'years' })  // detail:'years' is REQUIRED
@@ -347,7 +348,7 @@ describe('golden numbers — MFJ fixture [legacy bench conventions via explicit 
 // NEW-DEFAULT goldens (WS1.3): the SAME two fixtures built with NO `assumptions`
 // block, so the engine's createEmptyPlan defaults flow through — ~2.5% inflation,
 // SS COLA tracking inflation, +3% healthcare inflation, 5.5% fallback return.
-// Fresh literals generated on this branch (scratchpad/gen-goldens.mjs). These
+// Fresh literals generated on this branch (scripts/gen-goldens.mjs). These
 // prove the flip actually moved the modeled outcome away from the growth-neutral
 // bench numbers: the single household now DEPLETES under real inflation, and
 // Medicare premiums grow year over year instead of staying flat.

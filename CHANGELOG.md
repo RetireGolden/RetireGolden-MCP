@@ -60,6 +60,36 @@ Internal adapter hygiene. **No change to any tool's wire output or to
   launcher still accepts it; that file is deleted separately. The stdio server
   and every MCP tool are untouched.
 
+### Changed (tooling and tests only)
+
+No tool's wire output moves; the protocol baseline and every golden literal are
+unmoved. One item below does reach the published package: `src/versions.ts`
+gains an exported `resolveInstalledPackageVersion`, so `dist/versions.js` ships
+it. It is a refactor of the resolver `getVersions()` already used — same lookup,
+same null-on-failure contract — and it is not re-exported from the package root.
+
+- The dual-era MCP client harness lives in `tests/helpers/eraHarness.ts`. The
+  checkout suite and the packed-artifact release gate share that one copy
+  instead of carrying near-identical clients.
+- `pnpm run goldens:print` (`scripts/gen-goldens.mjs`) is committed: the
+  generator that prints the golden numbers in `tests/goldens.test.ts`, so a
+  deliberate engine bump can be re-derived rather than hand-transcribed.
+- `resolveInstalledPackageVersion` is one walk-up resolver shared with
+  `scripts/capture-protocol-baseline.mjs`, not two copies.
+- `fast-uri` is raised through a `pnpm.overrides` entry (`^3.1.6`), which the
+  lockfile resolves to 3.1.7 — clearing 4 high Dependabot alerts. It is a
+  transitive dev-only dependency, reached through the v1 MCP SDK's `ajv`.
+- `dist/` is built once per vitest run by a `globalSetup`
+  (`tests/globalSetup.ts`), replacing the per-file `pnpm run build` spawns in
+  the dist-backed suites. Those spawns raced on CI, where `pnpm test` runs
+  before `pnpm run build`; `ensureBuild()` now only asserts freshness. The
+  freshness check is content-based (a digest of `src/**/*.ts`, the emitted
+  `dist/*.js`, both tsconfigs, and the package and TypeScript versions, cached
+  under `node_modules/.cache/`), falling back to mtimes, so a `dist/` left over
+  from — or swapped in by — another HEAD is rebuilt rather than trusted.
+- `tests/buildFreshness.test.ts` pins that stamp's behaviour and the
+  null-on-failure contract of `resolveInstalledPackageVersion`.
+
 ## 0.9.1
 
 **Updates the exact `@retiregolden/engine` dependency from 0.2.0 to 0.3.0, and

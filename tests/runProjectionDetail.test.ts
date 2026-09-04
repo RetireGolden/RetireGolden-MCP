@@ -4,16 +4,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { createSession } from '../src/session.js'
 import * as adapter from '../src/adapter.js'
-import { mfjHousehold, mfjPolicy } from './fixtures.js'
-
-function session() {
-  const s = createSession(2026)
-  const built = adapter.setPlanFromBuild(s, { household: mfjHousehold, policy: mfjPolicy })
-  expect(built.ok).toBe(true)
-  return s
-}
+import { mfjSession as session } from './helpers/session.js'
 
 describe('run_projection detail option', () => {
   it("default response has no years array", () => {

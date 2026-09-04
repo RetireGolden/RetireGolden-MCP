@@ -7,15 +7,12 @@
  * casually update away.
  */
 
-import { execFile as execFileCallback } from 'node:child_process'
-import { readdir, readFile, stat } from 'node:fs/promises'
-import { promisify } from 'node:util'
+import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, beforeAll, it } from 'vitest'
 import { singleHousehold, singlePolicy } from './fixtures.js'
+import { PACKAGE_ROOT as packageRoot, ensureBuild } from './helpers/build.js'
 
-const execFile = promisify(execFileCallback)
-const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 const baselinePath = fileURLToPath(new URL('./protocol-baseline/baseline.json', import.meta.url))
 const captureModuleUrl = new URL('../scripts/capture-protocol-baseline.mjs', import.meta.url).href
 
@@ -62,55 +59,6 @@ interface CaptureLibrary {
     fixtures: { singleHousehold: typeof singleHousehold; singlePolicy: typeof singlePolicy }
   }): Promise<ProtocolBaseline>
   optimizerTimedOut(baseline: ProtocolBaseline): boolean
-}
-
-async function sourceFiles(directory: string): Promise<string[]> {
-  const entries = await readdir(directory, { withFileTypes: true })
-  const nested = await Promise.all(
-    entries.map(async (entry) => {
-      const fullPath = `${directory}/${entry.name}`
-      if (entry.isDirectory()) return sourceFiles(fullPath)
-      return entry.isFile() ? [fullPath] : []
-    }),
-  )
-  return nested.flat()
-}
-
-async function buildIsCurrent(): Promise<boolean> {
-  // The capture imports several dist modules and the spawned CLI loads the
-  // rest of the output graph, so the check is against the EXPECTED output
-  // set: every src/*.ts must have its emitted dist/*.js present and newer
-  // than every source. Scanning only surviving dist files would bless a
-  // partial build whose remaining files happen to be fresh.
-  const sources = (await sourceFiles(`${packageRoot}/src`)).filter((file) => file.endsWith('.ts'))
-  const expectedOutputs = sources.map((file) =>
-    file.replace(`${packageRoot}/src`, `${packageRoot}/dist`).replace(/\.ts$/, '.js'),
-  )
-  let sourceStats
-  let outputStats
-  try {
-    ;[sourceStats, outputStats] = await Promise.all([
-      Promise.all(sources.map((source) => stat(source))),
-      Promise.all(expectedOutputs.map((file) => stat(file))),
-    ])
-  } catch {
-    return false
-  }
-  const newestSource = Math.max(...sourceStats.map((s) => s.mtimeMs))
-  const oldestOutput = Math.min(...outputStats.map((s) => s.mtimeMs))
-  return newestSource < oldestOutput
-}
-
-async function ensureBuild(): Promise<void> {
-  if (await buildIsCurrent()) return
-  // Windows Node refuses to spawn .cmd shims without a shell (EINVAL since the
-  // CVE-2024-27980 hardening), so the win32 leg must go through one.
-  await execFile('pnpm', ['run', 'build'], {
-    cwd: packageRoot,
-    windowsHide: true,
-    maxBuffer: 10 * 1024 * 1024,
-    shell: process.platform === 'win32',
-  })
 }
 
 async function readBaseline(): Promise<ProtocolBaseline> {

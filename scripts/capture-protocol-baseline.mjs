@@ -7,9 +7,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import os from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -36,7 +34,6 @@ try {
   // skip when userInfo is unavailable
 }
 
-const require = createRequire(import.meta.url)
 const FIXED_REFUSAL = {
   ok: false,
   error: 'AUTHORIZATION_REFUSED',
@@ -619,32 +616,26 @@ async function defaultFixtures() {
   return import(new URL('../tests/fixtures.ts', import.meta.url))
 }
 
-function resolvedPackageVersion(packageName, entrySubpath) {
-  // Not every package exports ./package.json (the v1 SDK does not); fall back
-  // to resolving a real entry point and walking up to the owning manifest —
-  // the same recovery src/versions.ts uses for the engine.
-  try {
-    const manifest = require(`${packageName}/package.json`)
-    if (typeof manifest?.version === 'string') return manifest.version
-  } catch {
-    // fall through to the walk-up below
-  }
-  let dir = dirname(require.resolve(entrySubpath ?? packageName))
-  for (let i = 0; i < 8; i++) {
-    const candidate = resolve(dir, 'package.json')
-    try {
-      const manifest = JSON.parse(readFileSync(candidate, 'utf8'))
-      if (manifest.name === packageName && typeof manifest.version === 'string') {
-        return manifest.version
-      }
-    } catch {
-      // keep walking up
+/**
+ * The walk-up resolver lives in src/versions.ts (the engine-version fallback
+ * getVersions() needs); this script used to carry a second copy. It returns
+ * null where the adapter degrades to a null version field, so the strictness
+ * this capture needs — an unresolvable version is a broken capture, not a
+ * missing field — is applied here rather than duplicating the search.
+ */
+async function resolvedPackageVersionFactory(root) {
+  const { resolveInstalledPackageVersion } = await import(
+    pathToFileURL(resolve(root, 'dist/versions.js')).href
+  )
+  return (packageName, entrySubpath) => {
+    const version = resolveInstalledPackageVersion(packageName, entrySubpath)
+    if (typeof version !== 'string') {
+      throw new Error(
+        `Could not resolve ${packageName} package version from its installed package.json`,
+      )
     }
-    const parent = dirname(dir)
-    if (parent === dir) break
-    dir = parent
+    return version
   }
-  throw new Error(`Could not resolve ${packageName} package version from its installed package.json`)
 }
 
 /** Optimizer wall-clock budget exhaustion is CI contention, not wire drift. */
@@ -664,6 +655,7 @@ export function optimizerTimedOut(baselineLike) {
 export async function captureProtocolBaseline({ root = PACKAGE_ROOT, fixtures } = {}) {
   const activeFixtures = fixtures ?? (await defaultFixtures())
   const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
+  const resolvedPackageVersion = await resolvedPackageVersionFactory(root)
   const sdkPackage = resolvedPackageVersion(
     '@modelcontextprotocol/sdk',
     '@modelcontextprotocol/sdk/client/index.js',
