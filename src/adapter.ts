@@ -79,12 +79,17 @@ const STATE_TAX_CAVEAT_MARKER = 'stateEffectiveTaxPct'
  * re-derives it from `stateTaxCaveat` afterwards rather than deciding here: one
  * function owns what is true of a (state, override) pair, and the build path and
  * the update path cannot drift apart.
+ *
+ * ONE entry, deliberately. There were three: `recentAnnualMagi` and
+ * `historicalAnnualMagiByYear` each matched the prefixes `IRMAA-lookback:` and
+ * `convention irmaaLookbackMagis=`, and NOTHING emits either — `applyConventions`
+ * pushes no caveat for `irmaaLookbackMagis`, and tests/buildPlan.test.ts and
+ * tests/session.test.ts pin that absence. Two dead matchers reading as live rules
+ * are worse than none: they imply a caveat exists to supersede. Setting either
+ * MAGI field still clears the seeded `irmaaLookbackMagis` convention — that is a
+ * separate step at the end of `updatePlan`, and is unaffected.
  */
 const SUPERSEDED_CAVEATS: Record<string, (caveat: string) => boolean> = {
-  recentAnnualMagi: (c) =>
-    c.startsWith('IRMAA-lookback:') || c.startsWith('convention irmaaLookbackMagis='),
-  historicalAnnualMagiByYear: (c) =>
-    c.startsWith('IRMAA-lookback:') || c.startsWith('convention irmaaLookbackMagis='),
   stateEffectiveTaxPct: (c) => c.includes(STATE_TAX_CAVEAT_MARKER),
 }
 
@@ -491,6 +496,10 @@ export function solveMaxSpending(session: SessionState) {
       ok: false as const,
       error: 'SPENDING_SOLVER_FAILED',
       message: e instanceof Error ? e.message : String(e),
+      // Same as runOptimizer's failure arm: a solver that could not converge is
+      // exactly when the caveats explaining the plan's approximations matter, and
+      // omitting them here made the two failure shapes gratuitously different.
+      caveats: snapshotCaveats(session),
     }
   }
 }
