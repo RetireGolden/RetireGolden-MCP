@@ -12,8 +12,15 @@ command exits with an explanation instead of listening.
 It exists to measure one thing — whether the same adapter behind a different
 transport returns the same numbers as stdio for a fixture matrix. It is not a
 product API, it is not exported from the package index, and it has no subpath in
-the `exports` map: the only ways in are `src/http/gateway.ts` directly and this
-CLI subcommand.
+the `exports` map. From an installed package the only way in is this CLI
+subcommand; working in a clone of the repository you can also call
+`startHttpGateway()` in `src/http/gateway.ts` directly, or run the repo-root
+launcher `bin/retiregolden-mcp.js` (which still accepts `azure` as an alias for
+`http`, and is slated for deletion).
+
+Paths below that begin `src/` or `tests/` are repository paths. Neither
+directory is in the published tarball, so they are references for people reading
+this file in the repo, not files you can open from `node_modules`.
 
 ## Exposed surface (partial)
 

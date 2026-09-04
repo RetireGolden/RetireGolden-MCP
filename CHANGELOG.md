@@ -50,9 +50,15 @@ Internal adapter hygiene. **No change to any tool's wire output or to
 - A tool handler that throws now answers `500 { error: 'TOOL_FAILED' }` and
   logs the exception to stderr, instead of echoing the exception text on the
   wire.
+- A failed bind (`EADDRINUSE` on the default port, say) now rejects the
+  `startHttpGateway()` promise and releases the sweep timer, instead of raising
+  an unhandled `'error'` event that takes down the process without telling the
+  caller the gateway is not listening.
 - `GET /health` reports `transport: 'http-research'` (was `'http-stub'`), and
-  the undocumented `azure` CLI alias for `http` is gone. The stdio server and
-  every MCP tool are untouched.
+  the undocumented `azure` alias for `http` is gone from `src/cli.ts` — which is
+  the published `retiregolden-mcp` bin. The repo-root `bin/retiregolden-mcp.js`
+  launcher still accepts it; that file is deleted separately. The stdio server
+  and every MCP tool are untouched.
 
 ## 0.9.1
 

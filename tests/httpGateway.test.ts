@@ -217,11 +217,15 @@ describe('HTTP gateway integration', () => {
       const text = await r.text()
       expect(JSON.parse(text)).toEqual({ error: 'TOOL_FAILED' })
       expect(text).not.toContain(secret)
-      expect(
-        stderr.mock.calls.some((args) =>
-          args.some((a) => a instanceof Error && a.message === secret),
-        ),
-      ).toBe(true)
+      // Pin the operator-facing call exactly: a labelled line plus the thrown
+      // error itself. A looser check would pass if a future change dropped the
+      // label, logged a stringified stand-in, or moved the detail elsewhere.
+      expect(stderr).toHaveBeenCalledTimes(1)
+      expect(stderr).toHaveBeenCalledWith(
+        'RetireGolden HTTP gateway: tool handler threw',
+        expect.objectContaining({ message: secret }),
+      )
+      expect(stderr.mock.calls[0][1]).toBeInstanceOf(Error)
     } finally {
       handler.mockRestore()
       stderr.mockRestore()

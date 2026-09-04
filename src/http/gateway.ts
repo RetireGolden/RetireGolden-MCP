@@ -250,8 +250,21 @@ export async function startHttpGateway(
     sessions.clear()
   })
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
+    // A bind failure (EADDRINUSE on the default port is the likely one) arrives
+    // as an 'error' event, not a throw. With no listener that is an uncaught
+    // exception, and the caller never learns the gateway is not listening. Fail
+    // the start instead, and release what the start already allocated — the
+    // sweep timer is armed above and the 'close' handler that would clear it
+    // never runs for a server that never listened.
+    const onListenError = (err: Error): void => {
+      clearInterval(sweepTimer)
+      sessions.clear()
+      reject(err)
+    }
+    server.once('error', onListenError)
     server.listen(port, host, () => {
+      server.removeListener('error', onListenError)
       const addr = server.address()
       const boundPort = addr && typeof addr === 'object' ? addr.port : port
       console.error(
