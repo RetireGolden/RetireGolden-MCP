@@ -10,7 +10,7 @@
 
 import { z } from 'zod'
 import * as adapter from './adapter.js'
-import { clearSession, type SessionState } from './session.js'
+import { clearSession, DEFAULT_START_YEAR, type SessionState } from './session.js'
 import {
   HouseholdParamsSchema,
   PolicyParamsSchema,
@@ -304,13 +304,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'export_plan',
-    // NOTE: this description spells "non-2026" as a literal, not as an
-    // interpolation of session.DEFAULT_START_YEAR. Deliberate: every
-    // description here is hashed into tests/protocol-baseline/baseline.json's
-    // inventory, so interpolating it is itself a wire-visible change. If
-    // DEFAULT_START_YEAR ever moves, this string moves in the SAME change and
-    // the baseline is regenerated deliberately. @see session.DEFAULT_START_YEAR
-    description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear, conventions and caveats, and the identity of the build that emitted it: schemaVersion (the engine's plan-schema version), engineVersion and mcpVersion (null if not resolvable). Round-trips via build_plan({ plan, startYear, conventions, schemaVersion, engineVersion }) — pass the exported startYear back or a non-2026 session's projection will diverge, and pass the version siblings back so a different build can warn on skew (a differing engineVersion, or a schemaVersion that disagrees with the document, is a caveat only — never a refusal). A document written against an OLDER plan schema is migrated forward by the engine before import and accepted with a plan-schema migration caveat naming both versions (re-export it from this build to persist the upgrade). Only a document the engine cannot migrate — one newer than this build, or one that fails validation after migration — is rejected with an explanatory message rather than silently mis-read. Returns a clone; mutating it does not affect the live session.`,
+    description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear, conventions and caveats, and the identity of the build that emitted it: schemaVersion (the engine's plan-schema version), engineVersion and mcpVersion (null if not resolvable). Round-trips via build_plan({ plan, startYear, conventions, schemaVersion, engineVersion }) — pass the exported startYear back or a non-${DEFAULT_START_YEAR} session's projection will diverge, and pass the version siblings back so a different build can warn on skew (a differing engineVersion, or a schemaVersion that disagrees with the document, is a caveat only — never a refusal). A document written against an OLDER plan schema is migrated forward by the engine before import and accepted with a plan-schema migration caveat naming both versions (re-export it from this build to persist the upgrade). Only a document the engine cannot migrate — one newer than this build, or one that fails validation after migration — is rejected with an explanatory message rather than silently mis-read. Returns a clone; mutating it does not affect the live session.`,
     inputShape: {},
     handler: (session) => adapter.exportPlan(session),
     httpExposed: false,

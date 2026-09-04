@@ -48,13 +48,13 @@ export interface SessionState {
  * a freshly built plan, which is pinned rather than `new Date()` so a build is
  * reproducible.
  *
- * CHANGING THIS VALUE IS A WIRE CHANGE and not a one-line edit. Exactly one
- * `tools/list` description names 2026 in prose — `export_plan`'s "a non-2026
- * session's projection will diverge" in src/toolTable.ts — and that description
- * is hashed into tests/protocol-baseline/baseline.json's inventory. It is a
- * plain string, not an interpolation, so moving the year means editing it in
- * the same change and regenerating the baseline deliberately. Interpolating it
- * would itself be a wire-visible change and belongs in its own commit.
+ * CHANGING THIS VALUE IS A WIRE CHANGE. Exactly one `tools/list` description
+ * names the year in prose — `export_plan`'s "a non-2026 session's projection
+ * will diverge" in src/toolTable.ts — and that description is hashed into
+ * tests/protocol-baseline/baseline.json's inventory. As of 0.10.0 it
+ * INTERPOLATES this constant rather than spelling the year out, so the two
+ * cannot disagree; moving the year still moves that description, and the
+ * baseline must be regenerated deliberately in the same change.
  *
  * It also stamps `createdAtIso`/`updatedAtIso` on every newly built plan, via
  * `buildTypedPlan`'s frozen clock — INCLUDING plans built with an explicit
