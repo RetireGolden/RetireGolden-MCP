@@ -209,19 +209,33 @@ export function runProjection(
   }
 }
 
+/**
+ * Monte Carlo defaults, named rather than spelled inline three times.
+ *
+ * All three are ECHOED in the response and stated in the `run_monte_carlo` tool
+ * description, so a caller can tell a defaulted run from a configured one without
+ * reading this file. Moving any of them moves the tool description and the
+ * protocol baseline with it.
+ */
+const MC_DEFAULT_PATH_COUNT = 200
+const MC_DEFAULT_SEED = 42
+/** Annual return volatility, in percent, for the lognormal market model. */
+const MC_DEFAULT_RETURN_VOL_PCT = 12
+
 export function runMonteCarlo(
   session: SessionState,
-  opts: { pathCount?: number; seed?: number } = {},
+  opts: { pathCount?: number; seed?: number; returnVolPct?: number } = {},
 ) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
-  const pathCount = opts.pathCount ?? 200
-  const seed = opts.seed ?? 42
+  const pathCount = opts.pathCount ?? MC_DEFAULT_PATH_COUNT
+  const seed = opts.seed ?? MC_DEFAULT_SEED
+  const returnVolPct = opts.returnVolPct ?? MC_DEFAULT_RETURN_VOL_PCT
   const model = createLognormalModel({
     type: 'lognormal',
     inflationMeanPct: session.plan.assumptions.inflationPct,
-    returnVolPct: 12,
+    returnVolPct,
   })
   const paths = runMonteCarloPaths(session.plan, {
     startYear: session.startYear,
@@ -238,6 +252,10 @@ export function runMonteCarlo(
     ok: true as const,
     pathCount,
     seed,
+    // Echoed like pathCount and seed: the volatility is a real input to the
+    // distribution below, and a response that reported percentiles without
+    // saying which volatility produced them is not reproducible.
+    returnVolPct,
     successRate: agg.successRate,
     requiredFloorSuccessRate: agg.requiredFloorSuccessRate,
     percentiles: {

@@ -211,13 +211,24 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'run_monte_carlo',
-    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it).`,
+    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). Defaults, all echoed back in the result: pathCount 200, seed 42, returnVolPct 12.`,
     inputShape: {
       pathCount: z.number().int().positive().max(5000).optional(),
       seed: z.number().int().optional(),
+      returnVolPct: z
+        .number()
+        .min(0)
+        .max(100)
+        .optional()
+        .describe(
+          'Annual return volatility for the lognormal market model, in PERCENT (12 = 12%). Default 12. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation.',
+        ),
     },
     handler: (session, args) =>
-      adapter.runMonteCarlo(session, args as { pathCount?: number; seed?: number }),
+      adapter.runMonteCarlo(
+        session,
+        args as { pathCount?: number; seed?: number; returnVolPct?: number },
+      ),
     httpExposed: false,
     dataScope: 'session',
     arms: [],
