@@ -60,6 +60,30 @@ Internal adapter hygiene. **No change to any tool's wire output or to
   launcher still accepts it; that file is deleted separately. The stdio server
   and every MCP tool are untouched.
 
+### Changed (tooling and tests only)
+
+Nothing below reaches the published runtime; the protocol baseline and every
+golden literal are unmoved.
+
+- The dual-era MCP client harness lives in `tests/helpers/eraHarness.ts`. The
+  checkout suite and the packed-artifact release gate share that one copy
+  instead of carrying near-identical clients.
+- `pnpm run goldens:print` (`scripts/gen-goldens.mjs`) is committed: the
+  generator that prints the golden numbers in `tests/goldens.test.ts`, so a
+  deliberate engine bump can be re-derived rather than hand-transcribed.
+- `resolveInstalledPackageVersion` is one walk-up resolver shared with
+  `scripts/capture-protocol-baseline.mjs`, not two copies.
+- `fast-uri` is raised to 3.1.7 through `pnpm.overrides` (4 high Dependabot
+  alerts). It is a transitive dev-only dependency, reached through the v1 MCP
+  SDK's `ajv`.
+- `dist/` is built once per vitest run by a `globalSetup`
+  (`tests/globalSetup.ts`), replacing the per-file `pnpm run build` spawns in
+  the dist-backed suites. Those spawns raced on CI, where `pnpm test` runs
+  before `pnpm run build`; `ensureBuild()` now only asserts freshness. The
+  freshness check is content-based (a digest of `src/**/*.ts` plus the package
+  version, cached under `node_modules/.cache/`), falling back to mtimes, so a
+  `dist/` left over from another HEAD is rebuilt rather than trusted.
+
 ## 0.9.1
 
 **Updates the exact `@retiregolden/engine` dependency from 0.2.0 to 0.3.0, and
