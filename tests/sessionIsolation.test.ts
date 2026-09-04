@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { createSession, type SessionState } from '../src/session.js'
+import { createSession, type ConventionKnobs, type SessionState } from '../src/session.js'
 import * as adapter from '../src/adapter.js'
 import { getTool } from '../src/toolTable.js'
 import { mfjHousehold, mfjPolicy, singleHousehold, singlePolicy } from './fixtures.js'
@@ -28,12 +28,38 @@ function seededSession(): SessionState {
   const built = adapter.setPlanFromBuild(session, {
     household: singleHousehold,
     policy: { ...singlePolicy, ordering: 'traditional-first' },
-    conventions: { lawSunsetFreezeYear: 2030 },
+    // `irmaaLookbackMagis` is the ONLY reference-typed knob in ConventionKnobs,
+    // so it is the only thing that can tell a deep copy from a shallow one.
+    // Seeded here so every conventions case below exercises it.
+    conventions: { lawSunsetFreezeYear: 2030, irmaaLookbackMagis: [111000, 222000] },
   })
   expect(built.ok).toBe(true)
   expect(session.caveats.length).toBeGreaterThan(0)
   expect(session.conventions.lawSunsetFreezeYear).toBe(2030)
+  expect(session.conventions.irmaaLookbackMagis).toEqual([111000, 222000])
   return session
+}
+
+/**
+ * Assert a returned conventions object is a DEEP copy.
+ *
+ * The scalar check alone is not enough: `{ ...session.conventions }` passes
+ * both `not.toBe` and a top-level reassignment, so a suite that only mutates
+ * `lawSunsetFreezeYear` would stay green if `snapshotConventions` were ever
+ * "tidied up" from `structuredClone` to a spread — while consumers quietly
+ * regained the ability to rewrite the session's MAGI tuple. Mutating the nested
+ * tuple is what actually pins the deep clone.
+ */
+function expectConventionsIsolated(session: SessionState, returned: ConventionKnobs): void {
+  expect(returned).not.toBe(session.conventions)
+  expect(returned).toEqual(session.conventions)
+
+  returned.lawSunsetFreezeYear = 1999
+  expect(session.conventions.lawSunsetFreezeYear).toBe(2030)
+
+  expect(returned.irmaaLookbackMagis).not.toBe(session.conventions.irmaaLookbackMagis)
+  returned.irmaaLookbackMagis![0] = -1
+  expect(session.conventions.irmaaLookbackMagis).toEqual([111000, 222000])
 }
 
 /** Push onto a returned caveats array and assert the session's own is untouched. */
@@ -163,13 +189,10 @@ describe('batchEvaluate rows return copies of session.caveats', () => {
   })
 })
 
-describe('handlers return copies of session.conventions', () => {
+describe('handlers return DEEP copies of session.conventions', () => {
   it('explainModeledResult', () => {
     const session = seededSession()
-    const res = adapter.explainModeledResult(session)
-    expect(res.conventions).not.toBe(session.conventions)
-    res.conventions.lawSunsetFreezeYear = 1999
-    expect(session.conventions.lawSunsetFreezeYear).toBe(2030)
+    expectConventionsIsolated(session, adapter.explainModeledResult(session).conventions)
   })
 
   it('exportPlan', () => {
@@ -177,19 +200,89 @@ describe('handlers return copies of session.conventions', () => {
     const res = adapter.exportPlan(session)
     expect(res.ok).toBe(true)
     if (!res.ok) return
-    expect(res.conventions).not.toBe(session.conventions)
-    res.conventions.lawSunsetFreezeYear = 1999
-    expect(session.conventions.lawSunsetFreezeYear).toBe(2030)
+    expectConventionsIsolated(session, res.conventions)
   })
 
   it('get_session tool handler', () => {
     const session = seededSession()
     const entry = getTool('get_session')!
-    const res = entry.handler(session, {}) as {
-      conventions: { lawSunsetFreezeYear?: number | null }
+    const res = entry.handler(session, {}) as { conventions: ConventionKnobs }
+    expectConventionsIsolated(session, res.conventions)
+  })
+
+  it('build_plan does not keep the caller conventions object it was handed', () => {
+    // The mirror of the handler cases: isolation has to hold on the way IN too,
+    // or a caller that holds onto its own tuple can rewrite live session
+    // conventions after the build and change every later modeled result.
+    const session = createSession(2026)
+    const callerConventions: ConventionKnobs = {
+      lawSunsetFreezeYear: 2030,
+      irmaaLookbackMagis: [111000, 222000],
     }
-    expect(res.conventions).not.toBe(session.conventions)
-    res.conventions.lawSunsetFreezeYear = 1999
+    expect(
+      adapter.setPlanFromBuild(session, {
+        household: singleHousehold,
+        policy: singlePolicy,
+        conventions: callerConventions,
+      }).ok,
+    ).toBe(true)
+
+    expect(session.conventions).not.toBe(callerConventions)
+    expect(session.conventions.irmaaLookbackMagis).not.toBe(callerConventions.irmaaLookbackMagis)
+
+    callerConventions.lawSunsetFreezeYear = 1999
+    callerConventions.irmaaLookbackMagis![0] = -1
     expect(session.conventions.lawSunsetFreezeYear).toBe(2030)
+    expect(session.conventions.irmaaLookbackMagis).toEqual([111000, 222000])
+  })
+})
+
+/**
+ * The two remaining session-owned objects: the live plan's `assumptions`
+ * sub-object, and the projection summary cached on `session.lastProjection`.
+ * Neither is a caveat or a convention, so nothing above would catch them.
+ */
+describe('handlers return copies of the plan assumptions and the cached summary', () => {
+  it('runProjection does not hand out the summary it cached on the session', () => {
+    const session = seededSession()
+    const res = adapter.runProjection(session)
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+
+    expect(session.lastProjection).not.toBeNull()
+    const cached = session.lastProjection!.summary.endingAfterTaxEstate
+    expect(res.summary).not.toBe(session.lastProjection!.summary)
+
+    res.summary.endingAfterTaxEstate = -12345
+    expect(session.lastProjection!.summary.endingAfterTaxEstate).toBe(cached)
+    // And the next explain must report the session's number, not the caller's.
+    expect(
+      (adapter.explainModeledResult(session).lastProjectionSummary as { endingAfterTaxEstate: number })
+        .endingAfterTaxEstate,
+    ).toBe(cached)
+  })
+
+  it('explainModeledResult does not hand out the live plan assumptions', () => {
+    const session = seededSession()
+    const before = session.plan!.assumptions.inflationPct
+    const res = adapter.explainModeledResult(session)
+
+    expect(res.assumptions).not.toBe(session.plan!.assumptions)
+    res.assumptions!.inflationPct = 99
+    // Mutating the response must not steer the next projection behind
+    // update_plan's back — that bypass is exactly what update_plan's staleness
+    // caveat exists to make visible.
+    expect(session.plan!.assumptions.inflationPct).toBe(before)
+  })
+
+  it('explainModeledResult does not hand out the cached summary', () => {
+    const session = seededSession()
+    expect(adapter.runProjection(session).ok).toBe(true)
+    const res = adapter.explainModeledResult(session)
+
+    expect(res.lastProjectionSummary).not.toBe(session.lastProjection!.summary)
+    const cached = session.lastProjection!.summary.endingAfterTaxEstate
+    ;(res.lastProjectionSummary as { endingAfterTaxEstate: number }).endingAfterTaxEstate = -1
+    expect(session.lastProjection!.summary.endingAfterTaxEstate).toBe(cached)
   })
 })

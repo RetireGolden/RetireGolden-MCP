@@ -26,6 +26,15 @@ Internal adapter hygiene. **No change to any tool's wire output or to
   `get_session` now do too. A consumer that relied on mutating a returned
   `caveats` array to edit the live session no longer can — that was never the
   documented contract.
+- The same now holds for the other two session-owned objects that reached a
+  response by reference: `run_projection`'s `summary` (which is also cached on
+  the session) and `explain_modeled_result`'s `assumptions` (the live plan's)
+  and `lastProjectionSummary`. `build_plan` also deep-copies the `conventions`
+  it is given, so a caller that keeps its own `irmaaLookbackMagis` tuple can no
+  longer mutate live session conventions through it.
+- `adapter.snapshotCaveats(session)` and `adapter.snapshotConventions(session)`
+  are exported (via the `adapter` namespace) for embedders composing their own
+  handlers on the same isolation terms.
 - `SessionState.lastProjection` is typed as
   `{ result: ProjectionResult; summary: ProjectionSummary } | null` instead of
   `unknown | null`.

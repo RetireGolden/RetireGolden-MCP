@@ -261,13 +261,27 @@ export type BuildPlanResult =
  * words, because they grew at three different sites: the typed build path, the
  * conventions overlay, and the adapter's batch cell.
  *
- * DO NOT UNIFY THE TEXT HERE. These strings are FROZEN by
- * tests/protocol-baseline/baseline.json: `TRADITIONAL_FIRST_BATCH_CAVEAT` is
- * quoted verbatim inside the recorded `batch_evaluate` payload, and the other
- * two reach a response the same way. Rewording any of them is a wire change and
- * needs a deliberate baseline regeneration, not a tidy-up. Naming them is the
- * part that is safe: the three sites now point at one definition, so the next
- * reader can see they are duplicates rather than rediscovering it.
+ * DO NOT UNIFY THE TEXT HERE — but be accurate about what pins them.
+ *
+ * They are NOT in tests/protocol-baseline/baseline.json. The baseline's
+ * `batch_evaluate_fixture` step runs `singlePolicy`, whose `ordering` is
+ * `taxable-first`, so the only caveat it records is the state-tax one; none of
+ * these three strings appears anywhere in that file. What pins them is the unit
+ * suite, by substring:
+ *
+ * - `TRADITIONAL_FIRST_TYPED_CAVEAT` — `'ordering=traditional-first'` in
+ *   tests/buildPlan.test.ts and tests/adapter.extended.test.ts.
+ * - `TRADITIONAL_FIRST_CONVENTION_CAVEAT` — `'convention
+ *   withdrawalOrdering=traditional-first'` in tests/buildPlan.test.ts.
+ * - `TRADITIONAL_FIRST_BATCH_CAVEAT` — `'traditional-first approximate'` in
+ *   tests/adapter.extended.test.ts.
+ *
+ * They are still WIRE-VISIBLE: each reaches a tool response whenever a caller
+ * actually asks for traditional-first ordering. So rewording one is a change a
+ * client can see, and belongs in a deliberate commit that says so — it is just
+ * not the protocol baseline that would catch it. Naming them is the part that
+ * is safe: the three sites now point at one definition, so the next reader can
+ * see they are duplicates rather than rediscovering it.
  */
 export const TRADITIONAL_FIRST_TYPED_CAVEAT =
   'ordering=traditional-first has no full engine equivalent (sequential drains taxable before traditional); ledger is approximate'
@@ -560,8 +574,16 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   // `undefined` filing silently written into the plan.
   //
   // The same reasoning covers `FILING[hh.filing]` being unknown and the
-  // `unknown ordering` fallthrough in buildTypedPlan below. Tests assert these
-  // exact messages. Do not "clean them up" as dead code.
+  // `unknown ordering` fallthrough in buildTypedPlan below.
+  //
+  // Test coverage is UNEVEN, so do not read "tested" into all four: the two
+  // guards immediately below have their exact messages asserted in
+  // tests/buildPlan.test.ts ('horizon must be >= 1',
+  // 'household.persons must not be empty'). The `unknown filing` / `unknown
+  // ordering` fallthroughs have NO test — they are unreachable from the zod
+  // enums, so a test would have to construct a `BuildPlanInput` by hand. They
+  // are kept for the programmatic caller described above, not because CI would
+  // catch their removal. Do not "clean them up" as dead code.
   if (hh.horizon < 1) {
     return { ok: false, startYear, caveats, issues: ['horizon must be >= 1'] }
   }

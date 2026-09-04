@@ -111,9 +111,32 @@ export function snapshotCaveats(session: SessionState): string[] {
   return [...session.caveats]
 }
 
-/** @see snapshotCaveats */
+/**
+ * @see snapshotCaveats
+ *
+ * DEEP, not a spread: `ConventionKnobs.irmaaLookbackMagis` is a `[number,
+ * number]` tuple, so `{ ...session.conventions }` would hand the caller the
+ * live array. tests/sessionIsolation.test.ts seeds that knob and mutates the
+ * returned tuple precisely so a future "tidy-up" to a spread fails.
+ */
 export function snapshotConventions(session: SessionState): ConventionKnobs {
   return structuredClone(session.conventions)
+}
+
+/**
+ * @see snapshotCaveats
+ *
+ * The other two session-owned objects a response can carry: the live plan's
+ * `assumptions` sub-object, and the summary cached on `session.lastProjection`.
+ * Both used to go out by reference, so `res.assumptions.inflationPct = 99`
+ * rewrote the live plan behind `update_plan`'s back, and mutating the summary
+ * one handler returned changed what a later `explain_modeled_result` reported.
+ *
+ * Wire-invisible for the same reason as the other two helpers: a structural
+ * clone serializes byte-identically, so the protocol baseline does not move.
+ */
+function snapshotJson<T>(value: T): T {
+  return structuredClone(value)
 }
 
 export function validatePlanJson(input: unknown) {
@@ -130,7 +153,11 @@ export function setPlanFromBuild(session: SessionState, input: BuildPlanInput) {
   session.plan = result.plan
   session.startYear = result.startYear
   session.caveats = [...result.caveats]
-  if (input.conventions) session.conventions = { ...input.conventions }
+  // structuredClone, not a spread: `irmaaLookbackMagis` is a tuple, so a
+  // shallow copy would leave the CALLER holding the array the session now
+  // treats as its own — mutating it after build_plan would silently change
+  // exported conventions and modeled results.
+  if (input.conventions) session.conventions = structuredClone(input.conventions)
   session.lastProjection = null
   return result
 }
@@ -147,6 +174,9 @@ export function runProjection(
     taxCalculator: taxCalc(session.plan),
   })
   const summary = summarizeProjection(session.plan, result)
+  // The session keeps the canonical pair; the response gets its own copy
+  // (below), so a caller that edits `res.summary` cannot rewrite what a later
+  // `explain_modeled_result` reports off `session.lastProjection`.
   session.lastProjection = { result, summary }
   // The projection is now current, so drop update_plan's transient "re-run
   // run_projection" caveat — otherwise every fresh projection would keep telling
@@ -156,7 +186,7 @@ export function runProjection(
     ok: true as const,
     startYear: result.startYear,
     endYear: result.endYear,
-    summary,
+    summary: snapshotJson(summary),
     caveats: snapshotCaveats(session),
   }
   if (opts.detail !== 'years') {
@@ -459,11 +489,13 @@ export function explainModeledResult(session: SessionState) {
     // the app the plan came from. tests/browserParity.test.ts pins the claim.
     taxStack:
       "Federal brackets combined with the resident state's modeled income tax, plus any flat stateEffectiveTaxPct / localIncomeTaxPct override. This is the same stack the RetireGolden web app runs, so a projection here agrees with what the app shows for the same plan and start year.",
-    assumptions: session.plan?.assumptions ?? null,
+    // Copies, like conventions/caveats below: both of these are sub-objects of
+    // LIVE session state (the plan, and the cached projection). @see snapshotJson
+    assumptions: snapshotJson(session.plan?.assumptions ?? null),
     conventions: snapshotConventions(session),
     caveats: snapshotCaveats(session),
     hasPlan: session.plan != null,
-    lastProjectionSummary: session.lastProjection?.summary ?? null,
+    lastProjectionSummary: snapshotJson(session.lastProjection?.summary ?? null),
     limitations: [
       'Engine may use a single IRMAA lookback MAGI scalar.',
       'traditional-first withdrawal ordering is approximate under sequential drain.',

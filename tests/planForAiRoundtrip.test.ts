@@ -94,9 +94,16 @@ function copiedPayload(plan: BrowserPlan, startYear: number): SinglePlanExport {
 }
 
 /**
- * The `build_plan` argument schema the transports actually enforce — stdio
- * builds `z.object(tool.inputShape)` and the HTTP gateway validates against the
- * same shape.
+ * The `build_plan` argument schema the transports actually enforce. Both of
+ * them now compile it through `toolTable.argsSchemaFor` (stdio at registration,
+ * the HTTP gateway per request), which memoizes one `z.object` per entry.
+ *
+ * Compiled here from the raw shape INDEPENDENTLY, on purpose. This suite's
+ * subject is the serializer — whether what the browser puts on the clipboard is
+ * still a valid `build_plan` argument — so it should read the declared shape
+ * directly rather than whatever the cache happens to hold. Sharing the cached
+ * instance would make a schema-cache bug and a serializer bug look the same.
+ * `argsSchemaFor` compiles the identical `z.object(entry.inputShape)`.
  */
 const buildPlanArgs = z.object(TOOL_TABLE.find((t) => t.name === 'build_plan')!.inputShape)
 

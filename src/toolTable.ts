@@ -385,8 +385,24 @@ function zodIssues(error: z.ZodError): string {
  * Cached in a WeakMap rather than a field on the entry so `ToolEntry` stays the
  * plain declarative record it is documented as, and so an entry a caller
  * constructs itself (Pro composes tables) is memoized on the same terms as ours
- * without having to know about the cache. Sound because a shape is frozen for
- * an entry's lifetime: TOOL_TABLE is a module-level `readonly` literal.
+ * without having to know about the cache.
+ *
+ * THE CACHE'S PRECONDITION, stated as a contract rather than a guarantee: an
+ * entry's `inputShape` must not change after its first use. Nothing enforces
+ * that — `readonly TOOL_TABLE` freezes the array binding, not the entries, and
+ * `entry.inputShape = { ... }` still typechecks — so an embedder that edits a
+ * shape after one `validateToolArgs` keeps being validated against the schema
+ * compiled from the OLD shape, silently. Build the shape before first use, or
+ * hand out a fresh entry. Our own table never mutates one (grep: no assignment
+ * to `.inputShape` anywhere in src/ or tests/).
+ *
+ * The other shared-instance question — whether handing the SAME compiled object
+ * to `registerTool` and to the gateway lets one corrupt the other — was checked
+ * against the pinned SDK: @modelcontextprotocol/server 2.0.0's
+ * `normalizeRawShapeSchema` returns an already-Standard-Schema value untouched
+ * (it only wraps a RAW shape in `z.object`), and never writes to it. Zod
+ * schemas are themselves immutable under parsing. If that ever changes, give
+ * registration its own instance.
  */
 const compiledSchemas = new WeakMap<ToolEntry, z.ZodObject<z.ZodRawShape>>()
 

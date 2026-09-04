@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildPlanFromParams } from '../src/buildPlan.js'
+import { DEFAULT_START_YEAR } from '../src/session.js'
 import { getTool, validateToolArgs } from '../src/toolTable.js'
 import {
   builtFailed,
@@ -37,6 +38,33 @@ describe('buildPlanFromParams — typed household branch', () => {
     const res = buildPlanFromParams({ household: singleHousehold, policy: singlePolicy })
     expect(res.ok).toBe(true)
     expect(builtOk(res).plan.incomes.filter((i) => i.type === 'recurring')).toHaveLength(0)
+  })
+})
+
+describe('buildPlanFromParams — frozen build clock', () => {
+  const frozen = `${DEFAULT_START_YEAR}-01-01T00:00:00.000Z`
+
+  it('stamps createdAt/updatedAt from DEFAULT_START_YEAR, not the wall clock', () => {
+    const res = buildPlanFromParams({ household: singleHousehold, policy: singlePolicy })
+    expect(builtOk(res).plan.createdAtIso).toBe(frozen)
+    expect(builtOk(res).plan.updatedAtIso).toBe(frozen)
+  })
+
+  it('keeps that stamp even when the caller names an explicit startYear', () => {
+    // The coupling worth stating out loud: the frozen clock tracks
+    // DEFAULT_START_YEAR, so a plan built for 2029 is still stamped for the
+    // default year. That is deliberate — one literal instead of two — but it
+    // means a future change to DEFAULT_START_YEAR moves the timestamps on
+    // EVERY newly built plan, including ones that never used the default.
+    // The protocol baseline replaces timestamps with a sentinel, so it would
+    // not catch that; this test is what catches it.
+    const res = buildPlanFromParams({
+      household: singleHousehold,
+      policy: singlePolicy,
+      startYear: 2029,
+    })
+    expect(res.startYear).toBe(2029)
+    expect(builtOk(res).plan.createdAtIso).toBe(frozen)
   })
 })
 

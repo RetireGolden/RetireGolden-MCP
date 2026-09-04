@@ -21,6 +21,15 @@ import { getVersions } from './versions.js'
  * no fallback — an unresolvable package.json threw at module load instead of
  * degrading. `getVersions` never throws, so the sentinel is the visible
  * '0.0.0'.
+ *
+ * That sentinel deliberately does NOT match what the tools report on the same
+ * unresolvable install: `get_session` and `export_plan` keep emitting
+ * `mcpVersion: null`. The two surfaces have different contracts — MCP's
+ * `serverInfo.version` is a required string, so there is no null to send, while
+ * `mcpVersion` is a documented nullable whose null is recorded in
+ * tests/protocol-baseline/baseline.json. Unifying them either way is a wire
+ * change, so the divergence is stated here rather than papered over. Both still
+ * come from the one resolver, which is the drift this indirection removes.
  */
 const version = getVersions().mcpVersion ?? '0.0.0'
 
