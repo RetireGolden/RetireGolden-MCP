@@ -18,6 +18,7 @@ import { solveMaxSustainableSpending } from '@retiregolden/engine/decisions/spen
 import {
   buildPlanFromParams,
   stateTaxCaveat,
+  TRADITIONAL_FIRST_BATCH_CAVEAT,
   type BuildPlanInput,
   type PolicyParams,
 } from './buildPlan.js'
@@ -261,7 +262,10 @@ export function batchEvaluate(
       } else {
         planJson.strategies.withdrawalOrder = { mode: 'sequential' }
         if (policy.ordering === 'traditional-first') {
-          caveats.push('traditional-first approximate')
+          // Terser than the two buildPlan wordings, and deliberately left so:
+          // this exact string is recorded in the protocol baseline's
+          // batch_evaluate payload. @see TRADITIONAL_FIRST_TYPED_CAVEAT.
+          caveats.push(TRADITIONAL_FIRST_BATCH_CAVEAT)
         }
       }
 

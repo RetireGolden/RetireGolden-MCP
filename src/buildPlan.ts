@@ -253,6 +253,32 @@ export type BuildPlanResult =
       ordering_unsupported?: boolean
     }
 
+/**
+ * The three `traditional-first` caveat wordings, in one place.
+ *
+ * All three say the same thing — the engine's sequential drain cannot express
+ * traditional-first, so the ledger is approximate — in three different sets of
+ * words, because they grew at three different sites: the typed build path, the
+ * conventions overlay, and the adapter's batch cell.
+ *
+ * DO NOT UNIFY THE TEXT HERE. These strings are FROZEN by
+ * tests/protocol-baseline/baseline.json: `TRADITIONAL_FIRST_BATCH_CAVEAT` is
+ * quoted verbatim inside the recorded `batch_evaluate` payload, and the other
+ * two reach a response the same way. Rewording any of them is a wire change and
+ * needs a deliberate baseline regeneration, not a tidy-up. Naming them is the
+ * part that is safe: the three sites now point at one definition, so the next
+ * reader can see they are duplicates rather than rediscovering it.
+ */
+export const TRADITIONAL_FIRST_TYPED_CAVEAT =
+  'ordering=traditional-first has no full engine equivalent (sequential drains taxable before traditional); ledger is approximate'
+
+/** @see TRADITIONAL_FIRST_TYPED_CAVEAT — frozen wording, do not reword. */
+export const TRADITIONAL_FIRST_CONVENTION_CAVEAT =
+  'convention withdrawalOrdering=traditional-first: approximate under sequential'
+
+/** @see TRADITIONAL_FIRST_TYPED_CAVEAT — frozen wording, do not reword. */
+export const TRADITIONAL_FIRST_BATCH_CAVEAT = 'traditional-first approximate'
+
 const FILING = { single: 'single', mfj: 'marriedFilingJointly' } as const
 
 /**
@@ -521,6 +547,21 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   const hh = input.household
   const policy = input.policy
 
+  // KEEP THESE, even though they look redundant against HouseholdParamsSchema.
+  //
+  // `buildPlanFromParams` is exported from the package root and takes a plain
+  // `BuildPlanInput`, not a zod-parsed one. The tool layer happens to run
+  // HouseholdParamsSchema / PolicyParamsSchema first (so `horizon >= 1`,
+  // non-empty `persons`, and the `filing` / `ordering` enums are already
+  // enforced on THAT path) — but a programmatic caller (Pro, a test, an
+  // embedder) reaches this function directly with whatever it constructed, and
+  // for those callers these are the only checks there are. Without them a bad
+  // input becomes an opaque engine parsePlan failure, or worse, an
+  // `undefined` filing silently written into the plan.
+  //
+  // The same reasoning covers `FILING[hh.filing]` being unknown and the
+  // `unknown ordering` fallthrough in buildTypedPlan below. Tests assert these
+  // exact messages. Do not "clean them up" as dead code.
   if (hh.horizon < 1) {
     return { ok: false, startYear, caveats, issues: ['horizon must be >= 1'] }
   }
@@ -602,6 +643,8 @@ function buildTypedPlan(
 
   const endYear = startYear + hh.horizon - 1
   const filing = FILING[hh.filing]
+  // Unreachable through the tool layer's zod enum; reachable from a
+  // programmatic caller. See the guard note in buildPlanFromParams.
   if (!filing) {
     return { ok: false, startYear, caveats, issues: [`unknown filing ${hh.filing}`] }
   }
@@ -725,10 +768,10 @@ function buildTypedPlan(
   } else if (ordering === 'traditional-first') {
     plan.strategies.withdrawalOrder = { mode: 'sequential' }
     ordering_unsupported = true
-    caveats.push(
-      'ordering=traditional-first has no full engine equivalent (sequential drains taxable before traditional); ledger is approximate',
-    )
+    caveats.push(TRADITIONAL_FIRST_TYPED_CAVEAT)
   } else {
+    // Same as the filing guard above: the zod enum cannot produce this, a
+    // programmatic caller can. See the guard note in buildPlanFromParams.
     return { ok: false, startYear, caveats, issues: [`unknown ordering ${ordering}`] }
   }
   plan.strategies.qcdAnnual = 0
@@ -827,7 +870,7 @@ function applyConventions(
   } else if (conventions.withdrawalOrdering === 'traditional-first') {
     plan.strategies.withdrawalOrder = { mode: 'sequential' }
     mutated = true
-    caveats.push('convention withdrawalOrdering=traditional-first: approximate under sequential')
+    caveats.push(TRADITIONAL_FIRST_CONVENTION_CAVEAT)
   }
   return mutated
 }
