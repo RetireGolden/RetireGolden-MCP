@@ -6,14 +6,23 @@
  * pinned, so the factory must be side-effect-free per call.
  */
 
-import { createRequire } from 'node:module'
 import { McpServer } from '@modelcontextprotocol/server'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { createSession } from './session.js'
 import { registerTools, registerResources } from './tools.js'
+import { getVersions } from './versions.js'
 
-const require = createRequire(import.meta.url)
-const { version } = require('../package.json') as { version: string }
+/**
+ * The version this server reports in `serverInfo`. Read through
+ * `getVersions()`, which is the one place that resolves package identity (and
+ * the same value `get_session` and `export_plan` report), rather than through a
+ * second `createRequire('../package.json')` of its own: two readers is two
+ * chances to disagree about what "the running version" means, and this one had
+ * no fallback — an unresolvable package.json threw at module load instead of
+ * degrading. `getVersions` never throws, so the sentinel is the visible
+ * '0.0.0'.
+ */
+const version = getVersions().mcpVersion ?? '0.0.0'
 
 /**
  * Construct one server for one serving unit (a pinned stdio connection, or a
