@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import { McpServer, InMemoryTransport } from '@modelcontextprotocol/server'
 import { Client } from '@modelcontextprotocol/client'
-import { planJsonSchema, PLAN_SCHEMA_VERSION, PLAN_SCHEMA_ID } from '@retiregolden/engine/schema'
+import { planJsonSchema, PLAN_SCHEMA_VERSION, PLAN_SCHEMA_ID } from '@retiregolden/engine/schema/current'
 import * as adapter from '../src/adapter.js'
 import { registerResources } from '../src/tools.js'
 

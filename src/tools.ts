@@ -19,7 +19,7 @@ import {
   planJsonSchema,
   PLAN_SCHEMA_ID,
   PLAN_SCHEMA_VERSION,
-} from '@retiregolden/engine/schema'
+} from '@retiregolden/engine/schema/current'
 import type { SessionState } from './session.js'
 import { TOOL_TABLE, jsonResult, type ToolEntry } from './toolTable.js'
 

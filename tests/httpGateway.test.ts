@@ -170,7 +170,7 @@ describe('HTTP gateway (Phase 6 stub) integration', () => {
     // Re-import an exported document over the wire with mismatched provenance
     // siblings. Pins the HTTP contract: the gateway forwards the extra args and
     // the caveats reach the JSON response body.
-    const { PLAN_SCHEMA_VERSION } = await import('@retiregolden/engine/schema')
+    const { PLAN_SCHEMA_VERSION } = await import('@retiregolden/engine/schema/current')
     const exported = await exportedFixture()
 
     const r = await post(
@@ -193,7 +193,7 @@ describe('HTTP gateway (Phase 6 stub) integration', () => {
   })
 
   it('refuses a cross-plan-schema document over HTTP with an explanation, not a bare zod issue', async () => {
-    const { PLAN_SCHEMA_VERSION } = await import('@retiregolden/engine/schema')
+    const { PLAN_SCHEMA_VERSION } = await import('@retiregolden/engine/schema/current')
     const exported = await exportedFixture()
     const doc = {
       ...JSON.parse(JSON.stringify(exported.plan)),

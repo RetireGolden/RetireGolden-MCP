@@ -38,7 +38,7 @@ import { z } from 'zod'
 
 import { parsePlan, type Plan } from '@retiregolden/engine/model/plan'
 import { migratePlanToCurrent } from '@retiregolden/engine/model/migrations'
-import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema'
+import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema/current'
 // `testSupport/samplePlan` is a deprecated one-line re-export that planner-ui
 // means to keep out of its tarball, so import the builder it forwards to.
 import { buildExampleCouple as createSamplePlan } from '@retiregolden/planner-ui/planner/examples/buildExampleCouple'
@@ -54,12 +54,13 @@ import { TOOL_TABLE } from '../src/toolTable.js'
 
 /**
  * The plan type the PUBLISHED planner-ui produces — whatever engine it binds,
- * which is not necessarily this package's. Today planner-ui 0.9.0 resolves
- * engine ^0.1.12 (plan schema v4) while this package pins 0.2.0 (v5), so the
- * two `Plan` types genuinely differ on `schemaVersion`, and a value that
- * came out of planner-ui is typed as such rather than cast into ours. The day
- * planner-ui republishes on the same engine this alias collapses to `Plan`
- * and nothing here needs to change.
+ * which is not necessarily this package's. Today planner-ui 0.10.0 resolves
+ * engine ^0.3.0, the same 0.3.0 this package exact-pins, so the alias is
+ * currently identical to `Plan`. It is kept as an alias rather than collapsed
+ * because the two have already diverged once (planner-ui 0.9.0 on engine
+ * ^0.1.12, plan schema v4, against this package's 0.2.0, v5) and will again
+ * the next time one side moves first; a value that came out of planner-ui is
+ * typed as such rather than cast into ours.
  */
 type BrowserPlan = ReturnType<typeof createSamplePlan>
 
@@ -148,15 +149,15 @@ function buildFrom(payload: SinglePlanExport | Partial<BuildPlanInput>) {
  * the two would be this package reading itself: the `===` branch would always
  * win and the skew branch would be dead code.
  *
- * As of engine 0.2.0 the two readings DISAGREE, and in the direction this note
- * did not predict: our exact pin rose past planner-ui's floor, not the other
- * way round. planner-ui 0.9.0 still declares `^0.1.12`, which no longer
- * matches, so pnpm keeps a second engine copy nested under it and its payloads
- * are stamped by that copy — engine 0.1.12, plan schema v4. The skew branch
- * below is therefore live today, not dead code, and the `documentVersion`
- * parameter carries the same lag on the schema axis. Both collapse back to
- * the agreeing case, with no change here, once planner-ui republishes on a
- * range that admits 0.2.0.
+ * Both branches below have been live at different times, which is why both
+ * stay. Under engine 0.2.0 the two readings DISAGREED, in the direction this
+ * note had not predicted: our exact pin rose past planner-ui's floor (0.9.0
+ * declared `^0.1.12`), so pnpm nested a second engine copy under planner-ui
+ * and its payloads were stamped by that copy — engine 0.1.12, plan schema v4 —
+ * exercising the skew branch and the `documentVersion` lag on the schema
+ * axis. With planner-ui 0.10.0 on `^0.3.0` and this package on 0.3.0 the tree
+ * holds one engine again and the agreeing branch is the live one. Nothing
+ * here changed between the two states, which is the point.
  */
 function expectNoPayloadSkew(caveats: string[], stampedEngine: string, documentVersion: number) {
   const mcpEngine = adapter.getVersions().engineVersion
@@ -254,10 +255,11 @@ describe('copied plan → build_plan', () => {
     // so the sibling stamp and the embedded version agree exactly as they do
     // for a real paste.
     // Serialize BEFORE building the comparison object. `migratePlanToCurrent` is
-    // pure today — the lag assertion below passing (exactly one migration
-    // caveat) is what proves the payload still went out as v4 — but this order
-    // keeps the test independent of that: nothing the comparison does can leak
-    // into the bytes the browser is modelled as pasting.
+    // pure today — when the published planner-ui lags a schema version, the lag
+    // assertion below passing (exactly one migration caveat) is what proves the
+    // payload still went out on the older schema — but this order keeps the
+    // test independent of that: nothing the comparison does can leak into the
+    // bytes the browser is modelled as pasting.
     const payload = copiedPayload(plan, 2029)
     const stored = asThisBuildStoresIt(plan)
     const built = buildFrom(payload)
