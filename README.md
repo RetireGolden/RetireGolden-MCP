@@ -103,3 +103,13 @@ workflow (see [`.github/workflows/publish-mcp.yml`](.github/workflows/publish-mc
 ## Trademark
 
 See [TRADEMARKS.md](TRADEMARKS.md). Forks must rename.
+
+## Automated code review
+
+Repository review guidance lives in [REVIEW.md](REVIEW.md), with HTTP-specific notes in [src/http/REVIEW.md](src/http/REVIEW.md). The policy format follows the [OpenRouter PR review action reference](https://github.com/FlyOverCoderKY/openrouter-pr-review-action/blob/93cc91130605bc17cb583c5a5e899591773e048c/docs/review-policy.md).
+
+The workflow loads effective guidance from the **target branch** (typically `main`) at review time. Edits on an open PR affect later runs only **after merge**; changed source files on the PR branch are still reviewed. Review policy cannot exclude file coverage—new or touched source remains in scope.
+
+This repository caller enables `review_policy: base`. Model selection, budgets, and CI authorization remain in trusted workflow configuration; these files add review guidance only.
+
+Manual review dispatches review the full PR while retaining its finding ledger and rebuttals. Leave `reset_review` false for normal reruns; setting it true explicitly starts over. When reading review results through the GitHub API, paginate reviews, inline comments, and issue comments, including every continuation part.

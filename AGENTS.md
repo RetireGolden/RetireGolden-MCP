@@ -146,6 +146,14 @@ Code, Codex, Cursor, the Grok and OpenRouter review bots, and any other tool.
 
 ## Repo-specific
 
+- The current shared workflow pin makes ordinary manual dispatches full-PR
+  verification rounds that retain finding IDs, ledger decisions, and rebuttals.
+  This supersedes the older-pin behavior in the shared section. Leave
+  `reset_review` false unless intentionally discarding review history.
+- Paginate reviews, inline comments, and issue comments. Read every continuation
+  part and match the explicit reviewed SHA and bot identity before deciding
+  that the current head has a completed clean review.
+
 - Repository admin: @FlyOverCoderKY.
 - Merge grant: standing, recorded by @FlyOverCoderKY on 2026-09-03 (PR
   #62). Neither bypass condition named in the shared Merging section exists
