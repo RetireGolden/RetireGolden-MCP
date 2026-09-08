@@ -146,6 +146,13 @@ Code, Codex, Cursor, the Grok and OpenRouter review bots, and any other tool.
 
 ## Repo-specific
 
+- When a push rewrites history so the last reviewed commit is no longer an
+  ancestor, this caller automatically selects `rebase` scope. That run reviews
+  the full current PR at every severity while retaining finding IDs, round
+  progression, and earlier review context. Wait for its current-head verdict
+  and profile proof; do not dispatch another review just because it is a
+  full-PR sweep. This extends the older incremental-push description above.
+
 - The current shared workflow pin makes ordinary manual dispatches full-PR
   verification rounds that retain finding IDs, ledger decisions, and rebuttals.
   This supersedes the older-pin behavior in the shared section. Profile reviews

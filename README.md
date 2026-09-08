@@ -106,7 +106,7 @@ See [TRADEMARKS.md](TRADEMARKS.md). Forks must rename.
 
 ## Automated code review
 
-Repository review guidance lives in [REVIEW.md](REVIEW.md), with HTTP-specific notes in [src/http/REVIEW.md](src/http/REVIEW.md). The policy format follows the [OpenRouter PR review action reference](https://github.com/FlyOverCoderKY/openrouter-pr-review-action/blob/188cd5557765c858a37c1da78960cd353bcbcd60/docs/review-policy.md).
+Repository review guidance lives in [REVIEW.md](REVIEW.md), with HTTP-specific notes in [src/http/REVIEW.md](src/http/REVIEW.md). The policy format follows the [OpenRouter PR review action reference](https://github.com/FlyOverCoderKY/openrouter-pr-review-action/blob/212775ffea22e806cddcb706c73a3df26fbcb6d0/docs/review-policy.md).
 
 The workflow loads effective guidance from the **target branch** (typically `main`) at review time. Edits on an open PR affect later runs only **after merge**; changed source files on the PR branch are still reviewed. Review policy cannot exclude file coverage—new or touched source remains in scope.
 
@@ -114,10 +114,20 @@ This repository caller enables both `review_policy: base` and `review_profiles_e
 
 Manual review dispatches review the full PR while retaining its finding ledger and rebuttals. Leave `reset_review` false for normal reruns; profile-enabled reviews reject `reset_review: true`. When reading review results through the GitHub API, paginate reviews, inline comments, and issue comments, including every continuation part.
 
+After a rebase or force-push makes the last reviewed commit unreachable, the
+shared harness selects `rebase` scope automatically: a full current-PR sweep at
+all severities with earlier reviews and replies as bounded context. Finding IDs
+and round progression survive. Valid disputes remain settled; current-code
+evidence can reopen an invalidated dispute. Fixed or retired findings supply
+historical context for detecting regressions. A clean current-head review and
+current profile proof are still required; old-lineage evidence cannot unlock CI.
+The pinned action's [rebase contract and usage](https://github.com/FlyOverCoderKY/openrouter-pr-review-action/blob/212775ffea22e806cddcb706c73a3df26fbcb6d0/README.md#reruns-and-finding-continuity)
+and [collector regression tests](https://github.com/FlyOverCoderKY/openrouter-pr-review-action/blob/212775ffea22e806cddcb706c73a3df26fbcb6d0/tests/test_rebase_review.py)
+document and exercise this upstream behavior.
 
 ## Review profiles and CI proof
 
-The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/a0687591466b56f5435cf89ff0d65917bb703c7c/README.md). Code uses required Grok plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
+The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/a190c3d834f2e3048b4eef8129fa3c8e10891aa0/README.md). Code uses required Grok plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
 
 From Actions → **OpenRouter code review**, dispatch from `main` with a PR number and `review_level: auto`, `deep`, or `cancel`. Deep requests require repository write/maintain/admin permission, retain existing findings, and stay pending across retries and pushes until their own required review succeeds. Cancel removes a manual pending request; it cannot lower a policy requirement. Leave `reset_review` false.
 
