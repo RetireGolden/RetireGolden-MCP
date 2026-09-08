@@ -11,28 +11,36 @@
 #
 #   review / openrouter-first-pass-gate
 #
-# The lane roster is frozen by the exact central pin below. This repo runs
-# x-ai/grok-4.6 + z-ai/glm-5.3-flash at high effort; openai/gpt-5.6-luna
-# is the recall-safe merge judge, not a third reviewer. This pin retains that roster.
+# The central pin defines permitted profiles: standard uses required Grok 4.6
+# plus optional GLM 5.3 Flash; deep adds required Astra Flex. GPT 5.6 Luna
+# is the merge judge. Initial and verification effort follow the selected profile.
 
 name: OpenRouter code review
+run-name: "${{ format('OpenRouter PR #{0}: {1}', github.event.pull_request.number || inputs.pr_number, inputs.review_level || 'auto') }}"
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
+      review_level:
+        description: Follow policy, request deep review, or cancel a pending deep request
+        required: false
+        type: choice
+        options: [auto, deep, cancel]
+        default: auto
       pr_number:
         description: PR number to review
         required: true
         type: string
       reset_review:
-        description: Discard review history and start over (normally leave false)
+        description: Legacy input; profile reviews require false to retain findings
         required: false
         type: boolean
         default: false
 
 permissions:
+  actions: read
   contents: read
   pull-requests: write
   # The central reusable publishes the stable required-gate commit status.
@@ -42,9 +50,11 @@ jobs:
   # Keep this id stable: it is the first half of the required check context.
   review:
     if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
-    uses: RetireGolden/.github/.github/workflows/openrouter-code-review.yml@a6a690b82fa76bbda4334b87dd179551534d183b # .github#39 (after action v1.3.1; action#35@93cc91130605bc17cb583c5a5e899591773e048c; guidance and transport repair)
+    uses: RetireGolden/.github/.github/workflows/openrouter-code-review.yml@eac44d1fba1e89760ebf0a1b7826a119e1b6ba79 # .github#42; action#37@4fe6e668c9352b3f2a65254c4900d6443b5279e2 (trusted profiles and request gates)
     with:
       review_policy: base
+      review_profiles_enabled: true
+      review_level: ${{ inputs.review_level || 'auto' }}
       reset_review: ${{ inputs.reset_review || false }}
       pr_number: ${{ inputs.pr_number || github.event.inputs.pr_number || github.event.pull_request.number }}
     secrets:
