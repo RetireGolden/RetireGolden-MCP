@@ -117,7 +117,7 @@ Manual review dispatches review the full PR while retaining its finding ledger a
 
 ## Review profiles and CI proof
 
-The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/a89c14022c0bce5ace6cc9480924ec877e039c8e/README.md). Code uses required Grok plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
+The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/273dd054ab1c34950a3c2eeab2f00254db405e68/README.md). Code uses required Grok plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
 
 From Actions → **OpenRouter code review**, dispatch from `main` with a PR number and `review_level: auto`, `deep`, or `cancel`. Deep requests require repository write/maintain/admin permission, retain existing findings, and stay pending across retries and pushes until their own required review succeeds. Cancel removes a manual pending request; it cannot lower a policy requirement. Leave `reset_review` false.
 

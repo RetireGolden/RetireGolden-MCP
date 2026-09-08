@@ -51,7 +51,7 @@ jobs:
   # Keep this id stable: it is the first half of the required check context.
   review:
     if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
-    uses: RetireGolden/.github/.github/workflows/openrouter-code-review.yml@a89c14022c0bce5ace6cc9480924ec877e039c8e # .github#47; action#40@5bb16c7a5ba87a802d7884ccbfa5e99d10978a49 (trusted profiles and request gates)
+    uses: RetireGolden/.github/.github/workflows/openrouter-code-review.yml@273dd054ab1c34950a3c2eeab2f00254db405e68 # .github#50; action#40@5bb16c7a5ba87a802d7884ccbfa5e99d10978a49 (trusted profiles and request gates)
     with:
       review_policy: base
       review_profiles_enabled: true
