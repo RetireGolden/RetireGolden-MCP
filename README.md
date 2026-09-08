@@ -117,10 +117,18 @@ Manual review dispatches review the full PR while retaining its finding ledger a
 
 ## Review profiles and CI proof
 
-The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/3d92f63176b55e5ade2dbe4a081c21ad249826ea/README.md). Code uses required Grok plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
+The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/a0687591466b56f5435cf89ff0d65917bb703c7c/README.md). Code uses required Grok plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
 
 From Actions → **OpenRouter code review**, dispatch from `main` with a PR number and `review_level: auto`, `deep`, or `cancel`. Deep requests require repository write/maintain/admin permission, retain existing findings, and stay pending across retries and pushes until their own required review succeeds. Cancel removes a manual pending request; it cannot lower a policy requirement. Leave `reset_review` false.
 
 **OpenRouter profile completion** checks the exact PR head, effective current policy, required lanes, and accepted requests. The `openrouter-profile` status supplements the existing first-pass gate and repository CI. A successful review workflow alone does not establish a clean or complete review.
 
 Profile artifacts retain 30 days (requests 90 days), and the gate accepts PRs younger than 25 days. Open a replacement PR for older work. Missing evidence fails closed. An automatic policy refresh is requested at most once per head/configuration; use a manual rerun if that request fails. Maintainer labels and automatic path escalation are not enabled in this rollout.
+
+Dispatch **OpenRouter profile completion** from the default branch; selecting a
+feature branch intentionally skips its trusted proof job. Bot-dispatched reviews
+explicitly wake this workflow because GitHub suppresses their downstream
+`workflow_run` events. The optional `source_run_id` identifies a completed review
+run to inspect; the receiver still checks its provenance and current evidence.
+If notification delivery fails, retry profile completion with that run ID on
+`main` instead of paying for another review.
