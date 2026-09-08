@@ -106,7 +106,7 @@ See [TRADEMARKS.md](TRADEMARKS.md). Forks must rename.
 
 ## Automated code review
 
-Repository review guidance lives in [REVIEW.md](REVIEW.md), with HTTP-specific notes in [src/http/REVIEW.md](src/http/REVIEW.md). The policy format follows the [OpenRouter PR review action reference](https://github.com/FlyOverCoderKY/openrouter-pr-review-action/blob/188cd5557765c858a37c1da78960cd353bcbcd60/docs/review-policy.md).
+Repository review guidance lives in [REVIEW.md](REVIEW.md), with HTTP-specific notes in [src/http/REVIEW.md](src/http/REVIEW.md). The policy format follows the [OpenRouter PR review action reference](https://github.com/FlyOverCoderKY/openrouter-pr-review-action/blob/5bb16c7a5ba87a802d7884ccbfa5e99d10978a49/docs/review-policy.md).
 
 The workflow loads effective guidance from the **target branch** (typically `main`) at review time. Edits on an open PR affect later runs only **after merge**; changed source files on the PR branch are still reviewed. Review policy cannot exclude file coverage—new or touched source remains in scope.
 
@@ -117,7 +117,7 @@ Manual review dispatches review the full PR while retaining its finding ledger a
 
 ## Review profiles and CI proof
 
-The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/a0687591466b56f5435cf89ff0d65917bb703c7c/README.md). Code uses required Grok plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
+The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/a89c14022c0bce5ace6cc9480924ec877e039c8e/README.md). Code uses required Grok plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
 
 From Actions → **OpenRouter code review**, dispatch from `main` with a PR number and `review_level: auto`, `deep`, or `cancel`. Deep requests require repository write/maintain/admin permission, retain existing findings, and stay pending across retries and pushes until their own required review succeeds. Cancel removes a manual pending request; it cannot lower a policy requirement. Leave `reset_review` false.
 
