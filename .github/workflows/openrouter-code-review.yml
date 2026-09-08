@@ -12,8 +12,8 @@
 #   review / openrouter-first-pass-gate
 #
 # The lane roster is frozen by the exact central pin below. This repo runs
-# x-ai/grok-4.6 + z-ai/glm-5.3-flash at high effort; the recall-safe judge
-# merges the two independent OpenRouter lanes.
+# x-ai/grok-4.6 + z-ai/glm-5.3-flash at high effort; openai/gpt-5.6-luna
+# is the recall-safe merge judge, not a third reviewer. This pin retains that roster.
 
 name: OpenRouter code review
 
