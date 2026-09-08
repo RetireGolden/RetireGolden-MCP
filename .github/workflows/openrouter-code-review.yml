@@ -11,9 +11,9 @@
 #
 #   review / openrouter-first-pass-gate
 #
-# The lane roster is frozen by the exact central pin below. This repo runs
-# x-ai/grok-4.6 + z-ai/glm-5.3-flash at high effort; openai/gpt-5.6-luna
-# is the recall-safe merge judge, not a third reviewer. This pin retains that roster.
+# The central pin defines permitted profiles: standard uses required Grok 4.6
+# plus optional GLM 5.3 Flash; deep adds required Astra Flex. GPT 5.6 Luna
+# is the merge judge. Initial and verification effort follow the selected profile.
 
 name: OpenRouter code review
 run-name: "${{ format('OpenRouter PR #{0}: {1}', github.event.pull_request.number || inputs.pr_number, inputs.review_level || 'auto') }}"

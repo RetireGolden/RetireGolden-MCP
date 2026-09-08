@@ -110,7 +110,7 @@ Repository review guidance lives in [REVIEW.md](REVIEW.md), with HTTP-specific n
 
 The workflow loads effective guidance from the **target branch** (typically `main`) at review time. Edits on an open PR affect later runs only **after merge**; changed source files on the PR branch are still reviewed. Review policy cannot exclude file coverage—new or touched source remains in scope.
 
-This repository caller enables `review_policy: base`. Model selection, budgets, and CI authorization remain in trusted workflow configuration; these files supply guidance and select allowed review profiles; they cannot grant authorization.
+This repository caller enables both `review_policy: base` and `review_profiles_enabled: true`. With profiles enabled, the root `REVIEW.md` selects the trusted registry's `code` profile through its `review.profile` metadata. The registry defines that profile's models and budgets; policy cannot invent models or grant CI authorization. Nested `REVIEW.md` files add scoped guidance and cannot change the root profile.
 
 Manual review dispatches review the full PR while retaining its finding ledger and rebuttals. Leave `reset_review` false for normal reruns; profile-enabled reviews reject `reset_review: true`. When reading review results through the GitHub API, paginate reviews, inline comments, and issue comments, including every continuation part.
 

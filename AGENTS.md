@@ -148,11 +148,11 @@ Code, Codex, Cursor, the Grok and OpenRouter review bots, and any other tool.
 
 - The current shared workflow pin makes ordinary manual dispatches full-PR
   verification rounds that retain finding IDs, ledger decisions, and rebuttals.
-  This supersedes the older-pin behavior in the shared section. Leave
-  `reset_review` false unless intentionally discarding review history. The
-  timing rule against redundant dispatch on an already-reviewed current head
-  remains unchanged; retained-ledger behavior does not independently authorize
-  extra reruns.
+  This supersedes the older-pin behavior in the shared section. Profile reviews
+  require `reset_review: false`; discarding history with `true` is rejected.
+  Do not repeat an ordinary `auto` dispatch on an already-reviewed current head.
+  An intentional maintainer `deep` request is the specific exception described
+  below; retained-ledger behavior alone does not authorize extra reruns.
 - Paginate reviews, inline comments, and issue comments. Read every continuation
   part and match the explicit reviewed SHA and bot identity before deciding
   that the current head has a completed clean review.
