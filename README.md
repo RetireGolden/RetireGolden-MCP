@@ -114,7 +114,6 @@ This repository caller enables both `review_policy: base` and `review_profiles_e
 
 Manual review dispatches review the full PR while retaining its finding ledger and rebuttals. Leave `reset_review` false for normal reruns; profile-enabled reviews reject `reset_review: true`. When reading review results through the GitHub API, paginate reviews, inline comments, and issue comments, including every continuation part.
 
-
 After a rebase or force-push makes the last reviewed commit unreachable, the
 shared harness selects `rebase` scope automatically: a full current-PR sweep at
 all severities with earlier reviews and replies as bounded context. Finding IDs
@@ -122,6 +121,9 @@ and round progression survive. Valid disputes remain settled; current-code
 evidence can reopen an invalidated dispute. Fixed or retired findings supply
 historical context for detecting regressions. A clean current-head review and
 current profile proof are still required; old-lineage evidence cannot unlock CI.
+The pinned action's [rebase contract and usage](https://github.com/FlyOverCoderKY/openrouter-pr-review-action/blob/212775ffea22e806cddcb706c73a3df26fbcb6d0/README.md#reruns-and-finding-continuity)
+and [collector regression tests](https://github.com/FlyOverCoderKY/openrouter-pr-review-action/blob/212775ffea22e806cddcb706c73a3df26fbcb6d0/tests/test_rebase_review.py)
+document and exercise this upstream behavior.
 
 ## Review profiles and CI proof
 
