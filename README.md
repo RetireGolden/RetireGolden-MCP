@@ -106,7 +106,7 @@ See [TRADEMARKS.md](TRADEMARKS.md). Forks must rename.
 
 ## Automated code review
 
-Repository review guidance lives in [REVIEW.md](REVIEW.md), with HTTP-specific notes in [src/http/REVIEW.md](src/http/REVIEW.md). The policy format follows the [OpenRouter PR review action reference](https://github.com/FlyOverCoderKY/openrouter-pr-review-action/blob/4fe6e668c9352b3f2a65254c4900d6443b5279e2/docs/review-policy.md).
+Repository review guidance lives in [REVIEW.md](REVIEW.md), with HTTP-specific notes in [src/http/REVIEW.md](src/http/REVIEW.md). The policy format follows the [OpenRouter PR review action reference](https://github.com/FlyOverCoderKY/openrouter-pr-review-action/blob/188cd5557765c858a37c1da78960cd353bcbcd60/docs/review-policy.md).
 
 The workflow loads effective guidance from the **target branch** (typically `main`) at review time. Edits on an open PR affect later runs only **after merge**; changed source files on the PR branch are still reviewed. Review policy cannot exclude file coverage—new or touched source remains in scope.
 
@@ -117,10 +117,18 @@ Manual review dispatches review the full PR while retaining its finding ledger a
 
 ## Review profiles and CI proof
 
-The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/eac44d1fba1e89760ebf0a1b7826a119e1b6ba79/README.md). Code uses required Grok plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
+The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/a0687591466b56f5435cf89ff0d65917bb703c7c/README.md). Code uses required Grok plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
 
 From Actions → **OpenRouter code review**, dispatch from `main` with a PR number and `review_level: auto`, `deep`, or `cancel`. Deep requests require repository write/maintain/admin permission, retain existing findings, and stay pending across retries and pushes until their own required review succeeds. Cancel removes a manual pending request; it cannot lower a policy requirement. Leave `reset_review` false.
 
 **OpenRouter profile completion** checks the exact PR head, effective current policy, required lanes, and accepted requests. The `openrouter-profile` status supplements the existing first-pass gate and repository CI. A successful review workflow alone does not establish a clean or complete review.
 
 Profile artifacts retain 30 days (requests 90 days), and the gate accepts PRs younger than 25 days. Open a replacement PR for older work. Missing evidence fails closed. An automatic policy refresh is requested at most once per head/configuration; use a manual rerun if that request fails. Maintainer labels and automatic path escalation are not enabled in this rollout.
+
+Dispatch **OpenRouter profile completion** from the default branch; selecting a
+feature branch intentionally skips its trusted proof job. Bot-dispatched reviews
+explicitly wake this workflow because GitHub suppresses their downstream
+`workflow_run` events. The optional `source_run_id` identifies a completed review
+run to inspect; the receiver still checks its provenance and current evidence.
+If notification delivery fails, retry profile completion with that run ID on
+`main` instead of paying for another review.

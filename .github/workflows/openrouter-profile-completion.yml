@@ -8,6 +8,10 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      source_run_id:
+        description: Optional completed review run that requested this proof refresh
+        required: false
+        type: string
       pr_number:
         description: Optional PR number; planning also refreshes other open PRs
         required: false
@@ -18,9 +22,11 @@ permissions:
   pull-requests: read
   statuses: write
 jobs:
+  # Dispatch from the default branch; other refs intentionally skip this trusted proof.
   # The shared CI validator authenticates this exact calling job id.
   complete:
-    uses: RetireGolden/.github/.github/workflows/openrouter-profile-completion.yml@eac44d1fba1e89760ebf0a1b7826a119e1b6ba79 # .github#42
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    uses: RetireGolden/.github/.github/workflows/openrouter-profile-completion.yml@a0687591466b56f5435cf89ff0d65917bb703c7c # .github#46
     with:
       pr_number: ${{ inputs.pr_number || '' }}
-      source_run_id: ${{ github.event.workflow_run.id && format('{0}', github.event.workflow_run.id) || '' }}
+      source_run_id: ${{ inputs.source_run_id || (github.event.workflow_run.id && format('{0}', github.event.workflow_run.id)) || '' }}
