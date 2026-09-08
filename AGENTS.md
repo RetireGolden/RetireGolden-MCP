@@ -183,3 +183,12 @@ Code, Codex, Cursor, the Grok and OpenRouter review bots, and any other tool.
 - `main` requires every review thread resolved but has no post-push-approval
   rule, so a review-clean, green PR with resolved threads merges without the
   admin bypass. Resolve the threads; do not reach for the bypass.
+
+
+### Current review profile workflow
+
+- The caller now enables organization profiles. Earlier `reset_review: true` guidance applies only to legacy callers; profile reviews require `false` and retain findings.
+- Use `review_level: deep` on a default-branch manual dispatch to request extra review; `cancel` cancels only a manual pending request. A fresh deep request needs its own successful required lanes, even if this head already has an older clean deep review.
+- An intentional deep request on an already reviewed head is an exception to the shared rule against redundant same-head dispatches. Wait for that request's required lanes and current profile proof before treating the head as review-clean.
+- Check `OpenRouter profile completion` and the `openrouter-profile` status for the current head in addition to the existing review and CI requirements. The profile gate rechecks current base policy. A missing/failed required lane or pending deep request is not clean.
+- Profile evidence is bounded to PRs younger than 25 days. For older work, open a replacement PR; do not bypass the profile gate or delete request evidence.
