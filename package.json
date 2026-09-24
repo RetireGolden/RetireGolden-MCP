@@ -57,6 +57,7 @@
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
     "@retiregolden/engine": "0.3.0",
+    "highs": "1.15.2",
     "zod": "4.4.3"
   },
   "pnpm": {

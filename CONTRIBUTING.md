@@ -29,6 +29,14 @@ Node 25+ does not, so install it with `npm install -g corepack` before
 is what creates the `pnpm` executable
 (see [Corepack](https://github.com/nodejs/corepack#how-to-install)).
 
+**The engine and its solver move together.** `@retiregolden/engine` is pinned
+exactly, and so is `highs`, the solver the engine's optimizer uses: the engine
+only declares a range for it, so without the pin an npm install picks the newest
+match rather than the version the engine and this package's protocol baseline
+are tested with. When you bump the engine, set `highs` to the version in the
+engine repository's lockfile in the same change; `pnpm run test:packed` checks
+that exactly one solver at the pinned version is installed.
+
 ## Licensing of contributions
 
 Server code is **AGPL-3.0-only** ([LICENSE](LICENSE)). Skills under `skills/`

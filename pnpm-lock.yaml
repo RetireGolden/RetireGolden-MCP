@@ -17,6 +17,9 @@ importers:
       '@retiregolden/engine':
         specifier: 0.3.0
         version: 0.3.0
+      highs:
+        specifier: 1.15.2
+        version: 1.15.2
       zod:
         specifier: 4.4.3
         version: 4.4.3

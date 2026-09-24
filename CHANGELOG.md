@@ -3,6 +3,20 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- **The optimizer's solver is pinned to the version it is tested with.** The
+  engine declares `highs` as a caret range, so an npm install of this package
+  (every `npx @retiregolden/mcp` user) has resolved the newest match since
+  `highs` 1.15.3 was published on 2026-09-11, while the engine's lockfile and
+  this package's protocol baseline use 1.15.2; `run_optimizer`'s result moved
+  with it, which is what `test:packed` has reported on every CI run since. This
+  package now depends on `highs` exactly, so npm hoists the pinned solver and
+  the engine uses it, and `test:packed` asserts exactly one solver at the pinned
+  version. CONTRIBUTING.md says to move it with the engine.
+
 ## 0.10.0
 
 **A minor, because the tool surface moved.** `build_plan`'s `conventions` loses
