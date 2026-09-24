@@ -15,6 +15,7 @@ import { runMonteCarloPaths, aggregateMonteCarlo } from '@retiregolden/engine/mo
 import { createLognormalModel } from '@retiregolden/engine/montecarlo/marketModels'
 import { optimizePlan } from '@retiregolden/engine/projection/optimizePlan'
 import { solveMaxSustainableSpending } from '@retiregolden/engine/decisions/spendingSolver'
+import { compareScenarioPlans } from '@retiregolden/engine/scenarios/comparison'
 import {
   buildPlanFromParams,
   stateTaxCaveat,
@@ -42,8 +43,12 @@ import type { ConventionKnobs, SessionState } from './session.js'
  * Takes the plan rather than reading session state because the batch and compare
  * paths price CANDIDATE plans: each must be taxed at its own rates, not the
  * session plan's.
+ *
+ * Exported so the parity tests price their ledgers with exactly this stack and
+ * can check that the engine comparison is handed it, rather than a copy that
+ * could drift from it.
  */
-function taxCalc(plan: Plan) {
+export function taxCalc(plan: Plan) {
   return combineTaxCalculators(
     createFederalTaxCalculator(),
     createStateTaxCalculator({
@@ -415,18 +420,14 @@ export function batchEvaluate(
         taxCalculator: taxCalc(parsed.plan),
       })
       const summary = summarizeProjection(parsed.plan, proj)
-      let obj: number
-      if (objective === 'cumulative_tax') {
-        obj = proj.years.reduce((s, y) => s + y.tax + y.penalties, 0)
-      } else if (objective === 'ending_trad') {
-        const last = proj.years[proj.years.length - 1]!
-        obj = Object.entries(last.balances).reduce((s: number, [id, bal]) => {
-          const acct = parsed.plan.accounts.find((a: { id: string; type: string }) => a.id === id)
-          return acct?.type === 'traditional' ? s + bal : s
-        }, 0)
-      } else {
-        obj = summary.endingAfterTaxEstate
-      }
+      // Every objective is a value the engine publishes on the summary; this
+      // adapter selects it and does no arithmetic of its own on the projection.
+      const obj =
+        objective === 'cumulative_tax'
+          ? summary.lifetimeTaxesAndPenalties
+          : objective === 'ending_trad'
+            ? summary.endingByCategory.traditional
+            : summary.endingAfterTaxEstate
       results.push({ index: i, policy, objective: obj, ok: true, caveats })
     } catch (e) {
       results.push({
@@ -630,11 +631,29 @@ export function compareScenarios(
   const rb = simulatePlan(b.plan, { startYear: year, taxCalculator: taxCalc(b.plan) })
   const sa = summarizeProjection(a.plan, ra)
   const sb = summarizeProjection(b.plan, rb)
+  // The delta is the engine's own comparison (proposal minus baseline, each side
+  // priced with its own calculator), not a subtraction here. It projects each
+  // plan again: the engine's comparison does not return the full summaries this
+  // tool also reports, and a deterministic projection is cheap next to that.
+  // The engine refuses a comparison with a non-finite figure by throwing; that
+  // is returned in the tool's ok:false envelope like the optimizer's and the
+  // spending solver's failures, never thrown past the handler.
+  let delta: number
+  try {
+    const comparison = compareScenarioPlans(a.plan, b.plan, { startYear: year, taxCalculatorForPlan: taxCalc })
+    delta = comparison.headline.endingAfterTaxEstate.delta
+  } catch (e) {
+    return {
+      ok: false as const,
+      error: 'COMPARISON_FAILED',
+      message: e instanceof Error ? e.message : String(e),
+    }
+  }
   return {
     ok: true as const,
     a: sa,
     b: sb,
-    deltaEndingAfterTaxEstate: sb.endingAfterTaxEstate - sa.endingAfterTaxEstate,
+    deltaEndingAfterTaxEstate: delta,
   }
 }
 
