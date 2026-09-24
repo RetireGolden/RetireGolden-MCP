@@ -15,7 +15,12 @@ adheres to [Semantic Versioning](https://semver.org/).
   with it, which is what `test:packed` has reported on every CI run since. This
   package now depends on `highs` exactly, so npm hoists the pinned solver and
   the engine uses it, and `test:packed` asserts exactly one solver at the pinned
-  version. CONTRIBUTING.md says to move it with the engine.
+  version. The protocol baseline now records the solver it was captured with
+  (`meta.solverPackage`; nothing else in it changed), its drift messages name
+  the solver, Dependabot no longer proposes solver bumps on their own, and
+  CONTRIBUTING.md says to move it with the engine. The pin binds npm and `npx`
+  installs; a consumer installing with pnpm or Yarn Berry still resolves the
+  engine's own range until the engine pins its solver exactly.
 
 ## 0.10.0
 

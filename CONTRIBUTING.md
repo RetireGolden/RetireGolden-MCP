@@ -35,7 +35,13 @@ only declares a range for it, so without the pin an npm install picks the newest
 match rather than the version the engine and this package's protocol baseline
 are tested with. When you bump the engine, set `highs` to the version in the
 engine repository's lockfile in the same change; `pnpm run test:packed` checks
-that exactly one solver at the pinned version is installed.
+that exactly one solver at the pinned version is installed, the protocol
+baseline records it (`meta.solverPackage`), and Dependabot is told to leave it
+alone. The pin binds npm and `npx` installs, where npm hoists one solver that
+satisfies both. It does not bind a consumer that installs this package with
+pnpm or Yarn Berry, which resolve the engine's own range separately; that needs
+the engine to pin its solver exactly, which is the engine repository's change to
+make.
 
 ## Licensing of contributions
 

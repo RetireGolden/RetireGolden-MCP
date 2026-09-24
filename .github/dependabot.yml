@@ -4,6 +4,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # The optimizer's solver is pinned to the version in the engine
+      # repository's lockfile and moves only with an engine bump
+      # (CONTRIBUTING.md), never on its own: a solver bump changes
+      # run_optimizer's output and the protocol baseline.
+      - dependency-name: highs
   - package-ecosystem: github-actions
     directory: /
     schedule:

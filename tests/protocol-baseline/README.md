@@ -33,4 +33,4 @@ pnpm run baseline:capture
 The command rebuilds `dist/` itself before capturing, so a stale build can never be frozen into a
 regenerated baseline.
 
-Regenerate only as a deliberate, reviewed consequence of an engine bump or an intentional public protocol-contract change. Never regenerate casually to turn a red baseline test green: if the engine pin did not change, investigate the SDK/wire change as a blocking regression.
+Regenerate only as a deliberate, reviewed consequence of an engine bump (with the `highs` solver pin that moves with it, see CONTRIBUTING.md) or an intentional public protocol-contract change. Never regenerate casually to turn a red baseline test green: if neither the engine pin nor the solver pin changed, investigate the SDK/wire change as a blocking regression. `meta.solverPackage` records the solver the baseline was captured with, because `run_optimizer`'s payload moves with it.
