@@ -5,6 +5,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Changed
+
+- **Three figures are now the engine's published values, not arithmetic in the
+  adapter.** `batch_evaluate`'s `cumulative_tax` objective reads the summary's
+  `lifetimeTaxesAndPenalties`, `ending_trad` reads `endingByCategory.traditional`,
+  and `compare_scenarios`' `deltaEndingAfterTaxEstate` reads the engine
+  comparison's `headline.endingAfterTaxEstate.delta` (proposal minus baseline,
+  each plan priced with its own tax calculator, as before). The adapter now only
+  selects them, as its money-math-stays-in-the-engine rule requires. No number
+  moves beyond floating-point association: the new parity tests
+  (`tests/adapter.engineValues.parity.test.ts`) hold each figure equal to the
+  engine value and within a cent of the arithmetic it replaces, and the protocol
+  baseline is unchanged. One behaviour difference: a comparison whose inputs
+  produce a non-finite figure now fails with the engine's error instead of
+  returning a non-finite delta.
+
 ### Fixed
 
 - **The optimizer's solver is pinned to the version it is tested with.** The
