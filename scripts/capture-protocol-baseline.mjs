@@ -683,6 +683,9 @@ export async function captureProtocolBaseline({ root = PACKAGE_ROOT, fixtures } 
       mcpPackage: MCP_VERSION_SENTINEL,
       enginePackage: resolvedPackageVersion('@retiregolden/engine'),
       zodPackage: resolvedPackageVersion('zod'),
+      // The optimizer's solver: run_optimizer's payload moves with it, so the
+      // baseline names the version it was captured with (package.json pins it).
+      solverPackage: resolvedPackageVersion('highs'),
       sdkPackage,
       protocolVersion: stdio.handshake.protocolVersion,
       serverInfo: stdio.handshake.serverInfo,

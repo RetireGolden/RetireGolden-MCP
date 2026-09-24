@@ -426,7 +426,7 @@ describe('packed npm artifact', () => {
     }
   }, 120_000)
 
-  it('installs one v2 MCP runtime and one exact engine through npm', () => {
+  it('installs one v2 MCP runtime, one exact engine and one exact solver through npm', () => {
     const mcpPackages = installedPackages.filter((installed) =>
       installed.name.startsWith('@modelcontextprotocol/'),
     )
@@ -447,6 +447,17 @@ describe('packed npm artifact', () => {
     )
     expect(enginePackages).toHaveLength(1)
     expect(enginePackages[0]?.version).toBe(enginePin)
+
+    // The engine's optimizer solves with HiGHS, and the engine declares it as a
+    // caret range. Left to npm, a consumer gets the newest match, which is not
+    // the version the engine's lockfile or this package's protocol baseline is
+    // tested with (highs 1.15.3 moved run_optimizer's output). This package pins
+    // it, so npm hoists exactly the pinned solver and the engine uses that one.
+    const solverPin = packageManifest.dependencies.highs
+    if (!solverPin) throw new Error('package.json did not pin highs')
+    const solverPackages = installedPackages.filter((installed) => installed.name === 'highs')
+    expect(solverPackages, 'exactly one HiGHS solver must be installed').toHaveLength(1)
+    expect(solverPackages[0]?.version).toBe(solverPin)
   }, 120_000)
 
   it('exposes the documented programmatic exports from the installed package', async () => {

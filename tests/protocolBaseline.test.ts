@@ -32,6 +32,7 @@ interface ProtocolBaseline {
     mcpPackage: string
     enginePackage: string
     zodPackage: string
+    solverPackage: string
     sdkPackage: string
     protocolVersion: string
     serverInfo: Record<string, unknown>
@@ -92,7 +93,7 @@ const ENGINE_NUMERIC_STEPS = new Set([
 
 function driftMessage(step: string): string {
   if (ENGINE_NUMERIC_STEPS.has(step)) {
-    return `${step} drifted (engine-numeric payload); with the engine pin unchanged this is a serving-stack regression — if the engine pin moved, regenerate the baseline deliberately.`
+    return `${step} drifted (engine-numeric payload); with the engine and solver (highs) pins unchanged this is a serving-stack regression — if either pin moved, regenerate the baseline deliberately.`
   }
   return `${step} drifted; with the engine pin unchanged, this indicates an SDK/wire regression.`
 }
@@ -137,6 +138,10 @@ describe('protocol baseline', () => {
       actual.meta.zodPackage,
       'zod version changed; build_plan_invalid wording is zod-authored — regenerate deliberately with the bump',
     ).toBe(expected.meta.zodPackage)
+    expect.soft(
+      actual.meta.solverPackage,
+      "highs (the optimizer's solver) version changed; run_optimizer's payload moves with it — move it only with the engine (see CONTRIBUTING.md) and regenerate deliberately",
+    ).toBe(expected.meta.solverPackage)
     // HARD assertion, deliberately: the observer client must stay the frozen
     // v1 SDK release the baseline was captured with — if it moved, every
     // comparison below is made through a different referee and proves nothing.
