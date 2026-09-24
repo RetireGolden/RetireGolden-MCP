@@ -43,8 +43,12 @@ import type { ConventionKnobs, SessionState } from './session.js'
  * Takes the plan rather than reading session state because the batch and compare
  * paths price CANDIDATE plans: each must be taxed at its own rates, not the
  * session plan's.
+ *
+ * Exported so the parity tests price their ledgers with exactly this stack and
+ * can check that the engine comparison is handed it, rather than a copy that
+ * could drift from it.
  */
-function taxCalc(plan: Plan) {
+export function taxCalc(plan: Plan) {
   return combineTaxCalculators(
     createFederalTaxCalculator(),
     createStateTaxCalculator({
@@ -631,12 +635,25 @@ export function compareScenarios(
   // priced with its own calculator), not a subtraction here. It projects each
   // plan again: the engine's comparison does not return the full summaries this
   // tool also reports, and a deterministic projection is cheap next to that.
-  const comparison = compareScenarioPlans(a.plan, b.plan, { startYear: year, taxCalculatorForPlan: taxCalc })
+  // The engine refuses a comparison with a non-finite figure by throwing; that
+  // is returned in the tool's ok:false envelope like the optimizer's and the
+  // spending solver's failures, never thrown past the handler.
+  let delta: number
+  try {
+    const comparison = compareScenarioPlans(a.plan, b.plan, { startYear: year, taxCalculatorForPlan: taxCalc })
+    delta = comparison.headline.endingAfterTaxEstate.delta
+  } catch (e) {
+    return {
+      ok: false as const,
+      error: 'COMPARISON_FAILED',
+      message: e instanceof Error ? e.message : String(e),
+    }
+  }
   return {
     ok: true as const,
     a: sa,
     b: sb,
-    deltaEndingAfterTaxEstate: comparison.headline.endingAfterTaxEstate.delta,
+    deltaEndingAfterTaxEstate: delta,
   }
 }
 

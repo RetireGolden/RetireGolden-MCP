@@ -17,9 +17,12 @@ adheres to [Semantic Versioning](https://semver.org/).
   moves beyond floating-point association: the new parity tests
   (`tests/adapter.engineValues.parity.test.ts`) hold each figure equal to the
   engine value and within a cent of the arithmetic it replaces, and the protocol
-  baseline is unchanged. One behaviour difference: a comparison whose inputs
-  produce a non-finite figure now fails with the engine's error instead of
-  returning a non-finite delta.
+  baseline is unchanged. A wiring test (`tests/adapter.engineValues.wiring.test.ts`)
+  checks that the adapter reads each figure from the engine and hands the
+  comparison its own tax stack. One behaviour difference: a comparison the
+  engine refuses (it throws on a non-finite figure) now returns `ok: false` with
+  error `COMPARISON_FAILED` and the engine's message, instead of a non-finite
+  delta.
 
 ### Fixed
 
