@@ -19,14 +19,16 @@ describe('session helpers', () => {
     expect(createSession(undefined, { clock: () => new Date(2034, 6, 1) }).startYear).toBe(2034)
   })
 
-  it('clearSession resets plan, caveats, conventions, and lastProjection', () => {
-    // The build names no startYear, so it reads the session clock: pinned here.
+  it('clearSession resets plan, caveats, conventions, lastProjection and the start year', () => {
+    // Pinned to 2026 at creation; the build moves the session to 2030.
     const session = createSession(2026, { clock: () => new Date(2026, 5, 15) })
     adapter.setPlanFromBuild(session, {
       household: singleHousehold,
       policy: singlePolicy,
+      startYear: 2030,
       conventions: { withdrawalOrdering: 'proportional' },
     })
+    expect(session.startYear).toBe(2030)
     adapter.runProjection(session)
     // sanity: the session is now populated
     expect(session.plan).not.toBeNull()
@@ -38,8 +40,17 @@ describe('session helpers', () => {
     expect(session.caveats).toEqual([])
     expect(session.conventions).toEqual({})
     expect(session.lastProjection).toBeNull()
-    // startYear is intentionally preserved across a clear
+    // The start year goes back to the session's default, not the last build's:
+    // here the year pinned at creation.
     expect(session.startYear).toBe(2026)
+  })
+
+  it("clearSession returns an unpinned session to the clock's year", () => {
+    const session = createSession(undefined, { clock: () => new Date(2033, 5, 15) })
+    adapter.setPlanFromBuild(session, { household: singleHousehold, policy: singlePolicy, startYear: 2030 })
+    expect(session.startYear).toBe(2030)
+    clearSession(session)
+    expect(session.startYear).toBe(2033)
   })
 
   it('setPlanFromBuild records the built start year and exact MAGI history', () => {

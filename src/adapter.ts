@@ -31,6 +31,8 @@ import {
 import { compareScenarioPlans } from '@retiregolden/engine/scenarios/comparison'
 import {
   buildPlanFromParams,
+  droppedFields,
+  droppedFieldsSentence,
   startYearIssues,
   stateTaxCaveat,
   TRADITIONAL_FIRST_CAVEAT,
@@ -218,13 +220,23 @@ export function validatePlanJson(input: unknown, startYear?: number) {
   const parsed = parsePlan(input)
   if (startYear === undefined) return parsed
   if (!parsed.ok) return { ...parsed, startYear }
+  // Fields the engine dropped are a warning, not an error: the plan is valid
+  // without them, and build_plan would accept it with the same sentence as a
+  // caveat. @see droppedFieldsSentence
+  const dropped = droppedFields(input, parsed.plan)
+  const warnings = dropped.length > 0 ? [droppedFieldsSentence(dropped, 'document')] : []
   const asOf = startYearIssues(parsed.plan, startYear)
-  if (asOf.length > 0) return { ok: false as const, issues: asOf, startYear }
-  return { ...parsed, startYear }
+  if (asOf.length > 0) return { ok: false as const, issues: asOf, startYear, warnings }
+  return { ...parsed, startYear, warnings }
 }
 
 export function setPlanFromBuild(session: SessionState, input: BuildPlanInput) {
-  const result = buildPlanFromParams(input, { clock: session.clock })
+  // A build that names no year uses the session's default: the clock's year,
+  // or the year an embedder pinned at createSession. @see sessionDefaultStartYear
+  const result = buildPlanFromParams(input, {
+    clock: session.clock,
+    ...(session.defaultStartYear !== undefined ? { defaultStartYear: session.defaultStartYear } : {}),
+  })
   // `ok` alone narrows: BuildPlanResult is a discriminated union, so the success
   // arm's `plan` is non-optional and needs no second guard.
   if (!result.ok) {
@@ -821,11 +833,12 @@ export function compareScenarios(
   planB: unknown,
   startYear?: number,
 ) {
+  // Every arm says which year it judged, the refusals included.
+  const year = startYear ?? session.startYear
   const a = parsePlan(planA)
   const b = parsePlan(planB)
-  if (!a.ok) return { ok: false as const, error: 'INVALID_PLAN_A', issues: a.issues }
-  if (!b.ok) return { ok: false as const, error: 'INVALID_PLAN_B', issues: b.issues }
-  const year = startYear ?? session.startYear
+  if (!a.ok) return { ok: false as const, error: 'INVALID_PLAN_A', startYear: year, issues: a.issues }
+  if (!b.ok) return { ok: false as const, error: 'INVALID_PLAN_B', startYear: year, issues: b.issues }
   // The start-year check build_plan refuses a plan on, against the year both
   // sides are projected from: a side with a pension lump-sum election dated
   // before it would be priced as a pension that pays nothing and a rollover
@@ -1177,6 +1190,7 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
   if (asOf.length > 0) {
     return { ok: false as const, error: 'INVALID_PLAN', startYear: session.startYear, issues: asOf }
   }
+  const dropped = fragmentDroppedFields(ops, parsed.plan)
 
   // Commit. Stale projection is dropped; record the transient caveat so a reader
   // knows the plan moved and any prior projection/optimizer result no longer
@@ -1243,6 +1257,69 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
     // of it starts from.
     startYear: session.startYear,
     plan: planSummary(parsed.plan),
-    caveats: snapshotCaveats(session),
+    // A dropped-field note describes this call's operations, so it rides on
+    // this response only and is not kept with the session's caveats.
+    caveats:
+      dropped.length > 0
+        ? [...snapshotCaveats(session), droppedFieldsSentence(dropped, 'operations')]
+        : snapshotCaveats(session),
   }
+}
+
+/**
+ * Fields an update_plan operation supplied that the merged plan does not carry
+ * after `parsePlan`, as plan paths (`accounts.3.futureField`).
+ *
+ * Each account, income and assumptions or expenses field is compared with the
+ * LAST operation that wrote it, so an earlier fragment a later one replaced is
+ * not reported, and a removed entry is not compared at all. A field a
+ * `set_assumption` or `set_expense` names is known to the schema (unknown names
+ * are refused first), so only the keys inside an object value can be dropped.
+ */
+function fragmentDroppedFields(ops: UpdatePlanOp[], merged: Plan): string[] {
+  type Write =
+    | { section: 'accounts' | 'incomes'; id: unknown; fragment: Record<string, unknown> }
+    | { section: 'assumptions' | 'expenses'; field: string; value: unknown }
+  const last = new Map<string, Write>()
+  for (const op of ops) {
+    switch (op.op) {
+      case 'add_account':
+        last.set(`accounts:${String(op.account.id)}`, { section: 'accounts', id: op.account.id, fragment: op.account })
+        break
+      case 'replace_account':
+        last.set(`accounts:${op.id}`, { section: 'accounts', id: op.id, fragment: op.account })
+        break
+      case 'remove_account':
+        last.delete(`accounts:${op.id}`)
+        break
+      case 'add_income':
+        last.set(`incomes:${String(op.income.id)}`, { section: 'incomes', id: op.income.id, fragment: op.income })
+        break
+      case 'replace_income':
+        last.set(`incomes:${op.id}`, { section: 'incomes', id: op.id, fragment: op.income })
+        break
+      case 'remove_income':
+        last.delete(`incomes:${op.id}`)
+        break
+      case 'set_assumption':
+        last.set(`assumptions:${op.field}`, { section: 'assumptions', field: op.field, value: op.value })
+        break
+      case 'set_expense':
+        last.set(`expenses:${op.field}`, { section: 'expenses', field: op.field, value: op.value })
+        break
+    }
+  }
+  const out: string[] = []
+  for (const write of last.values()) {
+    if ('fragment' in write) {
+      const list = merged[write.section] as Array<{ id: string }>
+      const index = list.findIndex((entry) => entry.id === write.id)
+      if (index === -1) continue
+      out.push(...droppedFields(write.fragment, list[index], `${write.section}.${index}.`))
+    } else {
+      const kept = (merged[write.section] as Record<string, unknown>)[write.field]
+      out.push(...droppedFields(write.value, kept, `${write.section}.${write.field}.`))
+    }
+  }
+  return out
 }

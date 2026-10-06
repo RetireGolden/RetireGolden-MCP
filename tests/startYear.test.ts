@@ -190,6 +190,75 @@ describe('compare_scenarios and validate_plan run the same start-year check', ()
   })
 })
 
+describe('validate_plan, compare_scenarios and build_plan judge a plan in the same year', () => {
+  const validate = () => getTool('validate_plan')!
+
+  it('after a clear, the default the build uses (the reviewer sequence)', () => {
+    // Built at 2032, then cleared: the session's year goes back to the clock's
+    // (2026), so a 2031 election passes validation and builds; before the fix,
+    // validation judged it against the leftover 2032 and refused it.
+    const session = createSession(undefined, { clock: () => new Date(2026, 5, 15) })
+    adapter.setPlanFromBuild(session, { household: singleHousehold, policy: singlePolicy, startYear: 2032 })
+    expect(session.startYear).toBe(2032)
+    getTool('clear_session')!.handler(session, {})
+    const doc = planWithLumpSumOffer(2031, true)
+    const validated = validate().handler(session, { plan: doc }) as { ok: boolean; startYear: number }
+    const built = adapter.setPlanFromBuild(session, { plan: doc })
+    expect(validated.startYear).toBe(2026)
+    expect(built.startYear).toBe(2026)
+    expect(validated.ok).toBe(true)
+    expect(built.ok).toBe(true)
+    expect(adapter.compareScenarios(createSession(undefined, { clock: () => new Date(2026, 5, 15) }), doc, doc).ok).toBe(true)
+
+    // And on a clock past the election both refuse it.
+    const later = createSession(undefined, { clock: () => new Date(2033, 5, 15) })
+    adapter.setPlanFromBuild(later, { household: singleHousehold, policy: singlePolicy, startYear: 2032 })
+    getTool('clear_session')!.handler(later, {})
+    expect((validate().handler(later, { plan: doc }) as { ok: boolean }).ok).toBe(false)
+    expect(adapter.setPlanFromBuild(later, { plan: doc }).ok).toBe(false)
+  })
+
+  it('with a year pinned at createSession, which a build that names none also uses', () => {
+    const session = createSession(2032, { clock: () => new Date(2026, 5, 15) })
+    const doc = planWithLumpSumOffer(2031, true)
+    const validated = validate().handler(session, { plan: doc }) as { ok: boolean; startYear: number }
+    const built = adapter.setPlanFromBuild(session, { plan: doc })
+    expect(validated.startYear).toBe(2032)
+    expect(built.startYear).toBe(2032)
+    expect(validated.ok).toBe(false)
+    expect(built.ok).toBe(false)
+
+    const open = planWithLumpSumOffer(2033, true)
+    const builtOpen = adapter.setPlanFromBuild(session, { plan: open })
+    expect(builtOpen.ok).toBe(true)
+    expect(builtOpen.startYear).toBe(2032)
+  })
+})
+
+describe('every refusal says which year it judged', () => {
+  it('compare_scenarios echoes startYear when a side does not parse', () => {
+    const session = createSession(2026)
+    const plan = builtOk(buildPlanFromParams({ household: singleHousehold, policy: singlePolicy, startYear: 2026 })).plan
+    const badA = adapter.compareScenarios(session, { not: 'a plan' }, plan, 2030)
+    expect(badA.ok).toBe(false)
+    if (badA.ok) return
+    expect(badA.error).toBe('INVALID_PLAN_A')
+    expect(badA.startYear).toBe(2030)
+    const badB = adapter.compareScenarios(session, plan, { not: 'a plan' })
+    expect(badB.ok).toBe(false)
+    if (badB.ok) return
+    expect(badB.error).toBe('INVALID_PLAN_B')
+    expect(badB.startYear).toBe(2026)
+  })
+
+  it("validate_plan's NO_PLAN echoes the year it would have checked", () => {
+    const validate = getTool('validate_plan')!
+    const session = createSession(2029)
+    expect(validate.handler(session, {})).toEqual({ ok: false, error: 'NO_PLAN', startYear: 2029 })
+    expect(validate.handler(session, { startYear: 2031 })).toEqual({ ok: false, error: 'NO_PLAN', startYear: 2031 })
+  })
+})
+
 describe('every projecting tool echoes the start year it ran from', () => {
   async function echoes(session: SessionState) {
     const plan = structuredClone(session.plan)

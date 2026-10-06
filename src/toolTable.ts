@@ -179,7 +179,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'validate_plan',
-    description: `${EDUCATIONAL} Validate plan JSON (or the current session plan) with the engine, and against a start year as build_plan checks it: a pension lump-sum election dated before that year is reported as an issue. The result echoes the startYear it checked against.`,
+    description: `${EDUCATIONAL} Validate plan JSON (or the current session plan) with the engine, and against a start year as build_plan checks it: a pension lump-sum election dated before that year is reported as an issue. Fields the engine does not read, which build_plan would drop, are listed in warnings. The result echoes the startYear it checked against.`,
     inputShape: {
       plan: z.unknown().optional(),
       startYear: z
@@ -191,11 +191,12 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         ),
     },
     handler: (session, args) => {
+      const startYear = (args.startYear as number | undefined) ?? session.startYear
       const target = args.plan ?? session.plan
       if (target == null) {
-        return { ok: false, error: 'NO_PLAN' }
+        return { ok: false, error: 'NO_PLAN', startYear }
       }
-      return adapter.validatePlanJson(target, (args.startYear as number | undefined) ?? session.startYear)
+      return adapter.validatePlanJson(target, startYear)
     },
     httpExposed: false,
     dataScope: 'session',
@@ -363,7 +364,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'update_plan',
-    description: `${EDUCATIONAL} Incrementally mutate the current session plan with named merge operations (add/replace/remove accounts or incomes by id; set an assumption or expense field) — for building a plan up from extracted document fragments without rebuilding each turn. Requires a seeded plan (build_plan first; NO_PLAN otherwise). The mutated plan is validated via the engine BEFORE commit, and checked against the session's startYear as build_plan checks it (a pension lump-sum election dated before that year is refused): on failure the session plan is left UNCHANGED and issues are returned. Returns the updated plan summary, the session startYear, and caveats on success.`,
+    description: `${EDUCATIONAL} Incrementally mutate the current session plan with named merge operations (add/replace/remove accounts or incomes by id; set an assumption or expense field) — for building a plan up from extracted document fragments without rebuilding each turn. Requires a seeded plan (build_plan first; NO_PLAN otherwise). The mutated plan is validated via the engine BEFORE commit, and checked against the session's startYear as build_plan checks it (a pension lump-sum election dated before that year is refused): on failure the session plan is left UNCHANGED and issues are returned. Returns the updated plan summary, the session startYear, and caveats on success; a field in a fragment that the engine does not read is dropped and named in those caveats.`,
     inputShape: {
       operations: z
         .array(UpdatePlanOpSchema)

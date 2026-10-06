@@ -10,7 +10,7 @@ The example below is minimal and round-trips through `build_plan`. It is the `pl
 
 ## Section notes
 
-- **top-level ids/timestamps** — `schemaVersion` is the version the document was written against (`7` here, which is what a freshly exported document carries); `id`, `name`, `origin`, and the two ISO timestamps identify the document.
+- **top-level ids/timestamps** — `schemaVersion` is the version the document was written against (`7` here, which is what a freshly exported document carries); `id`, `name`, `origin`, and the two ISO timestamps identify the document. The two stamps come from the server's clock (both at a typed `build_plan`, `updatedAtIso` again at each `update_plan`, while an imported document keeps its own until then), and `export_plan` writes them as they stand; the instants below are example values.
 - **household** — filing status, state of residence, and the `people[]` (each with `dob`, `sex`, `retirementAge`, and a `longevity.planningAge` horizon endpoint).
 - **accounts** — a discriminated union by `type` (`traditional`/`roth`/`taxable`/`hsa`/`cash`/…); balances, `annualReturnPct`, and per-type fields like the taxable account's `costBasis` and `qualifiedRatio`.
 - **incomes** — a union by `type`: `socialSecurity` (with `piaMonthly` and `claimAge`), `recurring` (pensions/other, with `taxTreatment`), `wages`, and `oneTime`. Both `recurring` and `oneTime` carry a required `inflationAdjusted` boolean: `true` means the amount is in today's dollars and grows to the year it pays; `false` means it is that year's dollars, taken as written. Documents from before plan-schema v5 had no election on `oneTime` and migrate in as `false`, which preserves what they already projected; when you author a new one-time amount in today's dollars, set it `true`. (One-time spending goals carry no such election — their `amount` is always today's dollars and always grown to the goal year — so `true` gives a one-time income that same reading; there is no goal-side field to mirror.) A `socialSecurity` income can also carry `disability` for a disability benefit (SSDI): `onsetAge` (40–75) is required, and `incomes[].disability.onsetMonth` (1–12) is the month the disability began; a blank month reads as January 1, so the five-month waiting period runs January to May and the first payment is for June of the onset year. Set the month when you know it.
@@ -28,8 +28,8 @@ The example below is minimal and round-trips through `build_plan`. It is the `pl
   "id": "id-2",
   "name": "mcp-session",
   "origin": "user",
-  "createdAtIso": "2026-01-01T00:00:00.000Z",
-  "updatedAtIso": "2026-01-01T00:00:00.000Z",
+  "createdAtIso": "2026-03-14T15:42:07.318Z",
+  "updatedAtIso": "2026-03-14T15:42:07.318Z",
   "household": {
     "filingStatus": "marriedFilingJointly",
     "hasQualifyingDependent": false,

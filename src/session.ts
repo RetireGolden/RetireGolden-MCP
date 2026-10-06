@@ -66,6 +66,14 @@ export interface SessionState {
    */
   clock: Clock
   /**
+   * The start year an embedder pinned with `createSession(startYear)`, used in
+   * place of the clock's year wherever the session needs a default: before any
+   * build, after `clear_session`, and for a `build_plan` that names none.
+   * Undefined for every server and gateway session, which follow the clock.
+   * @see sessionDefaultStartYear
+   */
+  defaultStartYear?: number
+  /**
    * The most recent `run_projection` output, or null when no projection has run
    * (or `update_plan` invalidated it). `runProjection` is the only writer and it
    * always stores exactly this pair, so typing it saves
@@ -81,25 +89,52 @@ export interface CreateSessionOptions {
 }
 
 /**
+ * The start year a session uses when nothing has set one: the year an
+ * embedder pinned with `createSession(startYear)`, else the clock's year now.
+ * One rule for every path that needs a default (`get_session` before a build,
+ * `clear_session`, a `build_plan` that names no year, and through
+ * `session.startYear` the `validate_plan` and `compare_scenarios` defaults), so
+ * a plan checked on one path and built on another is judged in the same year.
+ */
+export function sessionDefaultStartYear(session: Pick<SessionState, 'clock' | 'defaultStartYear'>): number {
+  return session.defaultStartYear ?? clockStartYear(session.clock)
+}
+
+/**
  * A fresh, empty session. `startYear` is what `get_session` reports before any
- * build; it defaults to the clock's year, and every `build_plan` then sets it
- * (to the caller's `startYear`, or to the clock's year at that build).
+ * build, and what `validate_plan` and `compare_scenarios` check against when
+ * they name none: the session's default start year (@see
+ * sessionDefaultStartYear). Every `build_plan` then sets it, to the caller's
+ * `startYear` or to that default at that build.
+ *
+ * `startYear`, when given, pins the default for the session's whole life: a
+ * build that names no year and a clear both use it instead of the clock's.
  */
 export function createSession(startYear?: number, options: CreateSessionOptions = {}): SessionState {
   const clock = options.clock ?? systemClock
-  return {
+  const session: SessionState = {
     plan: null,
-    startYear: startYear ?? clockStartYear(clock),
+    startYear: 0,
     caveats: [],
     conventions: {},
     lastProjection: null,
     clock,
+    ...(startYear !== undefined ? { defaultStartYear: startYear } : {}),
   }
+  session.startYear = sessionDefaultStartYear(session)
+  return session
 }
 
+/**
+ * Empty the session. Its start year goes back to the session's default (the
+ * clock's year, or the year pinned at creation), not the last build's, so that
+ * after a clear `validate_plan`, `compare_scenarios` and `build_plan` all judge
+ * a plan in the same year again.
+ */
 export function clearSession(session: SessionState): void {
   session.plan = null
   session.caveats = []
   session.conventions = {}
   session.lastProjection = null
+  session.startYear = sessionDefaultStartYear(session)
 }

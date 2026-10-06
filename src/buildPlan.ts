@@ -417,6 +417,13 @@ interface AcceptedAs {
   conventionsApplied: boolean
   /** Paths of fields the supplied document carried and the parsed plan does not. */
   dropped: string[]
+  /** The plan-schema version a migrated document declared; null when it was read directly. */
+  migratedFrom: number | null
+  /**
+   * True once a caveat earlier in the same build has named `dropped`, so a
+   * second skew caveat refers to it instead of listing the paths again.
+   */
+  droppedNamedAbove?: boolean
 }
 
 /** How many dropped paths a caveat names before it summarizes the rest. */
@@ -437,8 +444,19 @@ const DROPPED_PATHS_NAMED = 5
  */
 function acceptedHow(accepted: AcceptedAs): string {
   const parts: string[] = []
+  // A migrated document was rewritten by the engine on its way in, so it was
+  // never imported "unchanged"; worded as the migration caveat words it.
+  if (accepted.migratedFrom != null) {
+    parts.push(
+      `after the engine upgraded it from plan-schema v${accepted.migratedFrom} to this build's v${PLAN_SCHEMA_VERSION}`,
+    )
+  }
   if (accepted.dropped.length > 0) {
-    parts.push(`without ${droppedList(accepted.dropped)}`)
+    parts.push(
+      accepted.droppedNamedAbove
+        ? "without the fields this build's engine does not read, named in the caveat above"
+        : `without ${droppedList(accepted.dropped)}`,
+    )
   }
   if (accepted.conventionsApplied) parts.push('with the `conventions` you supplied applied on top of it')
   return parts.length === 0 ? 'unchanged' : parts.join(', and ')
@@ -466,9 +484,18 @@ function droppedList(dropped: string[]): string {
  */
 function pushDroppedFieldsCaveat(dropped: string[], caveats: string[]): void {
   if (dropped.length === 0) return
-  caveats.push(
-    `fields dropped: the supplied plan document carried ${droppedList(dropped)}; a document written by a newer RetireGolden build can carry such fields, and the projection here is made without them.`,
-  )
+  caveats.push(droppedFieldsSentence(dropped, 'document'))
+}
+
+/**
+ * The `fields dropped:` sentence, shared by `build_plan` (a document),
+ * `validate_plan` (a document, as a warning) and `update_plan` (its operations'
+ * fragments), so the three name dropped fields in one wording.
+ */
+export function droppedFieldsSentence(dropped: string[], source: 'document' | 'operations'): string {
+  return source === 'document'
+    ? `fields dropped: the supplied plan document carried ${droppedList(dropped)}; a document written by a newer RetireGolden build can carry such fields, and the projection here is made without them.`
+    : `fields dropped: the update_plan operations carried ${droppedList(dropped)}; the plan was updated without them (check the field names against describe_plan_schema).`
 }
 
 /**
@@ -646,6 +673,12 @@ export interface BuildPlanOptions {
    * `setPlanFromBuild` passes the session's clock. Defaults to the system clock.
    */
   clock?: Clock
+  /**
+   * The start year to use when `input.startYear` is omitted, in place of the
+   * clock's year: the session's pinned default (`createSession(startYear)`),
+   * which `setPlanFromBuild` passes when there is one.
+   */
+  defaultStartYear?: number
 }
 
 /**
@@ -668,7 +701,7 @@ export function startYearIssues(plan: Plan, startYear: number): string[] {
 export function buildPlanFromParams(input: BuildPlanInput, options: BuildPlanOptions = {}): BuildPlanResult {
   const caveats: string[] = []
   const clock = options.clock ?? systemClock
-  const startYear = input.startYear ?? clockStartYear(clock)
+  const startYear = input.startYear ?? options.defaultStartYear ?? clockStartYear(clock)
   const conventions = input.conventions ?? {}
 
   if (input.plan != null) {
@@ -754,11 +787,16 @@ export function buildPlanFromParams(input: BuildPlanInput, options: BuildPlanOpt
       // this build's version.
       pushMigratedSiblingSkewCaveat(input.schemaVersion, migratedFrom, caveats)
     }
-    const acceptedAs = { conventionsApplied, dropped }
+    const acceptedAs: AcceptedAs = { conventionsApplied, dropped, migratedFrom }
     const callerSkew =
       migratedFrom == null && pushCallerSchemaSkewCaveat(input.schemaVersion, caveats, acceptedAs)
-    const engineSkew = pushEngineSkewCaveat(input.engineVersion, caveats, acceptedAs)
-    // Named once: a skew caveat that fired already lists the dropped fields.
+    // Named once: the first skew caveat that fires lists the dropped fields, a
+    // second refers to it, and the standalone caveat is only for a document
+    // with no skew caveat at all.
+    const engineSkew = pushEngineSkewCaveat(input.engineVersion, caveats, {
+      ...acceptedAs,
+      droppedNamedAbove: callerSkew,
+    })
     if (!callerSkew && !engineSkew) pushDroppedFieldsCaveat(dropped, caveats)
     // Say how this document is taxed, exactly as the typed path does. A document is
     // where `stateEffectiveTaxPct: 0` is most likely to be sitting — it is what the

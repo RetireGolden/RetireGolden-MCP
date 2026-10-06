@@ -46,8 +46,11 @@ with Marketplace coverage reaches it.
   does (`guiStartYear()`). Through 0.10.0 it was the literal 2026, so from
   1 January 2027 the same document would have answered differently here and in
   the app. A session's `startYear` before any build (what `get_session`
-  reports) is the clock's year too. Pass `startYear` to reproduce a projection
-  from another year: an exported plan carries it.
+  reports, and what `validate_plan` and `compare_scenarios` judge against when
+  they name no year) is the clock's year too, and `clear_session` returns it
+  there instead of keeping the last build's year, so before any build every
+  path judges a plan in the same year. Pass `startYear` to reproduce a
+  projection from another year: an exported plan carries it.
 - **Plans are stamped from the same clock.** A typed build's `createdAtIso` and
   `updatedAtIso` are the build instant, not a frozen `2026-01-01T00:00:00.000Z`,
   and `update_plan` advances `updatedAtIso` from the session's clock instead of
@@ -65,8 +68,11 @@ with Marketplace coverage reaches it.
   - `compare_scenarios` refuses a side as `INVALID_PLAN_A` or `INVALID_PLAN_B`,
     against the start year it projects both sides from.
   - `validate_plan` reports the issue as a validation error, against the
-    `startYear` it is given (a new optional argument) or the session's, and
-    echoes the year it checked.
+    `startYear` it is given (a new optional argument) or the session's.
+
+  Every arm of `compare_scenarios` and `validate_plan` echoes the year it
+  judged, including a side that does not parse and `validate_plan`'s
+  `NO_PLAN`.
 - **Every projecting tool echoes the `startYear` it ran from.**
   `run_monte_carlo`, `batch_evaluate`, `run_optimizer`, `solve_max_spending`,
   `compare_scenarios` (its argument or the session's), `explain_modeled_result`
@@ -105,21 +111,31 @@ with Marketplace coverage reaches it.
   and the earliest claim age still open: the claim would be backdated, and the
   engine's claim-age grid never offers it. Before, every row wrote every
   person's claim age, so a sweep could price claims the household cannot make.
-- **Fields the engine drops from a document are named.** When `parsePlan`
-  drops fields this engine does not read, which is how engine 0.3.0 lost
-  `incomes[].disability.onsetMonth`, `build_plan` now says so whatever the
-  document's version siblings say. It names up to five dropped paths and
-  counts the rest; an array item past the end of what the engine kept is named
-  by index (`accounts.3`).
-  - With no siblings, or siblings that match this build, a `fields dropped:`
-    caveat names them.
-  - On the skew path, the `engineVersion` or `schemaVersion` skew caveat names
-    them instead of calling the document "unchanged", and the `fields dropped:`
-    caveat is not added, so nothing is reported twice.
-  - A migrated document is not checked: a migration may move fields, and its
-    own caveat already says the document was upgraded.
+- **Fields the engine drops are named.** When `parsePlan` drops fields this
+  engine does not read, which is how engine 0.3.0 lost
+  `incomes[].disability.onsetMonth`, the tool that took them in now says so.
+  It names up to five dropped paths and counts the rest; an array item past
+  the end of what the engine kept is named by index (`accounts.3`).
+  - `build_plan`, with no version siblings or siblings that match this build:
+    a `fields dropped:` caveat names them.
+  - `build_plan` on the skew path: the first skew caveat that fires names them
+    instead of calling the document "unchanged"; when both the
+    `schemaVersion` and the `engineVersion` caveat fire, the second refers to
+    the first, and no `fields dropped:` caveat is added, so nothing is
+    reported twice.
+  - `update_plan`: each fragment is compared with the merged plan after
+    `parsePlan` (the last operation that wrote an entry or field), and the
+    response's caveats name what was dropped. The note rides on that response
+    only.
+  - `validate_plan`: listed in a new `warnings` array, as a warning, not an
+    error.
+  - A migrated document is not checked: a migration may move fields. Its
+    engine-skew caveat no longer calls it "imported unchanged"; it says the
+    engine upgraded it from its plan-schema version, as the migration caveat
+    does.
   - A current export and the `plan-json.md` example drop nothing, so they get
-    no such caveat.
+    no such caveat. The typed `household`/`policy`/`assumptions` path is not
+    checked: its tool input schema governs unknown keys.
 - **FI figures are priced as the app prices them.** Engine 0.4.0's
   `summarizeProjection` takes a third argument, the plan's conversion-free run
   or `null`. Every summary a response carries (`run_projection`,
@@ -198,9 +214,17 @@ with Marketplace coverage reaches it.
   `Clock`, `CreateSessionOptions` and `BuildPlanOptions` are exported.
 - `createSession(startYear?, { clock? })` takes an optional clock, and
   `SessionState` has a required `clock`; a session built with `createSession`
-  needs no change. `buildPlanFromParams(input, { clock? })` reads it for the
-  default start year and the build stamp; `setPlanFromBuild` passes the
-  session's.
+  needs no change. `buildPlanFromParams(input, { clock?, defaultStartYear? })`
+  reads the clock for the default start year and the build stamp;
+  `setPlanFromBuild` passes the session's.
+- A year passed to `createSession(startYear)` is now the session's default
+  start year for its whole life (`SessionState.defaultStartYear`): a
+  `build_plan` that names no year uses it, and `clearSession` returns to it,
+  as `validate_plan` and `compare_scenarios` already did through
+  `session.startYear`. `sessionDefaultStartYear(session)` gives the default
+  (that year, else the clock's). Without it a build used the clock while the
+  checks used the pinned year. Server and gateway sessions pin no year and
+  follow the clock.
 - `exportPlan`'s `plan` is declared as the engine's `Plan`. Inferred, its type
   named the zod brand of the engine's own zod (engine 0.4.0 needs `^4.6.2`;
   this package keeps its tool schemas on its exact zod 4.4.3), which a
@@ -238,10 +262,15 @@ with Marketplace coverage reaches it.
   `maxBaseAnnualNote`, on a required spending floor of $121,450 where the
   engine publishes the exact amount. `tests/startYear.test.ts` covers the
   start-year check in `compare_scenarios` (either side) and `validate_plan`
-  (the given year and the session's). `tests/droppedFields.test.ts` plants
-  unknown fields and checks the caveat on both paths, the count past five, and
-  a truncated array tail; the browser round trip asserts its payload drops
-  nothing.
+  (the given year and the session's), the year every refusal echoes, and
+  that `validate_plan` and `build_plan` agree after a clear and on a session
+  pinned at creation. `tests/droppedFields.test.ts` plants unknown fields and
+  checks the caveat with no siblings, matching siblings, one skew and both
+  skews, the count past five, a truncated array tail, a migrated document's
+  skew caveat, and the `update_plan` and `validate_plan` reports; the browser
+  round trip asserts its payload drops nothing, and
+  `tests/planJsonExample.test.ts` builds the `plan-json.md` example and
+  asserts it drops nothing and is not refused.
 - The protocol-baseline capture passes the SDK's default environment
   (`getDefaultEnvironment()`) plus `RETIREGOLDEN_MCP_BASELINE_NOW` to the stdio
   child explicitly, instead of relying on the SDK merging them.
@@ -256,7 +285,8 @@ with Marketplace coverage reaches it.
   `warnings` list, the `startYear` echo and the start-year refusal, and
   `examples.md`'s worked `build_plan` calls pass `startYear`.
   `plan-json.md` lists `incomes[].disability.onsetMonth` and what a blank month
-  means.
+  means, and says its example's stamps are example values from the server's
+  clock.
 - `schemas/tools.v1.json` is regenerated (`pnpm run contract:generate`): the
   `startYear` descriptions of `build_plan` and `compare_scenarios`,
   `validate_plan`'s new `startYear` argument, and the `assumptions.sex`
@@ -324,8 +354,10 @@ rollover; every fixture starts in 2026) and #771 (railroad annuities and
   `"down-to-hundred"`, `sustainsCurrentBase` true, and both notes null (the
   slack, $61,400, is positive). The claims check moves no batch row: the
   fixture's claim at 67 falls in 2027, still open. `validate_plan` gains
-  `startYear` (2026), and no recorded document trips the start-year check or
-  drops a field.
+  `startYear` (2026) and an empty `warnings` list, and no recorded document
+  trips the start-year check or drops a field. `get_session` after
+  `clear_session` still reports 2026: the cleared session returns to the
+  clock's year, which the capture pins to 2026.
 - **Golden numbers**, regenerated (`pnpm run goldens:print`), every moved
   literal from the causes above:
 

@@ -6,6 +6,7 @@ export {
   createSession,
   clearSession,
   clockStartYear,
+  sessionDefaultStartYear,
   systemClock,
   type Clock,
   type CreateSessionOptions,
