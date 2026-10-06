@@ -214,7 +214,9 @@ describe('batchEvaluate — ordering modes', () => {
   })
 })
 
-describe('runMonteCarlo', () => {
+// Each test runs full Monte Carlo projections, which on engine 0.4.0 take 5-8 s apiece on
+// hosted CI runners (1-3 s locally), past vitest's 5 s default.
+describe('runMonteCarlo', { timeout: 60_000 }, () => {
   it('returns a summary with a success rate in [0, 1]', () => {
     const session = mfjSession()
     const mc = adapter.runMonteCarlo(session, { pathCount: 50, seed: 7 })

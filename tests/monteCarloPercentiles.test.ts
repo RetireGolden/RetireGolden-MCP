@@ -7,7 +7,9 @@ import { describe, expect, it } from 'vitest'
 import * as adapter from '../src/adapter.js'
 import { mfjSession as session } from './helpers/session.js'
 
-describe('run_monte_carlo percentiles', () => {
+// Each test runs full Monte Carlo projections, which on engine 0.4.0 take 5-8 s apiece on
+// hosted CI runners (1-3 s locally), past vitest's 5 s default.
+describe('run_monte_carlo percentiles', { timeout: 60_000 }, () => {
   it('returns numeric, monotone p10..p90', () => {
     const mc = adapter.runMonteCarlo(session(), { pathCount: 100, seed: 7 })
     expect(mc.ok).toBe(true)
