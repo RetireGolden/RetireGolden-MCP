@@ -2,7 +2,14 @@
  * Headless engine adapter — projection, MC, batch evaluate, optimizer, spending.
  */
 
-import { simulatePlan, summarizeProjection, type Plan } from '@retiregolden/engine'
+import {
+  simulatePlan,
+  summarizeProjection,
+  type Plan,
+  type ProjectionResult,
+  type SimulateOptions,
+} from '@retiregolden/engine'
+import { conversionFreeRun } from '@retiregolden/engine/projection/compare'
 import { parsePlan } from '@retiregolden/engine/model/plan'
 import {
   planJsonSchema,
@@ -15,9 +22,18 @@ import { runMonteCarloPaths, aggregateMonteCarlo } from '@retiregolden/engine/mo
 import { createLognormalModel } from '@retiregolden/engine/montecarlo/marketModels'
 import { optimizePlan } from '@retiregolden/engine/projection/optimizePlan'
 import { solveMaxSustainableSpending } from '@retiregolden/engine/decisions/spendingSolver'
+import { isExactAnswerDiagnostic } from '@retiregolden/engine/decisions/spendingSolverDiagnostics'
+import {
+  claimYearOf,
+  earliestOpenClaimAge,
+  isClaimAlreadyMade,
+} from '@retiregolden/engine/socialSecurity/openClaims'
 import { compareScenarioPlans } from '@retiregolden/engine/scenarios/comparison'
 import {
   buildPlanFromParams,
+  droppedFields,
+  droppedFieldsSentence,
+  startYearIssues,
   stateTaxCaveat,
   TRADITIONAL_FIRST_CAVEAT,
   type BuildPlanInput,
@@ -56,6 +72,57 @@ export function taxCalc(plan: Plan) {
       localPct: plan.assumptions.localIncomeTaxPct,
     }),
   )
+}
+
+/**
+ * The projection summary a tool PUBLISHES, priced as the RetireGolden app prices
+ * it (planner-ui's `projectPlan`): when the plan converts to Roth in some year,
+ * the engine reads the FI number's spending year from the same plan run with its
+ * conversions removed (`conversionFreeRun`, on the options the projection itself
+ * ran on), so a conversion's one-off tax is not priced as spending. Engine 0.4.0
+ * requires every caller to choose; this is the choice for every summary a
+ * response carries, so its FI figures (`fiNumber`, `coastFireNumber`, `fiBasis`)
+ * match the app's. The conversion-free run is only built when the plan converts.
+ *
+ * Cost, paid for FI parity with the app: one more deterministic projection for
+ * each summary a response publishes, and only when the plan converts.
+ */
+function publishedSummary(plan: Plan, result: ProjectionResult, simulateOptions: SimulateOptions) {
+  return summarizeProjection(plan, result, { conversionFreeRun: conversionFreeRun(plan, simulateOptions) })
+}
+
+/**
+ * A summary read only for figures that do not depend on the FI basis (lifetime
+ * taxes, ending balances, the after-tax estate). `conversionFreeRun: null` is the
+ * engine's own choice for that case (`createDecisionContext` builds its baseline
+ * summary this way) and saves a second projection per converting plan. A summary
+ * built here must never reach a response whole: its FI figures may carry
+ * conversion tax (`fiBasis.spendingSource: 'conversionTaxIncluded'`).
+ */
+function summaryWithoutFiBasis(plan: Plan, result: ProjectionResult) {
+  return summarizeProjection(plan, result, { conversionFreeRun: null })
+}
+
+/**
+ * The warnings of the session plan's deterministic projection, for the tools
+ * that start from that projection but publish something else (Monte Carlo
+ * percentiles, a batch of objectives, an optimizer schedule, a solved spending
+ * level).
+ *
+ * `run_projection` has always returned them (`summary.warnings`); these four
+ * returned none, so what the engine says about the plan itself — that a
+ * pension's lump-sum offer year has passed and the pension pays its annuity, an
+ * event dated before the start year, a Social Security stream it skipped — was
+ * dropped exactly where a caller asks the bigger question. A copy, so a caller
+ * cannot reach into a projection the adapter keeps.
+ *
+ * Cost, paid for those warnings: one extra deterministic projection per
+ * `run_monte_carlo`, `batch_evaluate` and `run_optimizer` call, none of which
+ * otherwise runs it for the caller; `solve_max_spending` reads the baseline it
+ * already projects.
+ */
+function baselineWarnings(result: ProjectionResult): string[] {
+  return [...result.warnings]
 }
 
 /**
@@ -149,12 +216,42 @@ function snapshotJson<T>(value: T): T {
   return structuredClone(value)
 }
 
-export function validatePlanJson(input: unknown) {
-  return parsePlan(input)
+/**
+ * Validate a plan document: the engine's `parsePlan`, and, when a start year
+ * is named, the engine's start-year check (`asOfIssues`) against it, the same
+ * check `build_plan` and `update_plan` refuse a plan on. A document that
+ * passes here therefore builds from that year. The tool names the year it was
+ * given or the session's; a programmatic caller that names none gets the parse
+ * alone, as before. @see startYearIssues
+ */
+export function validatePlanJson(input: unknown, startYear?: number) {
+  const parsed = parsePlan(input)
+  if (startYear === undefined) return parsed
+  if (!parsed.ok) return { ...parsed, startYear }
+  // Fields the engine dropped are a warning, not an error: the plan is valid
+  // without them, and build_plan would accept it with the same sentence as a
+  // caveat. @see droppedFieldsSentence
+  const dropped = droppedFields(input, parsed.plan)
+  const warnings = dropped.length > 0 ? [droppedFieldsSentence(dropped, 'document')] : []
+  const asOf = startYearIssues(parsed.plan, startYear)
+  if (asOf.length > 0) return { ok: false as const, issues: asOf, startYear, warnings }
+  return { ...parsed, startYear, warnings }
 }
 
-export function setPlanFromBuild(session: SessionState, input: BuildPlanInput) {
-  const result = buildPlanFromParams(input)
+export function setPlanFromBuild(
+  session: SessionState,
+  input: BuildPlanInput,
+  options: { suppliedArguments?: unknown } = {},
+) {
+  // A build that names no year uses the session's default: the clock's year,
+  // or the year an embedder pinned at createSession. @see sessionDefaultStartYear
+  // `suppliedArguments` are the tool call's raw arguments when `input` is the
+  // transport's parsed copy. @see buildPlan.typedArgumentsDropped
+  const result = buildPlanFromParams(input, {
+    clock: session.clock,
+    ...(session.defaultStartYear !== undefined ? { defaultStartYear: session.defaultStartYear } : {}),
+    ...(options.suppliedArguments !== undefined ? { suppliedArguments: options.suppliedArguments } : {}),
+  })
   // `ok` alone narrows: BuildPlanResult is a discriminated union, so the success
   // arm's `plan` is non-optional and needs no second guard.
   if (!result.ok) {
@@ -179,11 +276,12 @@ export function runProjection(
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
-  const result = simulatePlan(session.plan, {
+  const simulateOptions = {
     startYear: session.startYear,
     taxCalculator: taxCalc(session.plan),
-  })
-  const summary = summarizeProjection(session.plan, result)
+  }
+  const result = simulatePlan(session.plan, simulateOptions)
+  const summary = publishedSummary(session.plan, result, simulateOptions)
   // The session keeps the canonical pair; the response gets its own copy
   // (below), so a caller that edits `res.summary` cannot rewrite what a later
   // `explain_modeled_result` reports off `session.lastProjection`.
@@ -249,19 +347,26 @@ export function runMonteCarlo(
     inflationMeanPct: session.plan.assumptions.inflationPct,
     returnVolPct,
   })
-  const paths = runMonteCarloPaths(session.plan, {
+  const simulateOptions = {
     startYear: session.startYear,
     taxCalculator: taxCalc(session.plan),
+  }
+  const paths = runMonteCarloPaths(session.plan, {
+    ...simulateOptions,
     model,
     seed,
     pathCount,
   })
+  // The paths publish no warnings of their own, so this is one extra
+  // deterministic projection, paid for the warnings. @see baselineWarnings
+  const warnings = baselineWarnings(simulatePlan(session.plan, simulateOptions))
   const agg = aggregateMonteCarlo(paths)
   // Engine already computes the ending-balance distribution; surface the total
   // (investable) ending-balance percentiles as p10/p25/p50/p75/p90.
   const pctl = agg.endingInvestable.percentiles
   return {
     ok: true as const,
+    startYear: session.startYear,
     pathCount,
     seed,
     // Echoed like pathCount and seed: the volatility is a real input to the
@@ -277,6 +382,7 @@ export function runMonteCarlo(
       p75: pctl.p75,
       p90: pctl.p90,
     },
+    warnings,
     caveats: snapshotCaveats(session),
   }
 }
@@ -310,6 +416,13 @@ export function batchEvaluate(
   // per-row `resolveClaimAgeTargets` call below still runs for EVERY policy,
   // because the length check and the resulting error text depend on that row's
   // own `claim_ages`.
+  // Every row is a variant of the session plan; what the engine says about the
+  // plan itself comes from its own projection: one extra deterministic run per
+  // call, paid for the warnings. @see baselineWarnings
+  const warnings = baselineWarnings(
+    simulatePlan(session.plan, { startYear: session.startYear, taxCalculator: taxCalc(session.plan) }),
+  )
+
   const people = session.plan.household.people
   const ssIncomeIndexByPerson = new Map<string, number[]>()
   session.plan.incomes.forEach((inc, idx) => {
@@ -349,23 +462,78 @@ export function batchEvaluate(
     return targets
   }
 
+  /**
+   * The claim ages a row writes, decided by the engine's one test for a claim
+   * already made (`socialSecurity/openClaims#isClaimAlreadyMade`: the claim
+   * year, birth year plus the claim age's whole years, is before the start
+   * year). Before 0.11.0 every row wrote every person's age, so a sweep could
+   * price a claim the household cannot make.
+   *
+   * - A person whose stored claim is already made keeps it. The engine holds
+   *   such a claim fixed in every claim-age search ("history, held fixed by
+   *   every search"): a claim cannot be re-made at another age. The row is
+   *   still priced, and says so in its caveats whenever it asked for a
+   *   different age.
+   * - A requested age whose claim year is before the start year fails the row:
+   *   it would be a backdated claim, which the engine's own claim-age grid
+   *   never offers (`gridClaimAges`, `earliestOpenClaimAge`).
+   */
+  const plan = session.plan
+  const startYear = session.startYear
+  function claimAgeWrites(
+    policy: PolicyParams,
+    targets: number[],
+  ): { writes: Array<{ incomeIdx: number; years: number }>; notes: string[] } | string {
+    const writes: Array<{ incomeIdx: number; years: number }> = []
+    const notes: string[] = []
+    for (const [personIdx, incomeIdx] of targets.entries()) {
+      const person = people[personIdx]!
+      const income = plan.incomes[incomeIdx]!
+      // Narrowing only — `targets` was built from socialSecurity incomes.
+      if (income.type !== 'socialSecurity') continue
+      const requested = policy.claim_ages[personIdx]!
+      const stored = income.claimAge
+      if (isClaimAlreadyMade(person, stored, startYear)) {
+        if (stored.years !== requested || stored.months !== 0) {
+          notes.push(
+            `person '${person.id}' (${person.name}) already claimed Social Security at ${stored.years}y${stored.months}m in ${claimYearOf(person, stored)}, before this plan starts in ${startYear}; a claim already made cannot be re-made at another age, so this row keeps it and does not apply the requested claim age ${requested}`,
+          )
+        }
+        continue
+      }
+      const requestedAge = { years: requested, months: 0 }
+      if (isClaimAlreadyMade(person, requestedAge, startYear)) {
+        const earliest = earliestOpenClaimAge(person, startYear)
+        return `person '${person.id}' (${person.name}): a claim at ${requested} falls in ${claimYearOf(person, requestedAge)}, before this plan starts in ${startYear}, and a claim cannot be backdated; ${
+          earliest === null
+            ? 'no claim age is still open'
+            : `the earliest claim age still open is ${earliest}`
+        }`
+      }
+      writes.push({ incomeIdx, years: requested })
+    }
+    return { writes, notes }
+  }
+
   for (let i = 0; i < policies.length; i++) {
     const policy = policies[i]!
     try {
       const targets = resolveClaimAgeTargets(policy)
-      if (typeof targets === 'string') {
+      const claims = typeof targets === 'string' ? targets : claimAgeWrites(policy, targets)
+      if (typeof claims === 'string') {
         results.push({
           index: i,
           policy,
           objective: null,
           ok: false,
-          error: targets,
+          error: claims,
           caveats: snapshotCaveats(session),
         })
         continue
       }
       const planJson = structuredClone(session.plan) as Plan
       const caveats = snapshotCaveats(session)
+      caveats.push(...claims.notes)
 
       if (policy.ordering === 'proportional') {
         planJson.strategies.withdrawalOrder = { mode: 'proportional' }
@@ -395,12 +563,12 @@ export function batchEvaluate(
         planJson.strategies.rothConversion = { mode: 'none' }
       }
 
-      targets.forEach((incomeIdx, personIdx) => {
+      for (const { incomeIdx, years } of claims.writes) {
         const inc = planJson.incomes[incomeIdx]!
-        // Narrowing only — `targets` was built from socialSecurity incomes.
-        if (inc.type !== 'socialSecurity') return
-        inc.claimAge = { years: policy.claim_ages[personIdx]!, months: 0 }
-      })
+        // Narrowing only — `claims.writes` was built from socialSecurity incomes.
+        if (inc.type !== 'socialSecurity') continue
+        inc.claimAge = { years, months: 0 }
+      }
 
       const parsed = parsePlan(planJson)
       if (!parsed.ok) {
@@ -419,9 +587,10 @@ export function batchEvaluate(
         startYear: session.startYear,
         taxCalculator: taxCalc(parsed.plan),
       })
-      const summary = summarizeProjection(parsed.plan, proj)
+      const summary = summaryWithoutFiBasis(parsed.plan, proj)
       // Every objective is a value the engine publishes on the summary; this
       // adapter selects it and does no arithmetic of its own on the projection.
+      // None of the three reads the FI basis, so no conversion-free run is built.
       const obj =
         objective === 'cumulative_tax'
           ? summary.lifetimeTaxesAndPenalties
@@ -441,7 +610,14 @@ export function batchEvaluate(
     }
   }
 
-  return { ok: true as const, objective, results, count: results.length }
+  return {
+    ok: true as const,
+    startYear: session.startYear,
+    objective,
+    results,
+    count: results.length,
+    warnings,
+  }
 }
 
 export async function runOptimizer(session: SessionState) {
@@ -449,12 +625,17 @@ export async function runOptimizer(session: SessionState) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
   try {
-    const result = await optimizePlan(session.plan, {
+    const simulateOptions = {
       startYear: session.startYear,
       taxCalculator: taxCalc(session.plan),
-    })
+    }
+    // optimizePlan runs this projection itself and returns none of its
+    // warnings, so it runs once more here, paid for them. @see baselineWarnings
+    const warnings = baselineWarnings(simulatePlan(session.plan, simulateOptions))
+    const result = await optimizePlan(session.plan, simulateOptions)
     return {
       ok: true as const,
+      startYear: session.startYear,
       schedule: result.schedule,
       tournament: {
         winnerSource: result.tournament.winnerSource,
@@ -462,6 +643,7 @@ export async function runOptimizer(session: SessionState) {
         policyId: result.tournament.policyId,
         winnerConversions: result.tournament.winnerConversions,
       },
+      warnings,
       caveats: snapshotCaveats(session),
     }
   } catch (e) {
@@ -474,6 +656,14 @@ export async function runOptimizer(session: SessionState) {
   }
 }
 
+/**
+ * What `solve_max_spending` says in place of a slack it withholds. @see solveMaxSpending
+ */
+const SUSTAINED_UNDER_HUNDRED_NOTE =
+  'The current base spending is sustained (sustainsCurrentBase), with less than $100 a year to spare, so spendingSlackDollars is withheld rather than published as a negative figure.'
+const SLACK_ROUNDED_BELOW_BASE_NOTE =
+  ' maxBaseAnnual is rounded down to the nearest $100, which puts it below the current base.'
+
 export function solveMaxSpending(session: SessionState) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
@@ -484,7 +674,9 @@ export function solveMaxSpending(session: SessionState) {
       taxCalculator: taxCalc(session.plan),
     }
     const baselineResult = simulatePlan(session.plan, simulateOptions)
-    const baselineSummary = summarizeProjection(session.plan, baselineResult)
+    // The solver reads the baseline summary's estate, net worth and tax figures,
+    // never its FI basis, and this response publishes none of it.
+    const baselineSummary = summaryWithoutFiBasis(session.plan, baselineResult)
     const ctx = {
       plan: session.plan,
       baselineResult,
@@ -492,12 +684,42 @@ export function solveMaxSpending(session: SessionState) {
       simulateOptions,
     }
     const result = solveMaxSustainableSpending(ctx, {})
+    // The engine measures the slack from the published amount, which it rounds
+    // down to $100 (`maxBaseAnnualRounding: 'down-to-hundred'`), so a slack
+    // between -$100 and 0 can sit beside a base the plan sustains; the engine
+    // says to read `sustainsCurrentBase` for that judgment, as the app's
+    // spending page does ("Under $100/yr"). A negative slack is published only
+    // when the engine has not judged the base sustained. Nothing is recomputed
+    // here: the figures are the engine's, and only which of them is shown
+    // depends on its verdict.
+    const slackWithheld =
+      result.sustainsCurrentBase === true &&
+      result.spendingSlackDollars !== null &&
+      result.spendingSlackDollars < 0
     return {
       ok: true as const,
+      startYear: session.startYear,
+      // The published answer: the amount every RetireGolden surface shows.
       maxBaseAnnual: result.maxBaseAnnual,
-      spendingSlackDollars: result.spendingSlackDollars,
+      // The highest level that passed, which maxBaseAnnual is rounded from.
+      feasibleBaseAnnual: result.feasibleBaseAnnual,
+      maxBaseAnnualRounding: result.maxBaseAnnualRounding,
+      // The engine's sentence saying why it published the exact amount that
+      // passed (`maxBaseAnnualRounding: 'none'`: under guardrails the amount
+      // rounded down to $100 failed, or it would fall below the required
+      // spending floor). Null when the answer is rounded as usual. The engine
+      // types `diagnostics` as `string[]`, so this is the sentence itself.
+      maxBaseAnnualNote: result.diagnostics.find(isExactAnswerDiagnostic) ?? null,
+      sustainsCurrentBase: result.sustainsCurrentBase,
+      spendingSlackDollars: slackWithheld ? null : result.spendingSlackDollars,
+      spendingSlackNote: slackWithheld
+        ? SUSTAINED_UNDER_HUNDRED_NOTE +
+          (result.maxBaseAnnualRounding === 'down-to-hundred' ? SLACK_ROUNDED_BELOW_BASE_NOTE : '')
+        : null,
       converged: result.converged,
       limitingConstraint: result.limitingConstraint,
+      // The solver's baseline is the plan's own projection. @see baselineWarnings
+      warnings: baselineWarnings(baselineResult),
       caveats: snapshotCaveats(session),
     }
   } catch (e) {
@@ -525,7 +747,8 @@ export function exportPlan(session: SessionState) {
   // that promise has to cover the whole response, not just `plan`.
   // startYear + conventions are surfaced so the exported document round-trips faithfully
   // via build_plan({ plan, startYear, conventions }); without startYear the re-imported
-  // projection would default to 2026 and diverge from any non-2026 session.
+  // projection starts in the clock's year, and diverges whenever that is not this
+  // session's year.
   //
   // schemaVersion / engineVersion / mcpVersion stamp the IDENTITY of the build that
   // emitted this document, as siblings of `plan` (the same shape startYear and
@@ -545,7 +768,12 @@ export function exportPlan(session: SessionState) {
   const { mcpVersion, engineVersion } = getVersions()
   return {
     ok: true as const,
-    plan: structuredClone(session.plan),
+    // Annotated, not inferred: the emitted declaration must name the engine's
+    // `Plan`. Inferred, it spells out the type's zod brand, which lives in the
+    // engine's own zod (engine 0.4.0 needs ^4.6.2; this package pins 4.4.3 for
+    // its tool schemas), and a declaration cannot name a module it does not
+    // depend on.
+    plan: structuredClone(session.plan) as Plan,
     startYear: session.startYear,
     conventions: snapshotConventions(session),
     caveats: snapshotCaveats(session),
@@ -561,6 +789,9 @@ export function explainModeledResult(session: SessionState) {
     ok: true as const,
     mcpVersion,
     engineVersion,
+    // The year every projecting tool runs this session's plan from, and the one
+    // `lastProjectionSummary` (when present) was run from: a build resets both.
+    startYear: session.startYear,
     framing:
       'Educational decision-support only — not tax, legal, or financial advice. Results are modeled under stated assumptions.',
     objective: 'User-selected or tool-default objective; tools do not prescribe securities actions.',
@@ -619,18 +850,32 @@ export function compareScenarios(
   planB: unknown,
   startYear?: number,
 ) {
+  // Every arm says which year it judged, the refusals included.
+  const year = startYear ?? session.startYear
   const a = parsePlan(planA)
   const b = parsePlan(planB)
-  if (!a.ok) return { ok: false as const, error: 'INVALID_PLAN_A', issues: a.issues }
-  if (!b.ok) return { ok: false as const, error: 'INVALID_PLAN_B', issues: b.issues }
-  const year = startYear ?? session.startYear
+  if (!a.ok) return { ok: false as const, error: 'INVALID_PLAN_A', startYear: year, issues: a.issues }
+  if (!b.ok) return { ok: false as const, error: 'INVALID_PLAN_B', startYear: year, issues: b.issues }
+  // The start-year check build_plan refuses a plan on, against the year both
+  // sides are projected from: a side with a pension lump-sum election dated
+  // before it would be priced as a pension that pays nothing and a rollover
+  // credited in no year. Refused with the engine's issue text, like a side that
+  // does not parse. @see startYearIssues
+  const asOfA = startYearIssues(a.plan, year)
+  if (asOfA.length > 0) return { ok: false as const, error: 'INVALID_PLAN_A', startYear: year, issues: asOfA }
+  const asOfB = startYearIssues(b.plan, year)
+  if (asOfB.length > 0) return { ok: false as const, error: 'INVALID_PLAN_B', startYear: year, issues: asOfB }
   // Each side gets ITS OWN calculator: the two documents can name different states
   // or different flat overrides, and a "compare" that priced B at A's state rates
   // would attribute a tax difference to whatever else changed between them.
-  const ra = simulatePlan(a.plan, { startYear: year, taxCalculator: taxCalc(a.plan) })
-  const rb = simulatePlan(b.plan, { startYear: year, taxCalculator: taxCalc(b.plan) })
-  const sa = summarizeProjection(a.plan, ra)
-  const sb = summarizeProjection(b.plan, rb)
+  const optionsA = { startYear: year, taxCalculator: taxCalc(a.plan) }
+  const optionsB = { startYear: year, taxCalculator: taxCalc(b.plan) }
+  const ra = simulatePlan(a.plan, optionsA)
+  const rb = simulatePlan(b.plan, optionsB)
+  // Both summaries are published whole, FI figures included, so each is priced
+  // as the app prices it. @see publishedSummary
+  const sa = publishedSummary(a.plan, ra, optionsA)
+  const sb = publishedSummary(b.plan, rb, optionsB)
   // The delta is the engine's own comparison (proposal minus baseline, each side
   // priced with its own calculator), not a subtraction here. It projects each
   // plan again: the engine's comparison does not return the full summaries this
@@ -651,6 +896,9 @@ export function compareScenarios(
   }
   return {
     ok: true as const,
+    // Echoed because it may be the caller's argument or the session's year, and
+    // both plans were projected from it.
+    startYear: year,
     a: sa,
     b: sb,
     deltaEndingAfterTaxEstate: delta,
@@ -941,8 +1189,9 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
   // two commits within the same millisecond, or a plan whose stored timestamp is
   // ahead of this clock, still move the timestamp forward. Set on the clone before
   // validation: on failure the clone is discarded and the live timestamp untouched.
+  // Read from the session's clock, not `Date.now()`, like the build stamp.
   const priorMs = Date.parse(session.plan.updatedAtIso)
-  const nextMs = Math.max(Date.now(), (Number.isNaN(priorMs) ? 0 : priorMs) + 1)
+  const nextMs = Math.max(session.clock().getTime(), (Number.isNaN(priorMs) ? 0 : priorMs) + 1)
   working.updatedAtIso = new Date(nextMs).toISOString()
 
   const parsed = parsePlan(working)
@@ -950,6 +1199,15 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
     // Leave session.plan untouched — the merge is all-or-nothing.
     return { ok: false as const, error: 'INVALID_PLAN', issues: parsed.issues }
   }
+  // The same as-of check build_plan runs, against the year this session's
+  // projections start: an edit can add or re-date a pension lump-sum election.
+  // Refused like a parse failure, and the session plan is left untouched.
+  // @see startYearIssues
+  const asOf = startYearIssues(parsed.plan, session.startYear)
+  if (asOf.length > 0) {
+    return { ok: false as const, error: 'INVALID_PLAN', startYear: session.startYear, issues: asOf }
+  }
+  const dropped = fragmentDroppedFields(ops, parsed.plan)
 
   // Commit. Stale projection is dropped; record the transient caveat so a reader
   // knows the plan moved and any prior projection/optimizer result no longer
@@ -1012,7 +1270,73 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
   return {
     ok: true as const,
     appliedOperations: ops.length,
+    // The year the plan was checked against, and the year the next projection
+    // of it starts from.
+    startYear: session.startYear,
     plan: planSummary(parsed.plan),
-    caveats: snapshotCaveats(session),
+    // A dropped-field note describes this call's operations, so it rides on
+    // this response only and is not kept with the session's caveats.
+    caveats:
+      dropped.length > 0
+        ? [...snapshotCaveats(session), droppedFieldsSentence(dropped, 'operations')]
+        : snapshotCaveats(session),
   }
+}
+
+/**
+ * Fields an update_plan operation supplied that the merged plan does not carry
+ * after `parsePlan`, as plan paths (`accounts.3.futureField`).
+ *
+ * Each account, income and assumptions or expenses field is compared with the
+ * LAST operation that wrote it, so an earlier fragment a later one replaced is
+ * not reported, and a removed entry is not compared at all. A field a
+ * `set_assumption` or `set_expense` names is known to the schema (unknown names
+ * are refused first), so only the keys inside an object value can be dropped.
+ */
+function fragmentDroppedFields(ops: UpdatePlanOp[], merged: Plan): string[] {
+  type Write =
+    | { section: 'accounts' | 'incomes'; id: unknown; fragment: Record<string, unknown> }
+    | { section: 'assumptions' | 'expenses'; field: string; value: unknown }
+  const last = new Map<string, Write>()
+  for (const op of ops) {
+    switch (op.op) {
+      case 'add_account':
+        last.set(`accounts:${String(op.account.id)}`, { section: 'accounts', id: op.account.id, fragment: op.account })
+        break
+      case 'replace_account':
+        last.set(`accounts:${op.id}`, { section: 'accounts', id: op.id, fragment: op.account })
+        break
+      case 'remove_account':
+        last.delete(`accounts:${op.id}`)
+        break
+      case 'add_income':
+        last.set(`incomes:${String(op.income.id)}`, { section: 'incomes', id: op.income.id, fragment: op.income })
+        break
+      case 'replace_income':
+        last.set(`incomes:${op.id}`, { section: 'incomes', id: op.id, fragment: op.income })
+        break
+      case 'remove_income':
+        last.delete(`incomes:${op.id}`)
+        break
+      case 'set_assumption':
+        last.set(`assumptions:${op.field}`, { section: 'assumptions', field: op.field, value: op.value })
+        break
+      case 'set_expense':
+        last.set(`expenses:${op.field}`, { section: 'expenses', field: op.field, value: op.value })
+        break
+    }
+  }
+  const out: string[] = []
+  for (const write of last.values()) {
+    if ('fragment' in write) {
+      const list = merged[write.section] as Array<{ id: string }>
+      const index = list.findIndex((entry) => entry.id === write.id)
+      if (index === -1) continue
+      out.push(...droppedFields(write.fragment, list[index], `${write.section}.${index}.`))
+    } else {
+      const kept = (merged[write.section] as Record<string, unknown>)[write.field]
+      out.push(...droppedFields(write.value, kept, `${write.section}.${write.field}.`))
+    }
+  }
+  return out
 }

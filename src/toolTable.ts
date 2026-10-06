@@ -10,7 +10,7 @@
 
 import { z } from 'zod'
 import * as adapter from './adapter.js'
-import { clearSession, DEFAULT_START_YEAR, type SessionState } from './session.js'
+import { clearSession, type SessionState } from './session.js'
 import {
   HouseholdParamsSchema,
   PolicyParamsSchema,
@@ -24,6 +24,15 @@ import {
 
 export const EDUCATIONAL =
   'Educational decision-support only — not tax, legal, or financial advice. Do not prescribe securities actions.'
+
+/**
+ * What the four tools that start from the session plan's projection, but
+ * publish something else, say about the run. One sentence for all four, so
+ * they cannot describe the same echo in different words. @see
+ * adapter.baselineWarnings
+ */
+const RUN_ECHO =
+  "The result echoes the startYear it ran from and carries the warnings of the session plan's own deterministic projection (the same list run_projection returns as summary.warnings)."
 
 /**
  * A plan fragment (account/income object) passed through update_plan verbatim.
@@ -111,7 +120,7 @@ export interface ToolEntry {
 export const TOOL_TABLE: readonly ToolEntry[] = [
   {
     name: 'build_plan',
-    description: `${EDUCATIONAL} Build or replace the in-memory plan from typed household/policy params or full plan JSON.`,
+    description: `${EDUCATIONAL} Build or replace the in-memory plan from typed household/policy params or full plan JSON. Besides the engine's validation, the plan is checked against its startYear: a pension lump-sum election dated before that year is refused, with the engine's two ways to restate it.`,
     inputShape: {
       plan: z.unknown().optional().describe('Full RetireGolden plan JSON (validated by the engine)'),
       household: HouseholdParamsSchema.optional().describe(
@@ -123,7 +132,13 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       conversion: ConversionSchema.optional().describe(
         'Optional manual Roth conversion schedule (overrides bracket-fill conversions)',
       ),
-      startYear: z.number().int().optional(),
+      startYear: z
+        .number()
+        .int()
+        .optional()
+        .describe(
+          "The calendar year the projection starts in (its first ledger year). Omit it and the build uses the current calendar year on this server's clock, as the RetireGolden app does for a user's plan. Pass the startYear an export carries (export_plan's, or the app's copied plan): the projection then starts where the exported one did, while a plan rebuilt without it in a later calendar year starts later and its figures move. Every projecting tool echoes the startYear it ran from.",
+        ),
       schemaVersion: z
         .number()
         .int()
@@ -152,7 +167,12 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         "Optional overrides for default modeling assumptions (inflation, returns, SS COLA, state, taxes, qualified ratio, dob month-day, sex). Defaults follow the engine (~2.5% inflation, SS COLA tracking inflation, and the resident state's own modeled income tax — set stateEffectiveTaxPct above 0 only to override that with a flat rate); household state is a REQUIRED input, not an assumption. Set explicit values to override; omitted fields keep the engine defaults.",
       ),
     },
-    handler: (session, args) => adapter.setPlanFromBuild(session, args as unknown as BuildPlanInput),
+    // The raw arguments ride beside the parsed ones, so the typed path can name
+    // a key its non-strict schemas stripped. @see suppliedArgumentsOf
+    handler: (session, args) =>
+      adapter.setPlanFromBuild(session, args as unknown as BuildPlanInput, {
+        suppliedArguments: suppliedArgumentsOf(args),
+      }),
     httpExposed: true,
     dataScope: 'session',
     arms: ['calculator', 'optimizer'],
@@ -164,16 +184,24 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'validate_plan',
-    description: `${EDUCATIONAL} Validate plan JSON (or the current session plan).`,
+    description: `${EDUCATIONAL} Validate plan JSON (or the current session plan) with the engine, and against a start year as build_plan checks it: a pension lump-sum election dated before that year is reported as an issue. Fields the engine does not read, which build_plan would drop, are listed in warnings. The result echoes the startYear it checked against.`,
     inputShape: {
       plan: z.unknown().optional(),
+      startYear: z
+        .number()
+        .int()
+        .optional()
+        .describe(
+          "The calendar year to check the plan against, the year its projection would start in. Omit it to use the session's startYear.",
+        ),
     },
     handler: (session, args) => {
+      const startYear = (args.startYear as number | undefined) ?? session.startYear
       const target = args.plan ?? session.plan
       if (target == null) {
-        return { ok: false, error: 'NO_PLAN' }
+        return { ok: false, error: 'NO_PLAN', startYear }
       }
-      return adapter.validatePlanJson(target)
+      return adapter.validatePlanJson(target, startYear)
     },
     httpExposed: false,
     dataScope: 'session',
@@ -202,7 +230,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     // tests/protocol-baseline/baseline.json does not move; changing a constant
     // moves this description and the baseline with it.
     // @see adapter.MC_DEFAULT_PATH_COUNT
-    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). Defaults, all echoed back in the result: pathCount ${adapter.MC_DEFAULT_PATH_COUNT}, seed ${adapter.MC_DEFAULT_SEED}, returnVolPct ${adapter.MC_DEFAULT_RETURN_VOL_PCT}.`,
+    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). Defaults, all echoed back in the result: pathCount ${adapter.MC_DEFAULT_PATH_COUNT}, seed ${adapter.MC_DEFAULT_SEED}, returnVolPct ${adapter.MC_DEFAULT_RETURN_VOL_PCT}. ${RUN_ECHO}`,
     inputShape: {
       pathCount: z.number().int().positive().max(5000).optional(),
       seed: z.number().int().optional(),
@@ -226,7 +254,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'batch_evaluate',
-    description: `${EDUCATIONAL} Evaluate many policies against the current household plan (search-friendly). Cap batches sensibly (~40 tool calls total in agent loops).`,
+    description: `${EDUCATIONAL} Evaluate many policies against the current household plan (search-friendly). Cap batches sensibly (~40 tool calls total in agent loops). A Social Security claim already made before startYear is held fixed (a row that asks for another age for that person says so in its caveats), and a claim age whose claim year falls before startYear fails that row. ${RUN_ECHO}`,
     inputShape: {
       policies: z
         .array(PolicyParamsSchema)
@@ -248,7 +276,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'run_optimizer',
-    description: `${EDUCATIONAL} Run the engine optimizer / conversion schedule search on the session plan.`,
+    description: `${EDUCATIONAL} Run the engine optimizer / conversion schedule search on the session plan. ${RUN_ECHO}`,
     inputShape: {},
     handler: (session) => adapter.runOptimizer(session),
     httpExposed: true,
@@ -257,7 +285,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'solve_max_spending',
-    description: `${EDUCATIONAL} Bisect maximum sustainable base annual spending for the session plan.`,
+    description: `${EDUCATIONAL} Bisect maximum sustainable base annual spending for the session plan. maxBaseAnnual is the engine's published answer, rounded down to $100 unless maxBaseAnnualRounding is 'none' (then maxBaseAnnualNote says why); feasibleBaseAnnual is the highest level that passed; sustainsCurrentBase is the engine's verdict on today's base spending. When that base is sustained with less than $100 a year to spare, spendingSlackDollars is null and spendingSlackNote says so. ${RUN_ECHO}`,
     inputShape: {},
     handler: (session) => adapter.solveMaxSpending(session),
     httpExposed: false,
@@ -266,11 +294,17 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'compare_scenarios',
-    description: `${EDUCATIONAL} Compare two plan JSON documents via projection summaries.`,
+    description: `${EDUCATIONAL} Compare two plan JSON documents via projection summaries. Both plans are projected from one startYear, which the result echoes, and each is checked against it as build_plan checks a plan: a side with a pension lump-sum election dated before that year is refused (INVALID_PLAN_A or INVALID_PLAN_B).`,
     inputShape: {
       planA: z.unknown(),
       planB: z.unknown(),
-      startYear: z.number().int().optional(),
+      startYear: z
+        .number()
+        .int()
+        .optional()
+        .describe(
+          "The calendar year both plans are projected from. Omit it to use the session's startYear (the year of the last build_plan, or the current calendar year before any build).",
+        ),
     },
     handler: (session, args) =>
       adapter.compareScenarios(session, args.planA, args.planB, args.startYear as number | undefined),
@@ -280,7 +314,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'explain_modeled_result',
-    description: `${EDUCATIONAL} Return framing, assumptions, caveats, and limitations for the current session.`,
+    description: `${EDUCATIONAL} Return framing, assumptions, caveats, and limitations for the current session, and the startYear its projections run from.`,
     inputShape: {},
     handler: (session) => adapter.explainModeledResult(session),
     httpExposed: true,
@@ -310,7 +344,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'export_plan',
-    description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear, conventions and caveats, and the identity of the build that emitted it: schemaVersion (the engine's plan-schema version), engineVersion and mcpVersion (null if not resolvable). Round-trips via build_plan({ plan, startYear, conventions, schemaVersion, engineVersion }) — pass the exported startYear back or a non-${DEFAULT_START_YEAR} session's projection will diverge, and pass the version siblings back so a different build can warn on skew (a differing engineVersion, or a schemaVersion that disagrees with the document, is a caveat only — never a refusal). A document written against an OLDER plan schema is migrated forward by the engine before import and accepted with a plan-schema migration caveat naming both versions (re-export it from this build to persist the upgrade). Only a document the engine cannot migrate — one newer than this build, or one that fails validation after migration — is rejected with an explanatory message rather than silently mis-read. Returns a clone; mutating it does not affect the live session.`,
+    description: `${EDUCATIONAL} Export the current session plan as full plan JSON plus the session startYear, conventions and caveats, and the identity of the build that emitted it: schemaVersion (the engine's plan-schema version), engineVersion and mcpVersion (null if not resolvable). Round-trips via build_plan({ plan, startYear, conventions, schemaVersion, engineVersion }) — pass the exported startYear back, or build_plan starts the projection in the current calendar year and it diverges from this session's whenever the two years differ, and pass the version siblings back so a different build can warn on skew (a differing engineVersion, or a schemaVersion that disagrees with the document, is a caveat only — never a refusal). A document written against an OLDER plan schema is migrated forward by the engine before import and accepted with a plan-schema migration caveat naming both versions (re-export it from this build to persist the upgrade). Only a document the engine cannot migrate — one newer than this build, or one that fails validation after migration — is rejected with an explanatory message rather than silently mis-read. Returns a clone; mutating it does not affect the live session.`,
     inputShape: {},
     handler: (session) => adapter.exportPlan(session),
     httpExposed: false,
@@ -335,7 +369,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'update_plan',
-    description: `${EDUCATIONAL} Incrementally mutate the current session plan with named merge operations (add/replace/remove accounts or incomes by id; set an assumption or expense field) — for building a plan up from extracted document fragments without rebuilding each turn. Requires a seeded plan (build_plan first; NO_PLAN otherwise). The mutated plan is validated via the engine BEFORE commit: on failure the session plan is left UNCHANGED and issues are returned. Returns the updated plan summary + caveats on success.`,
+    description: `${EDUCATIONAL} Incrementally mutate the current session plan with named merge operations (add/replace/remove accounts or incomes by id; set an assumption or expense field) — for building a plan up from extracted document fragments without rebuilding each turn. Requires a seeded plan (build_plan first; NO_PLAN otherwise). The mutated plan is validated via the engine BEFORE commit, and checked against the session's startYear as build_plan checks it (a pension lump-sum election dated before that year is refused): on failure the session plan is left UNCHANGED and issues are returned. Returns the updated plan summary, the session startYear, and caveats on success; a field in a fragment that the engine does not read is dropped and named in those caveats.`,
     inputShape: {
       operations: z
         .array(UpdatePlanOpSchema)
@@ -401,9 +435,33 @@ function zodIssues(error: z.ZodError): string {
  * `normalizeRawShapeSchema` returns an already-Standard-Schema value untouched
  * (it only wraps a RAW shape in `z.object`), and never writes to it. Zod
  * schemas are themselves immutable under parsing. If that ever changes, give
- * registration its own instance.
+ * registration its own instance. (Registration now passes a thin wrapper whose
+ * `~standard` delegates to this object and only records the raw arguments;
+ * @see tools.recordingSchemaFor.)
  */
 const compiledSchemas = new WeakMap<ToolEntry, z.ZodObject<z.ZodRawShape>>()
+
+/**
+ * The arguments a caller sent, keyed by the parsed object a handler receives.
+ *
+ * Both transports hand a handler the PARSED arguments (non-strict shapes, so
+ * unknown keys are stripped), which is what keeps retired keys out of session
+ * state. A handler that has to name what was stripped needs the raw call too:
+ * the gateway records it in `parseToolArgs`, and stdio through the recording
+ * schema `registerTools` registers (src/tools.ts). A WeakMap, so a parsed
+ * object and its raw arguments are collected together.
+ */
+const suppliedArguments = new WeakMap<object, unknown>()
+
+/** Remember the raw `supplied` arguments behind a `parsed` copy. */
+export function recordSuppliedArguments(parsed: unknown, supplied: unknown): void {
+  if (parsed !== null && typeof parsed === 'object') suppliedArguments.set(parsed, supplied)
+}
+
+/** The raw arguments behind a handler's parsed `args`, or undefined when none were recorded. */
+export function suppliedArgumentsOf(args: Record<string, unknown>): unknown {
+  return suppliedArguments.get(args)
+}
 
 /** The compiled input schema for `entry`, compiling it on first use. */
 export function argsSchemaFor(entry: ToolEntry): z.ZodObject<z.ZodRawShape> {
@@ -438,6 +496,7 @@ export function parseToolArgs(
 ): { ok: true; args: Record<string, unknown> } | { ok: false; message: string } {
   const parsed = argsSchemaFor(entry).safeParse(args)
   if (!parsed.success) return { ok: false, message: zodIssues(parsed.error) }
+  recordSuppliedArguments(parsed.data, args)
   if (entry.crossFieldValidate) {
     const issue = entry.crossFieldValidate(parsed.data as Record<string, unknown>)
     if (issue) return { ok: false, message: issue }

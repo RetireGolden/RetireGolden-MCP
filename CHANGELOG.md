@@ -3,43 +3,434 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.11.0
 
-### Changed
+**Moves the exact `@retiregolden/engine` dependency from 0.3.0 to 0.4.0 and the
+`@retiregolden/planner-ui` dev dependency from 0.10.0 to 0.11.0, and ships the
+host changes engine 0.4.0 assigns to this package.** A minor, because the wire
+surface moves: plans are plan-schema v7, which engine 0.3.x (and so every
+earlier release of this package) refuses; a build that names no `startYear`
+starts in the clock's year instead of 2026; `build_plan`, `update_plan` and
+`compare_scenarios` refuse a plan the engine's start-year check rejects, and
+`validate_plan` reports it; seven tools echo the
+`startYear` they ran from and four return the projection's `warnings`; and the
+programmatic API loses `DEFAULT_START_YEAR`. The protocol baseline and the
+golden numbers were regenerated, and every figure that moved is traced to the
+engine change that moves it under **Verified**. `highs` stays at 1.15.2, the
+version in the engine repository's lockfile at the 0.4.0 commit; engine 0.4.0
+still declares `^1.15.2`.
 
+Until this release the MCP priced no 2027 ACA premium tax credit, because
+engine 0.3.0 has none. Engine 0.4.0 prices the 2027 credit from its published
+figures (engine #750, Rev. Proc. 2026-26 and the HHS 2026 poverty guidelines),
+so a plan with Marketplace coverage in 2027 now shows a credit in that year;
+2028 and later stay unpriced until their figures are published. The typed
+`household` path sets `applyAcaCredit: false`, so only a full plan document
+with Marketplace coverage reaches it.
+
+### Changed (wire-visible)
+
+- **Plan schema v7.** `describe_plan_schema` and the `plan-schema` resource
+  serve the engine's v7 schema (`https://retiregolden.org/schemas/plan/v7.json`;
+  v6 came with the engine's premium-credit contracts, v7 with its people-order
+  change: `expenses.phasesAgeOf`, `contributionScheduleAgeOf`, and an owner on
+  every pension and annuity). Every plan this package builds or exports carries
+  `schemaVersion: 7` and four fact blocks engine 0.4.0's `parsePlan` writes
+  empty when a plan has none (`annualFederalTaxFacts`, `stateTaxFacts`,
+  `inheritedRothTaxCharacterPools`, `employerElectiveDeferralHistory`). A v1 to
+  v6 document still imports, migrated forward with the plan-schema migration
+  caveat; a v7 export does not open in 0.10.0 or earlier.
+- **The default start year follows the clock.** A `build_plan` that names no
+  `startYear` starts in the clock's calendar year on the local calendar, as the
+  RetireGolden app projects a user's plan and as RetireGolden Pro's MCP host
+  does (`guiStartYear()`). Through 0.10.0 it was the literal 2026, so from
+  1 January 2027 the same document would have answered differently here and in
+  the app. A session's `startYear` before any build (what `get_session`
+  reports, and what `validate_plan` and `compare_scenarios` judge against when
+  they name no year) is the clock's year too, and `clear_session` returns it
+  there instead of keeping the last build's year, so before any build every
+  path judges a plan in the same year. Pass `startYear` to reproduce a
+  projection from another year: an exported plan carries it.
+- **Plans are stamped from the same clock.** A typed build's `createdAtIso` and
+  `updatedAtIso` are the build instant, not a frozen `2026-01-01T00:00:00.000Z`,
+  and `update_plan` advances `updatedAtIso` from the session's clock instead of
+  `Date.now()` (still strictly past the prior value).
+- **Every tool that takes in or prices a plan document runs the engine's
+  start-year check.** Engine 0.4.0's `parsePlan` no longer refuses an elected
+  pension lump sum dated before the plan starts, and leaves that check
+  (`asOfIssues`) to the host. Without it the ledger would model a pension that
+  pays nothing and a rollover credited in no year. The engine's issue,
+  `accounts.N.lumpSumOffer.electionYear: The lump-sum election is dated …`,
+  names both restatements, and every tool below returns it as written:
+  - `build_plan` refuses such a plan, against its start year.
+  - `update_plan` refuses the edit as `INVALID_PLAN`, against the session's
+    start year, and leaves the session plan untouched.
+  - `compare_scenarios` refuses a side as `INVALID_PLAN_A` or `INVALID_PLAN_B`,
+    against the start year it projects both sides from.
+  - `validate_plan` reports the issue as a validation error, against the
+    `startYear` it is given (a new optional argument) or the session's.
+
+  Every arm of `compare_scenarios` and `validate_plan` echoes the year it
+  judged, including a side that does not parse and `validate_plan`'s
+  `NO_PLAN`.
+- **Every projecting tool echoes the `startYear` it ran from.**
+  `run_monte_carlo`, `batch_evaluate`, `run_optimizer`, `solve_max_spending`,
+  `compare_scenarios` (its argument or the session's), `explain_modeled_result`
+  and `update_plan` gain a top-level `startYear`, beside `build_plan`'s and
+  `run_projection`'s.
+- **The projection's warnings reach the tools that publish something else.**
+  `run_monte_carlo`, `batch_evaluate`, `run_optimizer` and `solve_max_spending`
+  return `warnings`, the engine's list for the session plan's own deterministic
+  projection, the same list `run_projection` returns as `summary.warnings`.
+  They returned none, which dropped, among others, the engine's warning that a
+  pension's lump-sum offer year has passed and the pension pays its annuity.
+  The cost is one extra deterministic projection per `run_monte_carlo`,
+  `batch_evaluate` and `run_optimizer` call (`solve_max_spending` reads the
+  baseline it already runs), paid for those warnings, and a conversion-free
+  run for each published summary of a plan that converts, paid for FI parity
+  with the app (below).
+- **`solve_max_spending` publishes the engine's whole answer.** Beside
+  `maxBaseAnnual` (the published amount, rounded down to $100) it returns
+  `feasibleBaseAnnual` (the highest level that passed), `maxBaseAnnualRounding`
+  (`'down-to-hundred'`, or `'none'` when the engine publishes the exact amount),
+  `maxBaseAnnualNote` (the engine's own sentence saying why it did, under
+  guardrail spending or a required floor, passed through as the string the
+  engine writes; null otherwise) and `sustainsCurrentBase` (the
+  engine's verdict on today's base spending). The slack is measured from the
+  rounded amount, so it can read between −$100 and 0 beside a base the plan
+  sustains: the protocol baseline's single household, set to spend $121,450,
+  sustains it, and the engine publishes $121,400 with a slack of −$50. When the
+  engine judges the base sustained and its slack is negative,
+  `spendingSlackDollars` is now `null` and `spendingSlackNote` says the base is
+  sustained with less than $100 a year to spare, as the app's spending page
+  shows "Under $100/yr". A negative slack beside a base the engine does not
+  judge sustained is published as before.
+- **`batch_evaluate` respects Social Security claims already made**, by the
+  engine's one test for them (`socialSecurity/openClaims`: the claim year,
+  birth year plus the claim age's whole years, is before the start year). A
+  person whose stored claim is already made keeps it in every row, as the
+  engine holds such a claim fixed in its own claim-age searches; a row that
+  asked for a different age for them is still priced, on the claim made, and
+  its caveats say so. A row that asks for a claim age whose claim year falls
+  before the start year fails with `ok: false`, naming the person, that year
+  and the earliest claim age still open: the claim would be backdated, and the
+  engine's claim-age grid never offers it. Before, every row wrote every
+  person's claim age, so a sweep could price claims the household cannot make.
+- **Fields the engine or the typed inputs drop are named.** When `parsePlan`
+  drops fields this engine does not read, which is how engine 0.3.0 lost
+  `incomes[].disability.onsetMonth`, or a typed `build_plan` input strips a key
+  it does not declare, the tool that took them in now says so and refuses
+  nothing. It names up to five dropped paths and counts the rest; an array item
+  past the end of what was kept is named by index (`accounts.3`).
+  - Typed `build_plan`: the `household`, `policy`, `assumptions` and
+    `conversion` schemas are plain `z.object`s, which strip an undeclared key
+    rather than refuse the call, so `onsetMonth` on a person was lost without a
+    word. A `fields dropped:` caveat now names every stripped key at any depth
+    (`household.persons.0.onsetMonth`, `policy.claimAge`), compared between the
+    arguments as sent and as parsed, over stdio, the HTTP gateway and the
+    programmatic call alike. The schemas stay non-strict: `.strict()` would
+    change the published input schema and refuse calls that work today.
+  - `build_plan`, with no version siblings or siblings that match this build:
+    a `fields dropped:` caveat names them.
+  - `build_plan` on the skew path: the first skew caveat that fires names them
+    instead of calling the document "unchanged"; when both the
+    `schemaVersion` and the `engineVersion` caveat fire, the second refers to
+    the first, and no `fields dropped:` caveat is added, so nothing is
+    reported twice.
+  - `update_plan`: each fragment is compared with the merged plan after
+    `parsePlan` (the last operation that wrote an entry or field), and the
+    response's caveats name what was dropped. The note rides on that response
+    only.
+  - `validate_plan`: listed in a new `warnings` array, as a warning, not an
+    error.
+  - A migrated document is not checked: a migration may move fields. Its
+    engine-skew caveat no longer calls it "imported unchanged"; it says the
+    engine upgraded it from its plan-schema version, as the migration caveat
+    does.
+  - A current export, the `plan-json.md` example, a clean typed call and the
+    protocol baseline's typed builds drop nothing, so they get no such caveat.
+- **FI figures are priced as the app prices them.** Engine 0.4.0's
+  `summarizeProjection` takes a third argument, the plan's conversion-free run
+  or `null`. Every summary a response carries (`run_projection`,
+  `compare_scenarios`, `explain_modeled_result`'s `lastProjectionSummary`) now
+  passes `conversionFreeRun(plan, options)`, as planner-ui's `projectPlan` does,
+  so a Roth conversion's one-off tax is not priced as FI spending, and the
+  summary carries the engine's new `fiBasis` (`spendingSource:
+  'conversionFreeProjection'` for a converting plan). `fiNumber` and
+  `coastFireNumber` are `null` when nobody in the plan retires. The batch rows
+  and the spending solver's baseline read no FI figure and pass `null`, as the
+  engine's own decision context does.
+- **Tool text.** The `startYear` fields of `build_plan`, `compare_scenarios`
+  and `validate_plan` have descriptions; `build_plan`, `validate_plan`,
+  `run_monte_carlo`, `batch_evaluate`, `run_optimizer`, `solve_max_spending`,
+  `compare_scenarios`, `explain_modeled_result`, `export_plan` and
+  `update_plan` describe the
+  behaviour above. No description names a year, so `tools/list` does not move
+  with the clock. `build_plan`'s `assumptions.sex` says what `average` is, in
+  the engine's words: the mean of the male and female survival probabilities.
+- **Figures that move with the engine**, each measured under **Verified**:
+  Kentucky residents' state tax (engine #710), Medicare IRMAA premiums at four
+  of the five tiers (engine #770), every converting plan's FI number (engine
+  #765 with the conversion-free run above), `solve_max_spending`'s
+  `maxBaseAnnual`, now rounded down to $100 as every RetireGolden surface shows
+  it, with `spendingSlackDollars` measured from it (engine #752), and
+  `run_optimizer`'s
+  `schedule`, which gains `conversionTotal` (engine #754).
 - **Three figures are now the engine's published values, not arithmetic in the
-  adapter.** `batch_evaluate`'s `cumulative_tax` objective reads the summary's
-  `lifetimeTaxesAndPenalties`, `ending_trad` reads `endingByCategory.traditional`,
-  and `compare_scenarios`' `deltaEndingAfterTaxEstate` reads the engine
-  comparison's `headline.endingAfterTaxEstate.delta` (proposal minus baseline,
-  each plan priced with its own tax calculator, as before). The adapter now only
-  selects them, as its money-math-stays-in-the-engine rule requires. No number
-  moves beyond floating-point association: the new parity tests
+  adapter** (#81, unreleased until now). `batch_evaluate`'s `cumulative_tax`
+  objective reads the summary's `lifetimeTaxesAndPenalties`, `ending_trad` reads
+  `endingByCategory.traditional`, and `compare_scenarios`'
+  `deltaEndingAfterTaxEstate` reads the engine comparison's
+  `headline.endingAfterTaxEstate.delta` (proposal minus baseline, each plan
+  priced with its own tax calculator, as before). The adapter now only selects
+  them, as its money-math-stays-in-the-engine rule requires. No number moved
+  beyond floating-point association: the parity tests
   (`tests/adapter.engineValues.parity.test.ts`) hold each figure equal to the
   engine value and within a cent of the arithmetic it replaces, and the protocol
-  baseline is unchanged. A wiring test (`tests/adapter.engineValues.wiring.test.ts`)
-  checks that the adapter reads each figure from the engine and hands the
-  comparison its own tax stack. One behaviour difference: a comparison the
-  engine refuses (it throws on a non-finite figure) now returns `ok: false` with
-  error `COMPARISON_FAILED` and the engine's message, instead of a non-finite
-  delta.
+  baseline did not change with it. A wiring test
+  (`tests/adapter.engineValues.wiring.test.ts`) checks that the adapter reads
+  each figure from the engine and hands the comparison its own tax stack. One
+  behaviour difference: a comparison the engine refuses (it throws on a
+  non-finite figure) returns `ok: false` with error `COMPARISON_FAILED` and the
+  engine's message, instead of a non-finite delta.
 
 ### Fixed
 
-- **The optimizer's solver is pinned to the version it is tested with.** The
-  engine declares `highs` as a caret range, so an npm install of this package
-  (every `npx @retiregolden/mcp` user) has resolved the newest match since
-  `highs` 1.15.3 was published on 2026-09-11, while the engine's lockfile and
-  this package's protocol baseline use 1.15.2; `run_optimizer`'s result moved
-  with it, which is what `test:packed` has reported on every CI run since. This
-  package now depends on `highs` exactly, so npm hoists the pinned solver and
-  the engine uses it, and `test:packed` asserts exactly one solver at the pinned
-  version. The protocol baseline now records the solver it was captured with
-  (`meta.solverPackage`; nothing else in it changed), its drift messages name
-  the solver, Dependabot no longer proposes solver bumps on their own, and
-  CONTRIBUTING.md says to move it with the engine. The pin binds npm and `npx`
-  installs; a consumer installing with pnpm or Yarn Berry still resolves the
-  engine's own range until the engine pins its solver exactly.
+- **A disability onset month survives an import.** Engine 0.3.0 did not know
+  `incomes[].disability.onsetMonth` and dropped it on parse, so through 0.10.0
+  `build_plan` lost it without a word, `update_plan` could not keep it, and
+  `export_plan` wrote the plan without it. The plan then read as a disability
+  that began on 1 January, which can pay up to 12 months more than the month
+  the user gave, or turn a retirement claim into a disability benefit. Engine
+  0.4.0 keeps the month. A document that already made a round trip through
+  0.10.0 or earlier lost the month and cannot recover it, because nothing left
+  in it records the month: re-enter it.
+- **The optimizer's solver is pinned to the version it is tested with** (#82).
+  The engine declares `highs` as a caret range, so an npm install of this
+  package (every `npx @retiregolden/mcp` user) has resolved the newest match
+  since `highs` 1.15.3 was published on 2026-09-11, while the engine's lockfile
+  and this package's protocol baseline use 1.15.2; `run_optimizer`'s result
+  moved with it, which is what `test:packed` reported on every CI run since.
+  This package now depends on `highs` exactly, so npm hoists the pinned solver
+  and the engine uses it, and `test:packed` asserts exactly one solver at the
+  pinned version. The protocol baseline records the solver it was captured
+  with (`meta.solverPackage`), its drift messages name the solver, Dependabot no
+  longer proposes solver bumps on their own, and CONTRIBUTING.md says to move it
+  with the engine. The pin binds npm and `npx` installs; a consumer installing
+  with pnpm or Yarn Berry still resolves the engine's own range until the
+  engine pins its solver exactly.
+
+### Changed (programmatic embedders only)
+
+- `DEFAULT_START_YEAR` is removed from the package root: the default is no
+  longer a constant. `clockStartYear(clock)` gives it, and `systemClock`,
+  `Clock`, `CreateSessionOptions` and `BuildPlanOptions` are exported.
+- `createSession(startYear?, { clock? })` takes an optional clock, and
+  `SessionState` has a required `clock`; a session built with `createSession`
+  needs no change. `buildPlanFromParams(input, { clock?, defaultStartYear? })`
+  reads the clock for the default start year and the build stamp;
+  `setPlanFromBuild` passes the session's.
+- A year passed to `createSession(startYear)` is now the session's default
+  start year for its whole life (`SessionState.defaultStartYear`): a
+  `build_plan` that names no year uses it, and `clearSession` returns to it,
+  as `validate_plan` and `compare_scenarios` already did through
+  `session.startYear`. `sessionDefaultStartYear(session)` gives the default
+  (that year, else the clock's). Without it a build used the clock while the
+  checks used the pinned year. Server and gateway sessions pin no year and
+  follow the clock.
+- `exportPlan`'s `plan` is declared as the engine's `Plan`. Inferred, its type
+  named the zod brand of the engine's own zod (engine 0.4.0 needs `^4.6.2`;
+  this package keeps its tool schemas on its exact zod 4.4.3), which a
+  declaration file cannot reference.
+
+### Changed (tooling and tests only)
+
+- The protocol baseline pins the clock: `scripts/capture-protocol-baseline.mjs`
+  starts the stdio server with `node --import scripts/baseline-clock.mjs` and
+  `BASELINE_NOW` (mid-2026), which moves that child's `Date` to that instant,
+  and the in-memory lane injects the same instant as its session clock.
+  Without it `get_session`'s pre-build `startYear` would drift every 1 January.
+  The package never loads the file. The whole suite also passes with the test
+  process's clock moved to 1 January 2027.
+- `tests/startYear.test.ts` covers the clock default on both sides of New
+  Year, the build and update stamps, the start-year check on both tools, the
+  `startYear` echo on all nine projecting tools, and the forwarded warnings
+  (with a passed lump-sum offer). Tests that built without a `startYear` and
+  asserted 2026 now name the year or inject a clock.
+- `tests/browserParity.test.ts` transcribes planner-ui's `projectPlan` summary
+  call (the conversion-free run) as the app's reference; its fixture converts
+  for six years, so the FI figures are part of what it compares.
+- planner-ui 0.11.0's `projectPlan` takes its start year from the caller;
+  `tests/planForAiRoundtrip.test.ts` passes `projectionStartYear(plan)`, as the
+  app does, and its "dropped startYear" control injects the clock. Its
+  `./projection` entry now re-exports planner-ui's New Year hook, so the
+  parity typecheck (`tsconfig.parity.json`) adds the DOM library and the
+  `@types/react` dev dependency; the root program keeps `lib: ["ES2022"]`.
+- `tests/solveMaxSpendingSlack.test.ts` pins the sustained base whose engine
+  slack reads −$50, and `tests/batchClaimsMade.test.ts` the claim held fixed
+  and the backdated age refused. The person-order test in
+  `tests/adapter.extended.test.ts` now sweeps ages still open in 2026 (70 and
+  68), since an age already passed fails its row.
+- `tests/solveMaxSpendingSlack.test.ts` also pins a non-null
+  `maxBaseAnnualNote`, on a required spending floor of $121,450 where the
+  engine publishes the exact amount. `tests/startYear.test.ts` covers the
+  start-year check in `compare_scenarios` (either side) and `validate_plan`
+  (the given year and the session's), the year every refusal echoes, and
+  that `validate_plan` and `build_plan` agree after a clear and on a session
+  pinned at creation. `tests/droppedFields.test.ts` plants unknown fields and
+  checks the caveat with no siblings, matching siblings, one skew and both
+  skews, the count past five, a truncated array tail, a migrated document's
+  skew caveat, and the `update_plan` and `validate_plan` reports; the browser
+  round trip asserts its payload drops nothing, and
+  `tests/planJsonExample.test.ts` builds the `plan-json.md` example and
+  asserts it drops nothing and is not refused. `tests/typedArgumentsDropped.test.ts`
+  sends a person's `onsetMonth`, an unknown policy key and an unknown
+  assumptions key over the programmatic call, stdio and the gateway path, and
+  a clean typed call that drops nothing.
+- To give a handler the arguments as sent beside the parsed ones,
+  `registerTools` registers a thin wrapper around each tool's compiled schema
+  that records them, and the gateway records them in `parseToolArgs`. The
+  wrapper's `~standard.jsonSchema` is the zod schema's own, so `tools/list` is
+  byte-identical.
+- The protocol-baseline capture passes the SDK's default environment
+  (`getDefaultEnvironment()`) plus `RETIREGOLDEN_MCP_BASELINE_NOW` to the stdio
+  child explicitly, instead of relying on the SDK merging them.
+
+### Changed (docs, skill, and tool contract)
+
+- `skills/retiregolden/SKILL.md` and `references/plan-json.md` tell agents to
+  pass `startYear`, and say what happens without it. `plan-json.md`'s example
+  is a current (plan-schema v7) export again, the four empty fact blocks
+  included, and still round-trips through `build_plan`. SKILL.md,
+  `references/examples.md` and `references/plan-ingestion.md` describe the
+  `warnings` list, the `startYear` echo and the start-year refusal, and
+  `examples.md`'s worked `build_plan` calls pass `startYear`.
+  `plan-json.md` lists `incomes[].disability.onsetMonth` and what a blank month
+  means, and says its example's stamps are example values from the server's
+  clock.
+- `schemas/tools.v1.json` is regenerated (`pnpm run contract:generate`): the
+  `startYear` descriptions of `build_plan` and `compare_scenarios`,
+  `validate_plan`'s new `startYear` argument, and the `assumptions.sex`
+  description are the only changes.
+
+### Verified
+
+The baseline fixture and the four golden fixtures (with the golden batches'
+no-conversion plans) were replayed on the engine at its 0.3.0 tag and at each
+of the 137 first-parent commits after it up to the 0.4.0 commit: the
+deterministic ledger, the Monte Carlo summary (300 paths, seed 7) and, for the
+baseline fixture, the optimizer and the spending solver. Four commits move a
+recorded figure: engine #710, #752, #765 and #770. The optimizer's new
+`conversionTotal` field comes from #754. Engine #761 (one default Monte Carlo
+seed; this package passes its own), #762 (state tax figures), #768 (the 2027
+rollover; every fixture starts in 2026) and #771 (railroad annuities and
+§4974) move none of them.
+
+- **Kentucky, engine #710** ("Complete the remaining state and federal
+  calculation audit implementation", 2026-09-12). **The engine CHANGELOG has
+  no entry for it.** Two Kentucky changes, each reproduced by hand at 3.5%:
+  the $31,110 retirement exclusion now applies to each owner's own IRA
+  distributions, Roth conversions included, where engine 0.3.0 applied the
+  household's combined cap to traditional withdrawals only; and the standard
+  deduction is $3,360 once per joint return, not $6,720. The baseline single
+  household (conversions in 2026 to 2028) pays $1,098.88 less KY tax in 2026
+  ($31,110 newly excluded, and $286.49 less gain sold to pay); over the plan,
+  lifetime taxes fall $4,319.66, ending net worth rises $6,588.41, the
+  after-tax estate $5,007.20 and its heir tax $1,581.22, and the Monte Carlo
+  ending-balance percentiles rise $3,477.58 (p10) to $12,318.06 (p90), success
+  rate unchanged at 100%. In the goldens the single fixtures pay $1,102.46 less
+  KY tax in 2026. In the MFJ fixtures the
+  halved deduction adds $117.60 a year, the conversions newly excluded in 2028
+  and 2029 take more than that off, and in the no-conversion rows the
+  per-owner cap adds tax wherever the withdrawals from the smaller IRA fall
+  below it.
+- **Medicare IRMAA from CMS's published table, engine #770.** The Part B
+  amounts move 4 or 8 cents a month a person at four of the five tiers. On the
+  baseline fixture: lifetime taxes +$0.19, ending net worth −$1.07, after-tax
+  estate −$0.81, p10 to p90 −$1.21 to $0.
+- **The FI number, engine #765 with this release's conversion-free run.** The
+  baseline fixture's `fiNumber` and `coastFireNumber` go from $2,229,102.89 to
+  $1,571,682.22: −$28,649.42 from the Kentucky change and −$628,771.25 because
+  the 2026 spending year is now priced without that year's conversion tax.
+  The new `fiBasis` names it (`conversionFreeProjection`, spending year 2026,
+  person-0's retirement in 2025 by `retirementAge`).
+- **Spending, engine #752** (the solver's answer published rounded down to the
+  nearest $100): `maxBaseAnnual` $121,407 → $121,400 and `spendingSlackDollars`
+  $61,407 → $61,400.
+- **Optimizer, engine #754**: `schedule.conversionTotal` (272,086.1) is new; the
+  schedule, its conversions and the tournament are byte-identical.
+- **Protocol baseline**, regenerated and read leaf by leaf. Besides the figures
+  above: `meta.enginePackage` and every `engineVersion` 0.3.0 → 0.4.0; the
+  plan-schema resource, both `describe_plan_schema` payloads and every plan
+  document move from v5 to v7 (plans gain only the four empty fact blocks); the
+  `tools/list` inventory moves with the descriptions; the new `startYear` and
+  `warnings` leaves appear (the fixture's one warning, "Spending withdrawals
+  from traditional accounts pushed income above the Roth-conversion target in
+  some years.", is the one its `run_projection` summary already carried).
+  `get_session`'s `startYear` stays 2026 on the pinned clock. The
+  `run_projection` round trip after `update_plan` moves by the same causes
+  (lifetime taxes −$4,319.26, ending net worth +$6,587.04, FI −$657,421.76).
+  This release's own `solve_max_spending` fields add five leaves and move no
+  figure: `feasibleBaseAnnual` 121,407, `maxBaseAnnualRounding`
+  `"down-to-hundred"`, `sustainsCurrentBase` true, and both notes null (the
+  slack, $61,400, is positive). The claims check moves no batch row: the
+  fixture's claim at 67 falls in 2027, still open. `validate_plan` gains
+  `startYear` (2026) and an empty `warnings` list, and no recorded document
+  trips the start-year check or drops a field. `get_session` after
+  `clear_session` still reports 2026: the cleared session returns to the
+  clock's year, which the capture pins to 2026.
+- **Golden numbers**, regenerated (`pnpm run goldens:print`), every moved
+  literal from the causes above:
+
+  | Fixture | Figure | 0.10.0 | 0.11.0 | #710 | #770 | #765 |
+  |---|---|---:|---:|---:|---:|---:|
+  | single, legacy conventions | lifetime taxes | 250,388.28 | 246,942.48 | −3,445.68 | −0.13 | |
+  | | ending net worth (= after-tax estate) | 668,917.73 | 685,126.95 | +16,201.16 | +8.06 | |
+  | | FI number | 3,072,179.65 | 2,335,173.69 | −29,159.38 | | −707,846.58 |
+  | MFJ, legacy conventions | lifetime taxes | 447,253.22 | 447,275.42 | +22.29 | −0.10 | |
+  | | ending net worth | 5,217,056.35 | 5,223,715.32 | +6,632.98 | +25.99 | |
+  | | FI number | 6,931,783.77 | 3,527,917.00 | +3,698.30 | | −3,407,565.06 |
+  | | no-conversion batch row | 4,517,886.08 | 4,491,786.43 | −26,099.65 | | |
+  | single, engine defaults | lifetime taxes | 248,916.78 | 247,155.98 | −1,760.81 | | |
+  | | FI number | 3,072,179.65 | 2,335,173.69 | −29,159.38 | | −707,846.58 |
+  | | Monte Carlo success | 32% | 33% | +1 point | | |
+  | MFJ, engine defaults | lifetime taxes | 449,374.11 | 449,300.61 | −73.39 | −0.11 | |
+  | | ending net worth | 3,258,662.96 | 3,265,770.78 | +7,082.34 | +25.48 | |
+  | | FI number | 6,931,783.77 | 3,527,917.00 | +3,698.30 | | −3,407,565.06 |
+  | | no-conversion batch row | 2,929,503.54 | 2,900,010.70 | −29,492.84 | | |
+
+  The single fixtures' 2026 tax falls $1,166.38 ($1,102.46 of it Kentucky's,
+  the rest federal tax on $388.79 less realized gain); the MFJ fixtures' 2026
+  tax rises $147.93 and their last year's $119.08. The other three Monte Carlo
+  rates hold. No depletion year moves. The claims check and the spending fields
+  move no golden: every fixture's claims fall in 2029 or 2030.
+- `pnpm test`, `pnpm run build` and `pnpm run test:packed` pass; the packed
+  artifact installs one engine at 0.4.0 and one `highs` at 1.15.2 through npm.
+
+### Known differences
+
+- `run_monte_carlo`'s defaults (seed 42, 200 paths, plain lognormal) are not
+  yet the app's headline Monte Carlo options (`DEFAULT_MONTE_CARLO_SEED`,
+  `headlineMonteCarloOptions`), so its default success rate for a plan can
+  differ from the rate the app shows.
+- `compare_scenarios`' `deltaEndingAfterTaxEstate` still subtracts nominal
+  estates, so two plans that end in different years are compared in two
+  different years' dollars; the app's Compare page reads
+  `comparePlanHeadlines`, which this tool does not yet.
+
+### Why this release exists
+
+Engine 0.4.0 writes plan-schema v7, which engine 0.3.x refuses as newer than it
+can read, so until a host moves its pin a plan saved by the app does not open
+in it. The engine also names this package's follow-ups for the release: the
+`summarizeProjection` argument, a start year that follows the clock with an
+injected clock for tests, the start-year check on `build_plan` and
+`update_plan`, the stamps from that clock, the forwarded warnings, the
+`startYear` echo and its schema description, and the skill's advice to pass it.
+Its notes to this package also ask for the spending solver's whole answer, the
+already-made claims check in `batch_evaluate`, the engine's wording for
+`average`, and caveats that do not call a stripped document unchanged. It also
+ships #81 and #82, merged since 0.10.0.
 
 ## 0.10.0
 

@@ -273,6 +273,7 @@
           ]
         },
         "startYear": {
+          "description": "The calendar year the projection starts in (its first ledger year). Omit it and the build uses the current calendar year on this server's clock, as the RetireGolden app does for a user's plan. Pass the startYear an export carries (export_plan's, or the app's copied plan): the projection then starts where the exported one did, while a plan rebuilt without it in a later calendar year starts later and its figures move. Every projecting tool echoes the startYear it ran from.",
           "type": "integer",
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
@@ -399,7 +400,7 @@
               "pattern": "^\\d{2}-\\d{2}$"
             },
             "sex": {
-              "description": "Person sex for mortality/longevity: female, male, or average (percent-free enum). Default 'average' (a reasonable neutral value, overridable) — not a bench artifact.",
+              "description": "Person sex for mortality/longevity: female, male, or average, where average is the mean of the male and female survival probabilities. Default 'average' (a reasonable neutral value, overridable) — not a bench artifact.",
               "type": "string",
               "enum": [
                 "female",
@@ -415,7 +416,13 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "plan": {}
+        "plan": {},
+        "startYear": {
+          "description": "The calendar year to check the plan against, the year its projection would start in. Omit it to use the session's startYear.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
       }
     },
     "run_projection": {
@@ -548,6 +555,7 @@
         "planA": {},
         "planB": {},
         "startYear": {
+          "description": "The calendar year both plans are projected from. Omit it to use the session's startYear (the year of the last build_plan, or the current calendar year before any build).",
           "type": "integer",
           "minimum": -9007199254740991,
           "maximum": 9007199254740991

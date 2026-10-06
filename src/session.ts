@@ -23,11 +23,56 @@ export type { ConventionKnobs }
  */
 type ProjectionSummary = ReturnType<typeof summarizeProjection>
 
+/**
+ * Where a session reads "now". Injected rather than read from `new Date()` at
+ * each site, so a test (and the protocol baseline) can pin the year while the
+ * stdio server runs on the real clock.
+ */
+export type Clock = () => Date
+
+/** The real clock, which every server and gateway session runs on. */
+export const systemClock: Clock = () => new Date()
+
+/**
+ * The projection start year a build uses when the caller names none: the
+ * clock's calendar year, read on the LOCAL calendar.
+ *
+ * Through 0.10.0 this was the literal 2026 (`DEFAULT_START_YEAR`), so a plan
+ * built or imported without a `startYear` was projected from 2026 forever,
+ * while the RetireGolden app projects a user's plan from the current year
+ * (planner-ui's `projectionStartYear`) and RetireGolden Pro's MCP host does the
+ * same (`guiStartYear()`, `new Date().getFullYear()`). From 1 January 2027 the
+ * same document would have answered differently here and in the app. This is
+ * the same rule, on the same local calendar, so the two agree on what "this
+ * year" is.
+ *
+ * No tool description names the resulting year: `tools/list` is hashed into
+ * the protocol baseline, and a description that moved with the clock would
+ * drift every New Year.
+ */
+export function clockStartYear(clock: Clock): number {
+  return clock().getFullYear()
+}
+
 export interface SessionState {
   plan: Plan | null
   startYear: number
   caveats: string[]
   conventions: ConventionKnobs
+  /**
+   * Where this session reads "now": the start year of a `build_plan` that names
+   * none, the createdAt/updatedAt stamp on a plan the typed path builds, and the
+   * updatedAt stamp `update_plan` advances. @see Clock
+   */
+  clock: Clock
+  /**
+   * The start year an embedder pinned with `createSession(startYear)`, used in
+   * place of the clock's year wherever the session needs a default: before any
+   * build, after `clear_session`, and for a `build_plan` that names none.
+   * Undefined for every server and gateway session, which follow the clock.
+   * @see sessionDefaultStartYear
+   */
+  defaultStartYear?: number
   /**
    * The most recent `run_projection` output, or null when no projection has run
    * (or `update_plan` invalidated it). `runProjection` is the only writer and it
@@ -38,46 +83,58 @@ export interface SessionState {
   lastProjection: { result: ProjectionResult; summary: ProjectionSummary } | null
 }
 
-/**
- * The projection start year a session (and a build) assumes when the caller
- * names none.
- *
- * One definition for what were three separate `2026` literals:
- * `createSession`'s default, `buildPlanFromParams`'s `input.startYear ?? 2026`,
- * and `buildTypedPlan`'s frozen `now()` clock — the createdAt/updatedAt stamp on
- * a freshly built plan, which is pinned rather than `new Date()` so a build is
- * reproducible.
- *
- * CHANGING THIS VALUE IS A WIRE CHANGE. Exactly one `tools/list` description
- * names the year in prose — `export_plan`'s "a non-2026 session's projection
- * will diverge" in src/toolTable.ts — and that description is hashed into
- * tests/protocol-baseline/baseline.json's inventory. As of 0.10.0 it
- * INTERPOLATES this constant rather than spelling the year out, so the two
- * cannot disagree; moving the year still moves that description, and the
- * baseline must be regenerated deliberately in the same change.
- *
- * It also stamps `createdAtIso`/`updatedAtIso` on every newly built plan, via
- * `buildTypedPlan`'s frozen clock — INCLUDING plans built with an explicit
- * `startYear`, which do not otherwise depend on this constant. That coupling is
- * deliberate (one literal, not two) and pinned by
- * tests/buildPlan.test.ts's "frozen build clock" case, so moving the year moves
- * those timestamps and that test with it.
- */
-export const DEFAULT_START_YEAR = 2026
+export interface CreateSessionOptions {
+  /** Where the session reads "now". Defaults to {@link systemClock}. */
+  clock?: Clock
+}
 
-export function createSession(startYear: number = DEFAULT_START_YEAR): SessionState {
-  return {
+/**
+ * The start year a session uses when nothing has set one: the year an
+ * embedder pinned with `createSession(startYear)`, else the clock's year now.
+ * One rule for every path that needs a default (`get_session` before a build,
+ * `clear_session`, a `build_plan` that names no year, and through
+ * `session.startYear` the `validate_plan` and `compare_scenarios` defaults), so
+ * a plan checked on one path and built on another is judged in the same year.
+ */
+export function sessionDefaultStartYear(session: Pick<SessionState, 'clock' | 'defaultStartYear'>): number {
+  return session.defaultStartYear ?? clockStartYear(session.clock)
+}
+
+/**
+ * A fresh, empty session. `startYear` is what `get_session` reports before any
+ * build, and what `validate_plan` and `compare_scenarios` check against when
+ * they name none: the session's default start year (@see
+ * sessionDefaultStartYear). Every `build_plan` then sets it, to the caller's
+ * `startYear` or to that default at that build.
+ *
+ * `startYear`, when given, pins the default for the session's whole life: a
+ * build that names no year and a clear both use it instead of the clock's.
+ */
+export function createSession(startYear?: number, options: CreateSessionOptions = {}): SessionState {
+  const clock = options.clock ?? systemClock
+  const session: SessionState = {
     plan: null,
-    startYear,
+    startYear: 0,
     caveats: [],
     conventions: {},
     lastProjection: null,
+    clock,
+    ...(startYear !== undefined ? { defaultStartYear: startYear } : {}),
   }
+  session.startYear = sessionDefaultStartYear(session)
+  return session
 }
 
+/**
+ * Empty the session. Its start year goes back to the session's default (the
+ * clock's year, or the year pinned at creation), not the last build's, so that
+ * after a clear `validate_plan`, `compare_scenarios` and `build_plan` all judge
+ * a plan in the same year again.
+ */
 export function clearSession(session: SessionState): void {
   session.plan = null
   session.caveats = []
   session.conventions = {}
   session.lastProjection = null
+  session.startYear = sessionDefaultStartYear(session)
 }

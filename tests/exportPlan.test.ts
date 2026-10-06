@@ -51,10 +51,10 @@ describe('export_plan round-trip', () => {
   })
 
   it('surfaces startYear + conventions and round-trips a non-2026 session identically', () => {
-    // Build a session that does NOT start in the default year 2026. Because the
+    // Build a session that starts in 2032, not in the clock's year. Because the
     // Roth-conversion window is baked into the plan JSON relative to startYear, a
-    // re-import that forgets startYear would project from 2026 and diverge. The
-    // export now carries startYear so the round-trip is faithful.
+    // re-import that forgets startYear would project from the clock's year and
+    // diverge. The export carries startYear so the round-trip is faithful.
     const session = createSession(2032)
     const built = adapter.setPlanFromBuild(session, {
       household: mfjHousehold,

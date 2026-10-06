@@ -15,9 +15,17 @@ import { registerTools, type AuthorizeTool } from '../src/tools.js'
 import { TOOL_TABLE } from '../src/toolTable.js'
 import { singleHousehold, singlePolicy } from './fixtures.js'
 
+/**
+ * One fixed instant for every session here. The build stamps a plan from the
+ * session's clock (0.11.0), so two sessions on the system clock would export
+ * documents a millisecond apart and the identity comparisons below would fail
+ * on the timestamp alone.
+ */
+const FIXED_NOW = new Date('2026-06-15T12:00:00.000Z')
+
 async function connect(authorize?: AuthorizeTool) {
   const server = new McpServer({ name: 'test', version: '0.0.0' })
-  const session = createSession()
+  const session = createSession(undefined, { clock: () => FIXED_NOW })
   registerTools(server, session, authorize ? { authorize } : {})
   const client = new Client({ name: 'test-client', version: '0.0.0' })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()

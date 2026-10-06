@@ -4,6 +4,8 @@ Every rate below is a **fraction** (`0.05` = 5%). `pia` is **monthly** dollars a
 
 `persons[]` order is load-bearing: `policy.claim_ages[i]` pairs with `persons[i]`.
 
+Each call passes `startYear`, the calendar year the projection starts in: the year the balances are as of, or the `startYear` an export carries. Omitted, the build starts in the current calendar year on the server's clock.
+
 ---
 
 ## 1. Single filer (engine defaults)
@@ -30,7 +32,8 @@ No `assumptions` block → the engine's real-world defaults (~2.5% inflation, SS
     "conversion_bracket": 0.24,
     "conversion_years": 5,
     "ordering": "taxable-first"
-  }
+  },
+  "startYear": 2026
 }
 ```
 
@@ -75,7 +78,8 @@ A real couple in Ohio. The `assumptions` block pins a specific inflation/COLA/re
     "qualifiedRatio": 0.9,
     "dobMonthDay": "03-15",
     "sex": "average"
-  }
+  },
+  "startYear": 2026
 }
 ```
 
@@ -107,4 +111,4 @@ First `build_plan` a household (above), then sweep policies against it in **one*
 }
 ```
 
-`objective` is one of `after_tax_estate` (default), `cumulative_tax`, or `ending_trad`. The result is `{ ok: true, objective, results[], count }`; each `results[i]` has `{ index, policy, objective, ok, caveats }` (and `error` when `ok: false`). Rank the winner by the `objective` value and **surface `caveats`** (e.g. `traditional-first` is approximate).
+`objective` is one of `after_tax_estate` (default), `cumulative_tax`, or `ending_trad`. The result is `{ ok: true, startYear, objective, results[], count, warnings }`; each `results[i]` has `{ index, policy, objective, ok, caveats }` (and `error` when `ok: false`), and `warnings` is the engine's list for the session plan's own projection. Rank the winner by the `objective` value and **surface `caveats` and `warnings`** (e.g. `traditional-first` is approximate).
