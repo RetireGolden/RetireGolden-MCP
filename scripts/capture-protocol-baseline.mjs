@@ -12,7 +12,7 @@ import os from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 export const MCP_VERSION_SENTINEL = '<mcp-version>'
 export const TIMING_SENTINEL = '<timing>'
@@ -414,7 +414,10 @@ export async function captureStdioLane({ root = PACKAGE_ROOT, fixtures }) {
     command: process.execPath,
     args: ['--import', BASELINE_CLOCK_MODULE, cliPath],
     cwd: root,
-    env: { RETIREGOLDEN_MCP_BASELINE_NOW: BASELINE_NOW },
+    // The SDK's default environment, the one the child got before the clock was
+    // pinned, plus the instant. Spelled out rather than left to the SDK's own
+    // merge, so the child's environment does not depend on that detail.
+    env: { ...getDefaultEnvironment(), RETIREGOLDEN_MCP_BASELINE_NOW: BASELINE_NOW },
   })
   // The v1 Client has getters for capabilities and instructions but none for
   // the complete initialize result (e.g. _meta), so intercept the transport's

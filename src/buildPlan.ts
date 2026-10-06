@@ -385,11 +385,12 @@ function pushCallerSchemaSkewCaveat(
   declared: number | undefined | null,
   caveats: string[],
   accepted: AcceptedAs,
-): void {
-  if (declared == null || declared === PLAN_SCHEMA_VERSION) return
+): boolean {
+  if (declared == null || declared === PLAN_SCHEMA_VERSION) return false
   caveats.push(
     `schemaVersion skew: caller-declared plan-schema v${declared} does not match this build's v${PLAN_SCHEMA_VERSION}; the supplied document itself validated as v${PLAN_SCHEMA_VERSION} and was accepted ${acceptedHow(accepted)} — check that the schemaVersion argument came from the same export_plan response as the plan.`,
   )
+  return true
 }
 
 /**
@@ -436,32 +437,56 @@ const DROPPED_PATHS_NAMED = 5
  */
 function acceptedHow(accepted: AcceptedAs): string {
   const parts: string[] = []
-  const n = accepted.dropped.length
-  if (n > 0) {
-    const named = accepted.dropped.slice(0, DROPPED_PATHS_NAMED).join(', ')
-    const more = n > DROPPED_PATHS_NAMED ? ` and ${n - DROPPED_PATHS_NAMED} more` : ''
-    parts.push(
-      `without ${n === 1 ? 'one field' : `${n} fields`} this build's engine does not read, which it dropped (${named}${more})`,
-    )
+  if (accepted.dropped.length > 0) {
+    parts.push(`without ${droppedList(accepted.dropped)}`)
   }
   if (accepted.conventionsApplied) parts.push('with the `conventions` you supplied applied on top of it')
   return parts.length === 0 ? 'unchanged' : parts.join(', and ')
 }
 
 /**
+ * "one field this build's engine does not read, which it dropped (a.b)", naming
+ * at most DROPPED_PATHS_NAMED paths and counting the rest: the one wording both
+ * the skew caveats and the dropped-fields caveat use.
+ */
+function droppedList(dropped: string[]): string {
+  const n = dropped.length
+  const named = dropped.slice(0, DROPPED_PATHS_NAMED).join(', ')
+  const more = n > DROPPED_PATHS_NAMED ? ` and ${n - DROPPED_PATHS_NAMED} more` : ''
+  return `${n === 1 ? 'one field' : `${n} fields`} this build's engine does not read, which it dropped (${named}${more})`
+}
+
+/**
+ * Say which fields the engine dropped from a document this build read
+ * directly, whatever the version siblings say. A skew caveat that fired already
+ * names them (`acceptedHow`), so this is only for a document with no skew
+ * caveat: no siblings, or siblings that match this build. Without it a field
+ * this engine cannot read disappears without a word, which is how engine 0.3.0
+ * lost `incomes[].disability.onsetMonth`.
+ */
+function pushDroppedFieldsCaveat(dropped: string[], caveats: string[]): void {
+  if (dropped.length === 0) return
+  caveats.push(
+    `fields dropped: the supplied plan document carried ${droppedList(dropped)}; a document written by a newer RetireGolden build can carry such fields, and the projection here is made without them.`,
+  )
+}
+
+/**
  * The fields a supplied document carried that the parsed plan does not, as
  * dotted paths (`incomes.0.disability.onsetMonth`). Structural only: it
  * compares keys, never values, and reads nothing the engine computes. Arrays
- * are compared position by position; a value the parse replaced with another
- * shape is not a drop.
+ * are compared position by position, and items past the end of the parsed
+ * array are named by index (`accounts.3`); a value the parse replaced with
+ * another shape is not a drop. Exported for its test (tests/droppedFields.test.ts);
+ * the package root does not re-export it.
  */
-function droppedFields(supplied: unknown, kept: unknown, prefix = ''): string[] {
+export function droppedFields(supplied: unknown, kept: unknown, prefix = ''): string[] {
   if (supplied === null || typeof supplied !== 'object') return []
   if (kept === null || typeof kept !== 'object') return []
   if (Array.isArray(supplied)) {
     if (!Array.isArray(kept)) return []
     return supplied.flatMap((value, i) =>
-      i < kept.length ? droppedFields(value, kept[i], `${prefix}${i}.`) : [],
+      i < kept.length ? droppedFields(value, kept[i], `${prefix}${i}.`) : [`${prefix}${i}`],
     )
   }
   const out: string[] = []
@@ -486,15 +511,16 @@ function pushEngineSkewCaveat(
   declared: string | undefined | null,
   caveats: string[],
   accepted: AcceptedAs,
-): void {
-  if (declared == null || declared === '') return
+): boolean {
+  if (declared == null || declared === '') return false
   const installed = getVersions().engineVersion
   // Unresolvable installed version => nothing to compare against; stay silent
   // rather than warn on an unknown.
-  if (installed == null || installed === declared) return
+  if (installed == null || installed === declared) return false
   caveats.push(
     `engineVersion skew: the supplied plan document was exported under @retiregolden/engine ${declared} but this build runs ${installed}; the document was imported ${acceptedHow(accepted)}, but engine defaults and modeling semantics can differ between versions — re-run the projection here rather than comparing against numbers produced by the exporting build.`,
   )
+  return true
 }
 
 /**
@@ -727,10 +753,13 @@ export function buildPlanFromParams(input: BuildPlanInput, options: BuildPlanOpt
       // still has to be checked — against what the document declared, not against
       // this build's version.
       pushMigratedSiblingSkewCaveat(input.schemaVersion, migratedFrom, caveats)
-    } else {
-      pushCallerSchemaSkewCaveat(input.schemaVersion, caveats, { conventionsApplied, dropped })
     }
-    pushEngineSkewCaveat(input.engineVersion, caveats, { conventionsApplied, dropped })
+    const acceptedAs = { conventionsApplied, dropped }
+    const callerSkew =
+      migratedFrom == null && pushCallerSchemaSkewCaveat(input.schemaVersion, caveats, acceptedAs)
+    const engineSkew = pushEngineSkewCaveat(input.engineVersion, caveats, acceptedAs)
+    // Named once: a skew caveat that fired already lists the dropped fields.
+    if (!callerSkew && !engineSkew) pushDroppedFieldsCaveat(dropped, caveats)
     // Say how this document is taxed, exactly as the typed path does. A document is
     // where `stateEffectiveTaxPct: 0` is most likely to be sitting — it is what the
     // pre-0.5.0 docs taught, and what an LLM authoring a plan from those docs would

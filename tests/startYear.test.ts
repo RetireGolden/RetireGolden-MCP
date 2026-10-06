@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 import type { Plan } from '@retiregolden/engine'
 import * as adapter from '../src/adapter.js'
 import { buildPlanFromParams } from '../src/buildPlan.js'
+import { getTool } from '../src/toolTable.js'
 import { clockStartYear, createSession, type SessionState } from '../src/session.js'
 import { builtOk, singleHousehold, singlePolicy } from './fixtures.js'
 
@@ -138,6 +139,54 @@ describe('build_plan and update_plan check the plan against the start year', () 
       'The lump-sum election is dated 2029, before this plan starts in 2031.',
     )
     expect(session.plan).toEqual(before)
+  })
+})
+
+describe('compare_scenarios and validate_plan run the same start-year check', () => {
+  it('compare_scenarios refuses a side with an election dated before the year it projects from', () => {
+    const session = createSession(2026)
+    const passed = planWithLumpSumOffer(2028, true)
+    const fine = planWithLumpSumOffer(2032, true)
+
+    const sideB = adapter.compareScenarios(session, fine, passed, 2031)
+    expect(sideB.ok).toBe(false)
+    if (sideB.ok) return
+    expect(sideB.error).toBe('INVALID_PLAN_B')
+    expect((sideB as { issues?: string[] }).issues?.join(' ') ?? '').toContain(
+      'The lump-sum election is dated 2028, before this plan starts in 2031.',
+    )
+    const sideA = adapter.compareScenarios(session, passed, fine, 2031)
+    expect(sideA.ok).toBe(false)
+    if (!sideA.ok) expect(sideA.error).toBe('INVALID_PLAN_A')
+
+    // The same documents compare from a year the election has not passed;
+    // without an argument the session's year (2026) is the one judged.
+    expect(adapter.compareScenarios(session, fine, passed, 2028).ok).toBe(true)
+    expect(adapter.compareScenarios(session, fine, passed).ok).toBe(true)
+  })
+
+  it('validate_plan reports the issue against the year it is given, or the session year', () => {
+    const validate = getTool('validate_plan')!
+    const session = createSession(2026)
+    const doc = planWithLumpSumOffer(2028, true)
+
+    const given = validate.handler(session, { plan: doc, startYear: 2031 }) as {
+      ok: boolean
+      issues?: string[]
+      startYear?: number
+    }
+    expect(given.ok).toBe(false)
+    expect(given.startYear).toBe(2031)
+    expect(given.issues?.join(' ')).toContain('The lump-sum election is dated 2028, before this plan starts in 2031.')
+
+    const sessionYear = validate.handler(session, { plan: doc }) as { ok: boolean; startYear?: number }
+    expect(sessionYear.ok).toBe(true)
+    expect(sessionYear.startYear).toBe(2026)
+
+    const later = createSession(2030)
+    const fromSession = validate.handler(later, { plan: doc }) as { ok: boolean; issues?: string[] }
+    expect(fromSession.ok).toBe(false)
+    expect(fromSession.issues?.join(' ')).toContain('before this plan starts in 2030.')
   })
 })
 

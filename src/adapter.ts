@@ -206,8 +206,21 @@ function snapshotJson<T>(value: T): T {
   return structuredClone(value)
 }
 
-export function validatePlanJson(input: unknown) {
-  return parsePlan(input)
+/**
+ * Validate a plan document: the engine's `parsePlan`, and, when a start year
+ * is named, the engine's start-year check (`asOfIssues`) against it, the same
+ * check `build_plan` and `update_plan` refuse a plan on. A document that
+ * passes here therefore builds from that year. The tool names the year it was
+ * given or the session's; a programmatic caller that names none gets the parse
+ * alone, as before. @see startYearIssues
+ */
+export function validatePlanJson(input: unknown, startYear?: number) {
+  const parsed = parsePlan(input)
+  if (startYear === undefined) return parsed
+  if (!parsed.ok) return { ...parsed, startYear }
+  const asOf = startYearIssues(parsed.plan, startYear)
+  if (asOf.length > 0) return { ok: false as const, issues: asOf, startYear }
+  return { ...parsed, startYear }
 }
 
 export function setPlanFromBuild(session: SessionState, input: BuildPlanInput) {
@@ -665,7 +678,8 @@ export function solveMaxSpending(session: SessionState) {
       // The engine's sentence saying why it published the exact amount that
       // passed (`maxBaseAnnualRounding: 'none'`: under guardrails the amount
       // rounded down to $100 failed, or it would fall below the required
-      // spending floor). Null when the answer is rounded as usual.
+      // spending floor). Null when the answer is rounded as usual. The engine
+      // types `diagnostics` as `string[]`, so this is the sentence itself.
       maxBaseAnnualNote: result.diagnostics.find(isExactAnswerDiagnostic) ?? null,
       sustainsCurrentBase: result.sustainsCurrentBase,
       spendingSlackDollars: slackWithheld ? null : result.spendingSlackDollars,
@@ -812,6 +826,15 @@ export function compareScenarios(
   if (!a.ok) return { ok: false as const, error: 'INVALID_PLAN_A', issues: a.issues }
   if (!b.ok) return { ok: false as const, error: 'INVALID_PLAN_B', issues: b.issues }
   const year = startYear ?? session.startYear
+  // The start-year check build_plan refuses a plan on, against the year both
+  // sides are projected from: a side with a pension lump-sum election dated
+  // before it would be priced as a pension that pays nothing and a rollover
+  // credited in no year. Refused with the engine's issue text, like a side that
+  // does not parse. @see startYearIssues
+  const asOfA = startYearIssues(a.plan, year)
+  if (asOfA.length > 0) return { ok: false as const, error: 'INVALID_PLAN_A', startYear: year, issues: asOfA }
+  const asOfB = startYearIssues(b.plan, year)
+  if (asOfB.length > 0) return { ok: false as const, error: 'INVALID_PLAN_B', startYear: year, issues: asOfB }
   // Each side gets ITS OWN calculator: the two documents can name different states
   // or different flat overrides, and a "compare" that priced B at A's state rates
   // would attribute a tax difference to whatever else changed between them.

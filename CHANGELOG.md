@@ -10,8 +10,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 host changes engine 0.4.0 assigns to this package.** A minor, because the wire
 surface moves: plans are plan-schema v7, which engine 0.3.x (and so every
 earlier release of this package) refuses; a build that names no `startYear`
-starts in the clock's year instead of 2026; `build_plan` and `update_plan`
-refuse a plan the engine's start-year check rejects; seven tools echo the
+starts in the clock's year instead of 2026; `build_plan`, `update_plan` and
+`compare_scenarios` refuse a plan the engine's start-year check rejects, and
+`validate_plan` reports it; seven tools echo the
 `startYear` they ran from and four return the projection's `warnings`; and the
 programmatic API loses `DEFAULT_START_YEAR`. The protocol baseline and the
 golden numbers were regenerated, and every figure that moved is traced to the
@@ -51,15 +52,21 @@ with Marketplace coverage reaches it.
   `updatedAtIso` are the build instant, not a frozen `2026-01-01T00:00:00.000Z`,
   and `update_plan` advances `updatedAtIso` from the session's clock instead of
   `Date.now()` (still strictly past the prior value).
-- **`build_plan` and `update_plan` run the engine's start-year check.** Engine
-  0.4.0's `parsePlan` no longer refuses an elected pension lump sum dated before
-  the plan starts, and leaves that check (`asOfIssues`) to the host that saves.
-  Both tools now run it against the start year (`build_plan`'s, and the
-  session's for `update_plan`) and refuse such a plan with the engine's issue,
+- **Every tool that takes in or prices a plan document runs the engine's
+  start-year check.** Engine 0.4.0's `parsePlan` no longer refuses an elected
+  pension lump sum dated before the plan starts, and leaves that check
+  (`asOfIssues`) to the host. Without it the ledger would model a pension that
+  pays nothing and a rollover credited in no year. The engine's issue,
   `accounts.N.lumpSumOffer.electionYear: The lump-sum election is dated …`,
-  which names both restatements; `update_plan` returns it as `INVALID_PLAN` and
-  leaves the session plan untouched. Without the check the ledger would model
-  a pension that pays nothing and a rollover credited in no year.
+  names both restatements, and every tool below returns it as written:
+  - `build_plan` refuses such a plan, against its start year.
+  - `update_plan` refuses the edit as `INVALID_PLAN`, against the session's
+    start year, and leaves the session plan untouched.
+  - `compare_scenarios` refuses a side as `INVALID_PLAN_A` or `INVALID_PLAN_B`,
+    against the start year it projects both sides from.
+  - `validate_plan` reports the issue as a validation error, against the
+    `startYear` it is given (a new optional argument) or the session's, and
+    echoes the year it checked.
 - **Every projecting tool echoes the `startYear` it ran from.**
   `run_monte_carlo`, `batch_evaluate`, `run_optimizer`, `solve_max_spending`,
   `compare_scenarios` (its argument or the session's), `explain_modeled_result`
@@ -75,8 +82,9 @@ with Marketplace coverage reaches it.
   `maxBaseAnnual` (the published amount, rounded down to $100) it returns
   `feasibleBaseAnnual` (the highest level that passed), `maxBaseAnnualRounding`
   (`'down-to-hundred'`, or `'none'` when the engine publishes the exact amount),
-  `maxBaseAnnualNote` (the engine's sentence saying why it did, under guardrail
-  spending or a required floor; null otherwise) and `sustainsCurrentBase` (the
+  `maxBaseAnnualNote` (the engine's own sentence saying why it did, under
+  guardrail spending or a required floor, passed through as the string the
+  engine writes; null otherwise) and `sustainsCurrentBase` (the
   engine's verdict on today's base spending). The slack is measured from the
   rounded amount, so it can read between −$100 and 0 beside a base the plan
   sustains: the protocol baseline's single household, set to spend $121,450,
@@ -97,13 +105,21 @@ with Marketplace coverage reaches it.
   and the earliest claim age still open: the claim would be backdated, and the
   engine's claim-age grid never offers it. Before, every row wrote every
   person's claim age, so a sweep could price claims the household cannot make.
-- **Import caveats no longer call a document unchanged when the engine dropped
-  fields from it.** The `engineVersion` and `schemaVersion` skew caveats said
-  the document was imported or accepted "unchanged" even when `parsePlan` had
-  dropped fields this engine does not read, which is how engine 0.3.0 lost
-  `incomes[].disability.onsetMonth`. They now name up to five dropped paths and
-  count the rest. A migrated document is not checked: a migration may move
-  fields, and its own caveat already says the document was upgraded.
+- **Fields the engine drops from a document are named.** When `parsePlan`
+  drops fields this engine does not read, which is how engine 0.3.0 lost
+  `incomes[].disability.onsetMonth`, `build_plan` now says so whatever the
+  document's version siblings say. It names up to five dropped paths and
+  counts the rest; an array item past the end of what the engine kept is named
+  by index (`accounts.3`).
+  - With no siblings, or siblings that match this build, a `fields dropped:`
+    caveat names them.
+  - On the skew path, the `engineVersion` or `schemaVersion` skew caveat names
+    them instead of calling the document "unchanged", and the `fields dropped:`
+    caveat is not added, so nothing is reported twice.
+  - A migrated document is not checked: a migration may move fields, and its
+    own caveat already says the document was upgraded.
+  - A current export and the `plan-json.md` example drop nothing, so they get
+    no such caveat.
 - **FI figures are priced as the app prices them.** Engine 0.4.0's
   `summarizeProjection` takes a third argument, the plan's conversion-free run
   or `null`. Every summary a response carries (`run_projection`,
@@ -115,10 +131,11 @@ with Marketplace coverage reaches it.
   `coastFireNumber` are `null` when nobody in the plan retires. The batch rows
   and the spending solver's baseline read no FI figure and pass `null`, as the
   engine's own decision context does.
-- **Tool text.** `build_plan`'s and `compare_scenarios`' `startYear` fields have
-  descriptions; `build_plan`, `run_monte_carlo`, `batch_evaluate`,
-  `run_optimizer`, `solve_max_spending`, `compare_scenarios`,
-  `explain_modeled_result`, `export_plan` and `update_plan` describe the
+- **Tool text.** The `startYear` fields of `build_plan`, `compare_scenarios`
+  and `validate_plan` have descriptions; `build_plan`, `validate_plan`,
+  `run_monte_carlo`, `batch_evaluate`, `run_optimizer`, `solve_max_spending`,
+  `compare_scenarios`, `explain_modeled_result`, `export_plan` and
+  `update_plan` describe the
   behaviour above. No description names a year, so `tools/list` does not move
   with the clock. `build_plan`'s `assumptions.sex` says what `average` is, in
   the engine's words: the mean of the male and female survival probabilities.
@@ -217,6 +234,17 @@ with Marketplace coverage reaches it.
   and the backdated age refused. The person-order test in
   `tests/adapter.extended.test.ts` now sweeps ages still open in 2026 (70 and
   68), since an age already passed fails its row.
+- `tests/solveMaxSpendingSlack.test.ts` also pins a non-null
+  `maxBaseAnnualNote`, on a required spending floor of $121,450 where the
+  engine publishes the exact amount. `tests/startYear.test.ts` covers the
+  start-year check in `compare_scenarios` (either side) and `validate_plan`
+  (the given year and the session's). `tests/droppedFields.test.ts` plants
+  unknown fields and checks the caveat on both paths, the count past five, and
+  a truncated array tail; the browser round trip asserts its payload drops
+  nothing.
+- The protocol-baseline capture passes the SDK's default environment
+  (`getDefaultEnvironment()`) plus `RETIREGOLDEN_MCP_BASELINE_NOW` to the stdio
+  child explicitly, instead of relying on the SDK merging them.
 
 ### Changed (docs, skill, and tool contract)
 
@@ -225,12 +253,14 @@ with Marketplace coverage reaches it.
   is a current (plan-schema v7) export again, the four empty fact blocks
   included, and still round-trips through `build_plan`. SKILL.md,
   `references/examples.md` and `references/plan-ingestion.md` describe the
-  `warnings` list, the `startYear` echo and the start-year refusal.
+  `warnings` list, the `startYear` echo and the start-year refusal, and
+  `examples.md`'s worked `build_plan` calls pass `startYear`.
   `plan-json.md` lists `incomes[].disability.onsetMonth` and what a blank month
   means.
-- `schemas/tools.v1.json` is regenerated (`pnpm run contract:generate`): the two
-  `startYear` descriptions and the `assumptions.sex` description are the only
-  changes.
+- `schemas/tools.v1.json` is regenerated (`pnpm run contract:generate`): the
+  `startYear` descriptions of `build_plan` and `compare_scenarios`,
+  `validate_plan`'s new `startYear` argument, and the `assumptions.sex`
+  description are the only changes.
 
 ### Verified
 
@@ -293,7 +323,9 @@ rollover; every fixture starts in 2026) and #771 (railroad annuities and
   figure: `feasibleBaseAnnual` 121,407, `maxBaseAnnualRounding`
   `"down-to-hundred"`, `sustainsCurrentBase` true, and both notes null (the
   slack, $61,400, is positive). The claims check moves no batch row: the
-  fixture's claim at 67 falls in 2027, still open.
+  fixture's claim at 67 falls in 2027, still open. `validate_plan` gains
+  `startYear` (2026), and no recorded document trips the start-year check or
+  drops a field.
 - **Golden numbers**, regenerated (`pnpm run goldens:print`), every moved
   literal from the causes above:
 

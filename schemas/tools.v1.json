@@ -416,7 +416,13 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "plan": {}
+        "plan": {},
+        "startYear": {
+          "description": "The calendar year to check the plan against, the year its projection would start in. Omit it to use the session's startYear.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
       }
     },
     "run_projection": {

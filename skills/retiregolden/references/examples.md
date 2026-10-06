@@ -4,6 +4,8 @@ Every rate below is a **fraction** (`0.05` = 5%). `pia` is **monthly** dollars a
 
 `persons[]` order is load-bearing: `policy.claim_ages[i]` pairs with `persons[i]`.
 
+Each call passes `startYear`, the calendar year the projection starts in: the year the balances are as of, or the `startYear` an export carries. Omitted, the build starts in the current calendar year on the server's clock.
+
 ---
 
 ## 1. Single filer (engine defaults)
@@ -30,7 +32,8 @@ No `assumptions` block → the engine's real-world defaults (~2.5% inflation, SS
     "conversion_bracket": 0.24,
     "conversion_years": 5,
     "ordering": "taxable-first"
-  }
+  },
+  "startYear": 2026
 }
 ```
 
@@ -75,7 +78,8 @@ A real couple in Ohio. The `assumptions` block pins a specific inflation/COLA/re
     "qualifiedRatio": 0.9,
     "dobMonthDay": "03-15",
     "sex": "average"
-  }
+  },
+  "startYear": 2026
 }
 ```
 

@@ -220,6 +220,8 @@ describe('copied plan → build_plan', () => {
     expect(built.ok).toBe(true)
     expect(builtOk(built).plan).toEqual(asThisBuildStoresIt(plan))
     expect(built.startYear).toBe(view.startYear)
+    // The engine reads every field the browser writes: nothing is dropped.
+    expect(built.caveats.filter((c) => c.startsWith('fields dropped:'))).toEqual([])
     // Filtered to skew rather than asserting no caveats at all — since 0.5.0 an
     // imported document also reports that the resident state's income tax is
     // modeled, which is a true statement about this KY plan and not a defect in

@@ -179,16 +179,23 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'validate_plan',
-    description: `${EDUCATIONAL} Validate plan JSON (or the current session plan).`,
+    description: `${EDUCATIONAL} Validate plan JSON (or the current session plan) with the engine, and against a start year as build_plan checks it: a pension lump-sum election dated before that year is reported as an issue. The result echoes the startYear it checked against.`,
     inputShape: {
       plan: z.unknown().optional(),
+      startYear: z
+        .number()
+        .int()
+        .optional()
+        .describe(
+          "The calendar year to check the plan against, the year its projection would start in. Omit it to use the session's startYear.",
+        ),
     },
     handler: (session, args) => {
       const target = args.plan ?? session.plan
       if (target == null) {
         return { ok: false, error: 'NO_PLAN' }
       }
-      return adapter.validatePlanJson(target)
+      return adapter.validatePlanJson(target, (args.startYear as number | undefined) ?? session.startYear)
     },
     httpExposed: false,
     dataScope: 'session',
@@ -281,7 +288,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'compare_scenarios',
-    description: `${EDUCATIONAL} Compare two plan JSON documents via projection summaries. Both plans are projected from one startYear, which the result echoes.`,
+    description: `${EDUCATIONAL} Compare two plan JSON documents via projection summaries. Both plans are projected from one startYear, which the result echoes, and each is checked against it as build_plan checks a plan: a side with a pension lump-sum election dated before that year is refused (INVALID_PLAN_A or INVALID_PLAN_B).`,
     inputShape: {
       planA: z.unknown(),
       planB: z.unknown(),

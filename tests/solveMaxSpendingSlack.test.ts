@@ -84,4 +84,25 @@ describe('solve_max_spending', () => {
     expect(short.spendingSlackDollars!).toBeLessThan(0)
     expect(short.spendingSlackNote).toBeNull()
   })
+
+  it("carries the engine's sentence when it publishes the exact amount", () => {
+    // A required spending floor of $121,450: the solve passes at exactly that
+    // level, and rounded down to $100 the answer would fall below the floor, so
+    // the engine publishes $121,450 (`maxBaseAnnualRounding: 'none'`) and says
+    // why in one of its diagnostics, a string.
+    const session = sessionSpending(121_450)
+    const floor = adapter.updatePlan(session, [{ op: 'set_expense', field: 'requiredAnnual', value: 121_450 }])
+    expect(floor.ok).toBe(true)
+    const res = adapter.solveMaxSpending(session)
+    if (!res.ok) throw new Error('solver failed')
+    expect(res.maxBaseAnnualRounding).toBe('none')
+    expect(res.maxBaseAnnual).toBe(121_450)
+    expect(res.feasibleBaseAnnual).toBe(121_450)
+    expect(res.maxBaseAnnualNote).toBe(
+      'The answer is the exact amount that passed ($121,450/yr): rounded down to the nearest $100 it would fall below the required spending floor ($121,450/yr).',
+    )
+    expect(res.sustainsCurrentBase).toBe(true)
+    expect(res.spendingSlackDollars).toBe(0)
+    expect(res.spendingSlackNote).toBeNull()
+  })
 })
