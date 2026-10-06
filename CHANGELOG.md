@@ -84,6 +84,11 @@ with Marketplace coverage reaches it.
   projection, the same list `run_projection` returns as `summary.warnings`.
   They returned none, which dropped, among others, the engine's warning that a
   pension's lump-sum offer year has passed and the pension pays its annuity.
+  The cost is one extra deterministic projection per `run_monte_carlo`,
+  `batch_evaluate` and `run_optimizer` call (`solve_max_spending` reads the
+  baseline it already runs), paid for those warnings, and a conversion-free
+  run for each published summary of a plan that converts, paid for FI parity
+  with the app (below).
 - **`solve_max_spending` publishes the engine's whole answer.** Beside
   `maxBaseAnnual` (the published amount, rounded down to $100) it returns
   `feasibleBaseAnnual` (the highest level that passed), `maxBaseAnnualRounding`
@@ -111,11 +116,20 @@ with Marketplace coverage reaches it.
   and the earliest claim age still open: the claim would be backdated, and the
   engine's claim-age grid never offers it. Before, every row wrote every
   person's claim age, so a sweep could price claims the household cannot make.
-- **Fields the engine drops are named.** When `parsePlan` drops fields this
-  engine does not read, which is how engine 0.3.0 lost
-  `incomes[].disability.onsetMonth`, the tool that took them in now says so.
-  It names up to five dropped paths and counts the rest; an array item past
-  the end of what the engine kept is named by index (`accounts.3`).
+- **Fields the engine or the typed inputs drop are named.** When `parsePlan`
+  drops fields this engine does not read, which is how engine 0.3.0 lost
+  `incomes[].disability.onsetMonth`, or a typed `build_plan` input strips a key
+  it does not declare, the tool that took them in now says so and refuses
+  nothing. It names up to five dropped paths and counts the rest; an array item
+  past the end of what was kept is named by index (`accounts.3`).
+  - Typed `build_plan`: the `household`, `policy`, `assumptions` and
+    `conversion` schemas are plain `z.object`s, which strip an undeclared key
+    rather than refuse the call, so `onsetMonth` on a person was lost without a
+    word. A `fields dropped:` caveat now names every stripped key at any depth
+    (`household.persons.0.onsetMonth`, `policy.claimAge`), compared between the
+    arguments as sent and as parsed, over stdio, the HTTP gateway and the
+    programmatic call alike. The schemas stay non-strict: `.strict()` would
+    change the published input schema and refuse calls that work today.
   - `build_plan`, with no version siblings or siblings that match this build:
     a `fields dropped:` caveat names them.
   - `build_plan` on the skew path: the first skew caveat that fires names them
@@ -133,9 +147,8 @@ with Marketplace coverage reaches it.
     engine-skew caveat no longer calls it "imported unchanged"; it says the
     engine upgraded it from its plan-schema version, as the migration caveat
     does.
-  - A current export and the `plan-json.md` example drop nothing, so they get
-    no such caveat. The typed `household`/`policy`/`assumptions` path is not
-    checked: its tool input schema governs unknown keys.
+  - A current export, the `plan-json.md` example, a clean typed call and the
+    protocol baseline's typed builds drop nothing, so they get no such caveat.
 - **FI figures are priced as the app prices them.** Engine 0.4.0's
   `summarizeProjection` takes a third argument, the plan's conversion-free run
   or `null`. Every summary a response carries (`run_projection`,
@@ -270,7 +283,15 @@ with Marketplace coverage reaches it.
   skew caveat, and the `update_plan` and `validate_plan` reports; the browser
   round trip asserts its payload drops nothing, and
   `tests/planJsonExample.test.ts` builds the `plan-json.md` example and
-  asserts it drops nothing and is not refused.
+  asserts it drops nothing and is not refused. `tests/typedArgumentsDropped.test.ts`
+  sends a person's `onsetMonth`, an unknown policy key and an unknown
+  assumptions key over the programmatic call, stdio and the gateway path, and
+  a clean typed call that drops nothing.
+- To give a handler the arguments as sent beside the parsed ones,
+  `registerTools` registers a thin wrapper around each tool's compiled schema
+  that records them, and the gateway records them in `parseToolArgs`. The
+  wrapper's `~standard.jsonSchema` is the zod schema's own, so `tools/list` is
+  byte-identical.
 - The protocol-baseline capture passes the SDK's default environment
   (`getDefaultEnvironment()`) plus `RETIREGOLDEN_MCP_BASELINE_NOW` to the stdio
   child explicitly, instead of relying on the SDK merging them.

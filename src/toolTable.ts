@@ -167,7 +167,12 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         "Optional overrides for default modeling assumptions (inflation, returns, SS COLA, state, taxes, qualified ratio, dob month-day, sex). Defaults follow the engine (~2.5% inflation, SS COLA tracking inflation, and the resident state's own modeled income tax — set stateEffectiveTaxPct above 0 only to override that with a flat rate); household state is a REQUIRED input, not an assumption. Set explicit values to override; omitted fields keep the engine defaults.",
       ),
     },
-    handler: (session, args) => adapter.setPlanFromBuild(session, args as unknown as BuildPlanInput),
+    // The raw arguments ride beside the parsed ones, so the typed path can name
+    // a key its non-strict schemas stripped. @see suppliedArgumentsOf
+    handler: (session, args) =>
+      adapter.setPlanFromBuild(session, args as unknown as BuildPlanInput, {
+        suppliedArguments: suppliedArgumentsOf(args),
+      }),
     httpExposed: true,
     dataScope: 'session',
     arms: ['calculator', 'optimizer'],
@@ -430,9 +435,33 @@ function zodIssues(error: z.ZodError): string {
  * `normalizeRawShapeSchema` returns an already-Standard-Schema value untouched
  * (it only wraps a RAW shape in `z.object`), and never writes to it. Zod
  * schemas are themselves immutable under parsing. If that ever changes, give
- * registration its own instance.
+ * registration its own instance. (Registration now passes a thin wrapper whose
+ * `~standard` delegates to this object and only records the raw arguments;
+ * @see tools.recordingSchemaFor.)
  */
 const compiledSchemas = new WeakMap<ToolEntry, z.ZodObject<z.ZodRawShape>>()
+
+/**
+ * The arguments a caller sent, keyed by the parsed object a handler receives.
+ *
+ * Both transports hand a handler the PARSED arguments (non-strict shapes, so
+ * unknown keys are stripped), which is what keeps retired keys out of session
+ * state. A handler that has to name what was stripped needs the raw call too:
+ * the gateway records it in `parseToolArgs`, and stdio through the recording
+ * schema `registerTools` registers (src/tools.ts). A WeakMap, so a parsed
+ * object and its raw arguments are collected together.
+ */
+const suppliedArguments = new WeakMap<object, unknown>()
+
+/** Remember the raw `supplied` arguments behind a `parsed` copy. */
+export function recordSuppliedArguments(parsed: unknown, supplied: unknown): void {
+  if (parsed !== null && typeof parsed === 'object') suppliedArguments.set(parsed, supplied)
+}
+
+/** The raw arguments behind a handler's parsed `args`, or undefined when none were recorded. */
+export function suppliedArgumentsOf(args: Record<string, unknown>): unknown {
+  return suppliedArguments.get(args)
+}
 
 /** The compiled input schema for `entry`, compiling it on first use. */
 export function argsSchemaFor(entry: ToolEntry): z.ZodObject<z.ZodRawShape> {
@@ -467,6 +496,7 @@ export function parseToolArgs(
 ): { ok: true; args: Record<string, unknown> } | { ok: false; message: string } {
   const parsed = argsSchemaFor(entry).safeParse(args)
   if (!parsed.success) return { ok: false, message: zodIssues(parsed.error) }
+  recordSuppliedArguments(parsed.data, args)
   if (entry.crossFieldValidate) {
     const issue = entry.crossFieldValidate(parsed.data as Record<string, unknown>)
     if (issue) return { ok: false, message: issue }

@@ -13,14 +13,20 @@
  * responses keep the SDK's safe fallback (`ttlMs: 0`, `cacheScope: 'private'`).
  */
 
-import type { McpServer } from '@modelcontextprotocol/server'
+import type { McpServer, StandardSchemaWithJSON } from '@modelcontextprotocol/server'
 import {
   planJsonSchema,
   PLAN_SCHEMA_ID,
   PLAN_SCHEMA_VERSION,
 } from '@retiregolden/engine/schema/current'
 import type { SessionState } from './session.js'
-import { TOOL_TABLE, argsSchemaFor, jsonResult, type ToolEntry } from './toolTable.js'
+import {
+  TOOL_TABLE,
+  argsSchemaFor,
+  jsonResult,
+  recordSuppliedArguments,
+  type ToolEntry,
+} from './toolTable.js'
 
 export { EDUCATIONAL, jsonResult } from './toolTable.js'
 
@@ -68,6 +74,40 @@ export interface RegisterToolsOptions {
   authorize?: AuthorizeTool
 }
 
+const recordingSchemas = new WeakMap<ToolEntry, StandardSchemaWithJSON>()
+
+/**
+ * The input schema `registerTools` registers: the tool's compiled zod schema,
+ * unchanged in what it publishes and how it validates, which also records the
+ * raw arguments behind each parsed result (@see toolTable.suppliedArgumentsOf).
+ *
+ * The SDK validates through `~standard.validate` and hands the handler the
+ * value it returns; `tools/list` renders `~standard.jsonSchema`, which is the
+ * zod schema's own, so the advertised schema is byte-identical (the protocol
+ * baseline's inventory hash holds it). Only `validate` is wrapped.
+ */
+function recordingSchemaFor(entry: ToolEntry): StandardSchemaWithJSON {
+  let schema = recordingSchemas.get(entry)
+  if (!schema) {
+    const standard = argsSchemaFor(entry)['~standard']
+    const record = <R extends { value?: unknown; issues?: unknown }>(raw: unknown, result: R): R => {
+      if (!result.issues) recordSuppliedArguments(result.value, raw)
+      return result
+    }
+    schema = {
+      '~standard': {
+        ...standard,
+        validate: (value: unknown) => {
+          const result = standard.validate(value)
+          return result instanceof Promise ? result.then((r) => record(value, r)) : record(value, result)
+        },
+      },
+    } as StandardSchemaWithJSON
+    recordingSchemas.set(entry, schema)
+  }
+  return schema
+}
+
 export function registerTools(
   server: McpServer,
   session: SessionState,
@@ -79,9 +119,10 @@ export function registerTools(
       tool.name,
       {
         description: tool.description,
-        // Same compiled schema object the gateway's validateToolArgs uses, so
-        // the two transports cannot drift and the compile happens once.
-        inputSchema: argsSchemaFor(tool),
+        // The same compiled schema the gateway's validateToolArgs uses, so the
+        // two transports cannot drift and the compile happens once, wrapped
+        // only to record the raw arguments. @see recordingSchemaFor
+        inputSchema: recordingSchemaFor(tool),
       },
       async (args) => {
         // Guarded rather than defaulted to a no-op callback: with no `authorize`,

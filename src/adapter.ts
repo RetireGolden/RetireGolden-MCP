@@ -83,6 +83,9 @@ export function taxCalc(plan: Plan) {
  * requires every caller to choose; this is the choice for every summary a
  * response carries, so its FI figures (`fiNumber`, `coastFireNumber`, `fiBasis`)
  * match the app's. The conversion-free run is only built when the plan converts.
+ *
+ * Cost, paid for FI parity with the app: one more deterministic projection for
+ * each summary a response publishes, and only when the plan converts.
  */
 function publishedSummary(plan: Plan, result: ProjectionResult, simulateOptions: SimulateOptions) {
   return summarizeProjection(plan, result, { conversionFreeRun: conversionFreeRun(plan, simulateOptions) })
@@ -112,6 +115,11 @@ function summaryWithoutFiBasis(plan: Plan, result: ProjectionResult) {
  * event dated before the start year, a Social Security stream it skipped — was
  * dropped exactly where a caller asks the bigger question. A copy, so a caller
  * cannot reach into a projection the adapter keeps.
+ *
+ * Cost, paid for those warnings: one extra deterministic projection per
+ * `run_monte_carlo`, `batch_evaluate` and `run_optimizer` call, none of which
+ * otherwise runs it for the caller; `solve_max_spending` reads the baseline it
+ * already projects.
  */
 function baselineWarnings(result: ProjectionResult): string[] {
   return [...result.warnings]
@@ -230,12 +238,19 @@ export function validatePlanJson(input: unknown, startYear?: number) {
   return { ...parsed, startYear, warnings }
 }
 
-export function setPlanFromBuild(session: SessionState, input: BuildPlanInput) {
+export function setPlanFromBuild(
+  session: SessionState,
+  input: BuildPlanInput,
+  options: { suppliedArguments?: unknown } = {},
+) {
   // A build that names no year uses the session's default: the clock's year,
   // or the year an embedder pinned at createSession. @see sessionDefaultStartYear
+  // `suppliedArguments` are the tool call's raw arguments when `input` is the
+  // transport's parsed copy. @see buildPlan.typedArgumentsDropped
   const result = buildPlanFromParams(input, {
     clock: session.clock,
     ...(session.defaultStartYear !== undefined ? { defaultStartYear: session.defaultStartYear } : {}),
+    ...(options.suppliedArguments !== undefined ? { suppliedArguments: options.suppliedArguments } : {}),
   })
   // `ok` alone narrows: BuildPlanResult is a discriminated union, so the success
   // arm's `plan` is non-optional and needs no second guard.
@@ -342,7 +357,8 @@ export function runMonteCarlo(
     seed,
     pathCount,
   })
-  // The paths publish no warnings of their own. @see baselineWarnings
+  // The paths publish no warnings of their own, so this is one extra
+  // deterministic projection, paid for the warnings. @see baselineWarnings
   const warnings = baselineWarnings(simulatePlan(session.plan, simulateOptions))
   const agg = aggregateMonteCarlo(paths)
   // Engine already computes the ending-balance distribution; surface the total
@@ -401,7 +417,8 @@ export function batchEvaluate(
   // because the length check and the resulting error text depend on that row's
   // own `claim_ages`.
   // Every row is a variant of the session plan; what the engine says about the
-  // plan itself comes from its own projection. @see baselineWarnings
+  // plan itself comes from its own projection: one extra deterministic run per
+  // call, paid for the warnings. @see baselineWarnings
   const warnings = baselineWarnings(
     simulatePlan(session.plan, { startYear: session.startYear, taxCalculator: taxCalc(session.plan) }),
   )
@@ -613,7 +630,7 @@ export async function runOptimizer(session: SessionState) {
       taxCalculator: taxCalc(session.plan),
     }
     // optimizePlan runs this projection itself and returns none of its
-    // warnings. @see baselineWarnings
+    // warnings, so it runs once more here, paid for them. @see baselineWarnings
     const warnings = baselineWarnings(simulatePlan(session.plan, simulateOptions))
     const result = await optimizePlan(session.plan, simulateOptions)
     return {

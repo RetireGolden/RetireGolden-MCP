@@ -467,11 +467,11 @@ function acceptedHow(accepted: AcceptedAs): string {
  * at most DROPPED_PATHS_NAMED paths and counting the rest: the one wording both
  * the skew caveats and the dropped-fields caveat use.
  */
-function droppedList(dropped: string[]): string {
+function droppedList(dropped: string[], reader = "this build's engine does not read"): string {
   const n = dropped.length
   const named = dropped.slice(0, DROPPED_PATHS_NAMED).join(', ')
   const more = n > DROPPED_PATHS_NAMED ? ` and ${n - DROPPED_PATHS_NAMED} more` : ''
-  return `${n === 1 ? 'one field' : `${n} fields`} this build's engine does not read, which it dropped (${named}${more})`
+  return `${n === 1 ? 'one field' : `${n} fields`} ${reader}, which it dropped (${named}${more})`
 }
 
 /**
@@ -492,10 +492,53 @@ function pushDroppedFieldsCaveat(dropped: string[], caveats: string[]): void {
  * `validate_plan` (a document, as a warning) and `update_plan` (its operations'
  * fragments), so the three name dropped fields in one wording.
  */
-export function droppedFieldsSentence(dropped: string[], source: 'document' | 'operations'): string {
-  return source === 'document'
-    ? `fields dropped: the supplied plan document carried ${droppedList(dropped)}; a document written by a newer RetireGolden build can carry such fields, and the projection here is made without them.`
-    : `fields dropped: the update_plan operations carried ${droppedList(dropped)}; the plan was updated without them (check the field names against describe_plan_schema).`
+export function droppedFieldsSentence(
+  dropped: string[],
+  source: 'document' | 'operations' | 'arguments',
+): string {
+  switch (source) {
+    case 'document':
+      return `fields dropped: the supplied plan document carried ${droppedList(dropped)}; a document written by a newer RetireGolden build can carry such fields, and the projection here is made without them.`
+    case 'operations':
+      return `fields dropped: the update_plan operations carried ${droppedList(dropped)}; the plan was updated without them (check the field names against describe_plan_schema).`
+    case 'arguments':
+      return `fields dropped: the build_plan arguments carried ${droppedList(dropped, "build_plan's typed inputs do not read")}; the plan was built without them (the typed household, policy, assumptions and conversion inputs have no such field; full plan JSON reaches every field describe_plan_schema lists).`
+  }
+}
+
+/**
+ * The typed inputs whose unknown keys `build_plan` names. Each is a plain
+ * `z.object` (non-strict), so parsing STRIPS a key it does not declare rather
+ * than refusing the call. They stay non-strict on purpose: `.strict()` would
+ * change the published input schema and refuse calls that work today.
+ */
+const TYPED_INPUTS = [
+  ['household', HouseholdParamsSchema],
+  ['policy', PolicyParamsSchema],
+  ['assumptions', AssumptionsSchema],
+  ['conversion', ConversionSchema],
+] as const
+
+/**
+ * Every key the typed inputs' schemas strip from the arguments a caller
+ * supplied, at any depth (arrays by index), as dotted paths such as
+ * `household.persons.0.onsetMonth`. `supplied` is the arguments as the caller
+ * sent them: the transports hand a handler the already-parsed arguments, and
+ * the tool layer passes the raw ones beside them (@see
+ * toolTable.suppliedArgumentsOf); a programmatic caller's input is raw already.
+ * An input that does not parse is left to the issues the build reports.
+ */
+export function typedArgumentsDropped(supplied: unknown): string[] {
+  if (supplied === null || typeof supplied !== 'object' || Array.isArray(supplied)) return []
+  const out: string[] = []
+  for (const [key, schema] of TYPED_INPUTS) {
+    const raw = (supplied as Record<string, unknown>)[key]
+    if (raw == null) continue
+    const parsed = schema.safeParse(raw)
+    if (!parsed.success) continue
+    out.push(...droppedFields(raw, parsed.data, `${key}.`))
+  }
+  return out
 }
 
 /**
@@ -679,6 +722,12 @@ export interface BuildPlanOptions {
    * which `setPlanFromBuild` passes when there is one.
    */
   defaultStartYear?: number
+  /**
+   * The arguments as the caller sent them, when `input` is the transport's
+   * parsed copy: the typed path names the keys parsing stripped
+   * (@see typedArgumentsDropped). Omitted, `input` itself is read as supplied.
+   */
+  suppliedArguments?: unknown
 }
 
 /**
@@ -825,6 +874,11 @@ export function buildPlanFromParams(input: BuildPlanInput, options: BuildPlanOpt
   if (typedPathIssue != null) {
     return { ok: false, startYear, caveats, issues: [typedPathIssue] }
   }
+  // Keys the typed schemas stripped, named rather than lost without a word
+  // (a person's `onsetMonth`, a misspelled assumption). Not refused: the
+  // typed inputs are non-strict, and a call that works today keeps working.
+  const typedDropped = typedArgumentsDropped(options.suppliedArguments ?? input)
+  if (typedDropped.length > 0) caveats.push(droppedFieldsSentence(typedDropped, 'arguments'))
 
   const hh = input.household!
   const policy = input.policy!
