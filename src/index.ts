@@ -5,13 +5,17 @@
 export {
   createSession,
   clearSession,
-  DEFAULT_START_YEAR,
+  clockStartYear,
+  systemClock,
+  type Clock,
+  type CreateSessionOptions,
   type SessionState,
   type ConventionKnobs,
 } from './session.js'
 export {
   buildPlanFromParams,
   type BuildPlanInput,
+  type BuildPlanOptions,
   type BuildPlanResult,
   type AssumptionsInput,
 } from './buildPlan.js'

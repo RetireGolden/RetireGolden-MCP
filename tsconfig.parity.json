@@ -9,11 +9,20 @@
 //
 // This is a resolution swap, not an escape hatch: `strict` and every other check
 // are inherited, and the test's own types are still fully enforced.
+//
+// It also adds the DOM library, and planner-ui's React types come from the
+// `@types/react` dev dependency. Since planner-ui 0.11.0 the `./projection` entry
+// this test imports re-exports `src/startYear.ts`, which holds the planner's New
+// Year hook (`useClockYear`: React state, `window`, `document`). That source is
+// checked as part of this program, so it needs the browser types it was written
+// against. The root program, which checks this package's own Node code, keeps
+// `lib: ["ES2022"]`.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "preserve",
-    "moduleResolution": "bundler"
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"]
   },
   "include": ["tests/planForAiRoundtrip.test.ts"],
   "exclude": []

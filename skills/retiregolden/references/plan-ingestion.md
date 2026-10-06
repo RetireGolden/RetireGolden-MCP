@@ -80,8 +80,9 @@ half-applied merges). A later bad operation rolls back an earlier good one.
 | `set_assumption` | `field`, `value` | set one `assumptions` field |
 | `set_expense` | `field`, `value` | set one `expenses` field |
 
-On success `update_plan` returns `appliedOperations`, a compact plan summary
-(account + income ids/types, `expenseBaseAnnual`), and `caveats`. Failures come
+On success `update_plan` returns `appliedOperations`, the session `startYear`, a
+compact plan summary (account + income ids/types, `expenseBaseAnnual`), and
+`caveats`. Failures come
 back as successful MCP results with `ok: false`:
 
 - `NO_PLAN` — nothing seeded; call `build_plan` first.
@@ -94,8 +95,9 @@ back as successful MCP results with `ok: false`:
   or a fragment carried an **unsafe key** (`__proto__` / `constructor` /
   `prototype`). Read `issues` and correct the specific operation.
 - `INVALID_PLAN` — the operations were well-formed but the **merged plan** failed
-  engine validation (`parsePlan`); `issues` lists the problems and the session
-  plan is left untouched.
+  engine validation (`parsePlan`), or the engine's check against the session's
+  `startYear` (a pension lump-sum election dated before it); `issues` lists the
+  problems and the session plan is left untouched.
 
 ## Worked example — a brokerage statement → an account
 

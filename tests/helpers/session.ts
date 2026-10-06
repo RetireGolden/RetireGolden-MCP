@@ -12,7 +12,8 @@ import { mfjHousehold, mfjPolicy } from '../fixtures.js'
 /** Fresh 2026 session with the MFJ fixture plan already built into it. */
 export function mfjSession() {
   const s = createSession(2026)
-  const built = adapter.setPlanFromBuild(s, { household: mfjHousehold, policy: mfjPolicy })
+  // Explicit: a build that names no startYear starts in the clock's year.
+  const built = adapter.setPlanFromBuild(s, { household: mfjHousehold, policy: mfjPolicy, startYear: 2026 })
   expect(built.ok).toBe(true)
   return s
 }

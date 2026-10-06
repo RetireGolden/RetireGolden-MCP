@@ -6,11 +6,12 @@
 import { z } from 'zod'
 import type { Plan } from '@retiregolden/engine'
 import { createEmptyPlan, parsePlan } from '@retiregolden/engine/model/plan'
+import { asOfIssues } from '@retiregolden/engine/model/asOfIssues'
 import { migratePlanToCurrent } from '@retiregolden/engine/model/migrations'
 import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema/current'
 import { stateParamsFor } from '@retiregolden/engine/params/state'
 import { getVersions } from './versions.js'
-import { DEFAULT_START_YEAR } from './session.js'
+import { clockStartYear, systemClock, type Clock } from './session.js'
 
 export const PersonParamsSchema = z.object({
   birth_year: z.number().int().min(1900).max(2100).describe('4-digit birth year, e.g. 1960'),
@@ -241,7 +242,7 @@ export const AssumptionsSchema = z
     sex: z
       .enum(['female', 'male', 'average'])
       .optional()
-      .describe("Person sex for mortality/longevity: female, male, or average (percent-free enum). Default 'average' (a reasonable neutral value, overridable) — not a bench artifact."),
+      .describe("Person sex for mortality/longevity: female, male, or average, where average is the mean of the male and female survival probabilities. Default 'average' (a reasonable neutral value, overridable) — not a bench artifact."),
   })
   .describe("Optional overrides for the typed-path modeling assumptions. Defaults follow the ENGINE's own defaults: ~2.5%/yr inflation, +3%/yr healthcare inflation above general, 5.5% fallback return, SS COLA tracking inflation, the modeled state income tax for household.state (NOT 0% — see stateEffectiveTaxPct), and 0% local income tax. Household state is a REQUIRED input (household.state), not an assumption. Set explicit values to override; omitted fields keep the engine defaults.")
 export type AssumptionsInput = z.infer<typeof AssumptionsSchema>
@@ -260,6 +261,12 @@ export interface BuildPlanInput {
   household?: HouseholdParams
   policy?: PolicyParams
   conversion?: ConversionInput
+  /**
+   * The calendar year the projection starts in. Omitted, the build uses the
+   * clock's year (`clockStartYear`), as the RetireGolden app does for a user's
+   * plan; a document exported from a session or from the app carries the year
+   * it was projected from, and passing it back reproduces that projection.
+   */
   startYear?: number
   conventions?: ConventionKnobs
   assumptions?: AssumptionsInput
@@ -377,11 +384,11 @@ function embeddedSchemaVersion(plan: unknown): number | null {
 function pushCallerSchemaSkewCaveat(
   declared: number | undefined | null,
   caveats: string[],
-  conventionsApplied: boolean,
+  accepted: AcceptedAs,
 ): void {
   if (declared == null || declared === PLAN_SCHEMA_VERSION) return
   caveats.push(
-    `schemaVersion skew: caller-declared plan-schema v${declared} does not match this build's v${PLAN_SCHEMA_VERSION}; the supplied document itself validated as v${PLAN_SCHEMA_VERSION} and was accepted ${acceptedHow(conventionsApplied)} — check that the schemaVersion argument came from the same export_plan response as the plan.`,
+    `schemaVersion skew: caller-declared plan-schema v${declared} does not match this build's v${PLAN_SCHEMA_VERSION}; the supplied document itself validated as v${PLAN_SCHEMA_VERSION} and was accepted ${acceptedHow(accepted)} — check that the schemaVersion argument came from the same export_plan response as the plan.`,
   )
 }
 
@@ -403,6 +410,17 @@ function pushMigratedSiblingSkewCaveat(
   )
 }
 
+/** What happened to an accepted document on its way in. @see acceptedHow */
+interface AcceptedAs {
+  /** Whether a `conventions` knob rewrote a field of the parsed plan. */
+  conventionsApplied: boolean
+  /** Paths of fields the supplied document carried and the parsed plan does not. */
+  dropped: string[]
+}
+
+/** How many dropped paths a caveat names before it summarizes the rest. */
+const DROPPED_PATHS_NAMED = 5
+
 /**
  * How truthfully to describe what happened to an accepted document. Conventions
  * are applied to the parsed plan BEFORE these caveats are emitted, and they
@@ -410,11 +428,49 @@ function pushMigratedSiblingSkewCaveat(
  * claiming the document was imported "unchanged" would be false whenever the
  * caller passed conventions, and would misdirect anyone investigating why the
  * projection moved.
+ *
+ * The same holds for fields the engine's `parsePlan` dropped because this
+ * build's engine does not read them, typically a document written by a newer
+ * engine. Engine 0.3.0 dropped `incomes[].disability.onsetMonth` that way, and
+ * the skew caveat still called the document imported unchanged.
  */
-function acceptedHow(conventionsApplied: boolean): string {
-  return conventionsApplied
-    ? 'with the `conventions` you supplied applied on top of it'
-    : 'unchanged'
+function acceptedHow(accepted: AcceptedAs): string {
+  const parts: string[] = []
+  const n = accepted.dropped.length
+  if (n > 0) {
+    const named = accepted.dropped.slice(0, DROPPED_PATHS_NAMED).join(', ')
+    const more = n > DROPPED_PATHS_NAMED ? ` and ${n - DROPPED_PATHS_NAMED} more` : ''
+    parts.push(
+      `without ${n === 1 ? 'one field' : `${n} fields`} this build's engine does not read, which it dropped (${named}${more})`,
+    )
+  }
+  if (accepted.conventionsApplied) parts.push('with the `conventions` you supplied applied on top of it')
+  return parts.length === 0 ? 'unchanged' : parts.join(', and ')
+}
+
+/**
+ * The fields a supplied document carried that the parsed plan does not, as
+ * dotted paths (`incomes.0.disability.onsetMonth`). Structural only: it
+ * compares keys, never values, and reads nothing the engine computes. Arrays
+ * are compared position by position; a value the parse replaced with another
+ * shape is not a drop.
+ */
+function droppedFields(supplied: unknown, kept: unknown, prefix = ''): string[] {
+  if (supplied === null || typeof supplied !== 'object') return []
+  if (kept === null || typeof kept !== 'object') return []
+  if (Array.isArray(supplied)) {
+    if (!Array.isArray(kept)) return []
+    return supplied.flatMap((value, i) =>
+      i < kept.length ? droppedFields(value, kept[i], `${prefix}${i}.`) : [],
+    )
+  }
+  const out: string[] = []
+  for (const [key, value] of Object.entries(supplied)) {
+    if (value === undefined) continue
+    if (!Object.prototype.hasOwnProperty.call(kept, key)) out.push(`${prefix}${key}`)
+    else out.push(...droppedFields(value, (kept as Record<string, unknown>)[key], `${prefix}${key}.`))
+  }
+  return out
 }
 
 /**
@@ -423,12 +479,13 @@ function acceptedHow(conventionsApplied: boolean): string {
  * builds: the plan schema is gated by the engine (see `explainSchemaRefusal`), so
  * two builds that can exchange documents at all share a schema version — but their
  * defaults, parameter packs and semantics may differ. Warn only; the document is
- * imported as supplied (modulo any conventions the caller passed).
+ * imported as parsed (modulo any conventions the caller passed), and the caveat
+ * names any field the parse dropped.
  */
 function pushEngineSkewCaveat(
   declared: string | undefined | null,
   caveats: string[],
-  conventionsApplied: boolean,
+  accepted: AcceptedAs,
 ): void {
   if (declared == null || declared === '') return
   const installed = getVersions().engineVersion
@@ -436,7 +493,7 @@ function pushEngineSkewCaveat(
   // rather than warn on an unknown.
   if (installed == null || installed === declared) return
   caveats.push(
-    `engineVersion skew: the supplied plan document was exported under @retiregolden/engine ${declared} but this build runs ${installed}; the document was imported ${acceptedHow(conventionsApplied)}, but engine defaults and modeling semantics can differ between versions — re-run the projection here rather than comparing against numbers produced by the exporting build.`,
+    `engineVersion skew: the supplied plan document was exported under @retiregolden/engine ${declared} but this build runs ${installed}; the document was imported ${acceptedHow(accepted)}, but engine defaults and modeling semantics can differ between versions — re-run the projection here rather than comparing against numbers produced by the exporting build.`,
   )
 }
 
@@ -555,9 +612,37 @@ export function validateTypedPathInputs(input: BuildPlanInput): string | null {
   return null
 }
 
-export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
+/** What a build reads besides its input. */
+export interface BuildPlanOptions {
+  /**
+   * Where the build reads "now": the start year when `input.startYear` is
+   * omitted, and the createdAt/updatedAt stamp of a plan the typed path builds.
+   * `setPlanFromBuild` passes the session's clock. Defaults to the system clock.
+   */
+  clock?: Clock
+}
+
+/**
+ * The engine's as-of check, run where a plan is committed.
+ *
+ * `parsePlan` judges a document's shape only, so a plan always opens again; a
+ * rule about what is already in the past is judged against the year the
+ * projection starts, which the document does not carry (engine 0.4.0,
+ * `model/asOfIssues.ts`). Today that is one rule: an elected pension lump sum
+ * dated before the start year, which the ledger would model as a pension that
+ * pays nothing and a rollover credited in no year. The engine leaves that check
+ * to the host that saves; in this package `build_plan` and `update_plan` are
+ * the two places a plan enters the session, so both refuse such a plan with the
+ * engine's own issue text, which names both ways to restate it.
+ */
+export function startYearIssues(plan: Plan, startYear: number): string[] {
+  return asOfIssues(plan, startYear)
+}
+
+export function buildPlanFromParams(input: BuildPlanInput, options: BuildPlanOptions = {}): BuildPlanResult {
   const caveats: string[] = []
-  const startYear = input.startYear ?? DEFAULT_START_YEAR
+  const clock = options.clock ?? systemClock
+  const startYear = input.startYear ?? clockStartYear(clock)
   const conventions = input.conventions ?? {}
 
   if (input.plan != null) {
@@ -565,8 +650,16 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
     let accepted: Plan
     /** Set when the document arrived on an older schema and the engine upgraded it. */
     let migratedFrom: number | null = null
+    /**
+     * Fields the engine's parse dropped from a document this build read
+     * directly. Not computed for a migrated document: a migration may move or
+     * rewrite fields, and calling those dropped would be wrong in the other
+     * direction; the migration caveat already says the document was upgraded.
+     */
+    let dropped: string[] = []
     if (firstParse.ok) {
       accepted = firstParse.plan
+      dropped = droppedFields(input.plan, firstParse.plan)
     } else {
       // The document did not validate. Before surfacing raw zod issues, work out
       // whether the cause is a plan-schema mismatch — the case this whole feature
@@ -616,6 +709,13 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
     if (!conventionParsed.ok) {
       return { ok: false, startYear, caveats, issues: conventionParsed.issues }
     }
+    // A document is where a pension lump-sum election can be sitting, and an
+    // older one (or one exported in an earlier year) can date it before this
+    // start year. @see startYearIssues
+    const asOf = startYearIssues(conventionParsed.plan, startYear)
+    if (asOf.length > 0) {
+      return { ok: false, startYear, caveats, issues: asOf }
+    }
     // Provenance skew — WARN, never refuse. Emitted only after the document has
     // actually been accepted, so every "was accepted" phrasing is literally true.
     if (migratedFrom != null) {
@@ -628,9 +728,9 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
       // this build's version.
       pushMigratedSiblingSkewCaveat(input.schemaVersion, migratedFrom, caveats)
     } else {
-      pushCallerSchemaSkewCaveat(input.schemaVersion, caveats, conventionsApplied)
+      pushCallerSchemaSkewCaveat(input.schemaVersion, caveats, { conventionsApplied, dropped })
     }
-    pushEngineSkewCaveat(input.engineVersion, caveats, conventionsApplied)
+    pushEngineSkewCaveat(input.engineVersion, caveats, { conventionsApplied, dropped })
     // Say how this document is taxed, exactly as the typed path does. A document is
     // where `stateEffectiveTaxPct: 0` is most likely to be sitting — it is what the
     // pre-0.5.0 docs taught, and what an LLM authoring a plan from those docs would
@@ -719,7 +819,7 @@ export function buildPlanFromParams(input: BuildPlanInput): BuildPlanResult {
   }
 
   try {
-    return buildTypedPlan(input, hh, policy, startYear, conventions, caveats)
+    return buildTypedPlan(input, hh, policy, startYear, conventions, caveats, clock)
   } catch (e) {
     return { ok: false, startYear, caveats, issues: [e instanceof Error ? e.message : String(e)] }
   }
@@ -732,13 +832,16 @@ function buildTypedPlan(
   startYear: number,
   conventions: ConventionKnobs,
   caveats: string[],
+  clock: Clock,
 ): BuildPlanResult {
   let n = 0
   const newId = () => `id-${++n}`
-  // Frozen clock, not `new Date()`: a build must be reproducible, and this
-  // stamps the plan's createdAt/updatedAt. Pinned to the same default year as
-  // the session so the two cannot drift. @see DEFAULT_START_YEAR
-  const now = () => new Date(`${DEFAULT_START_YEAR}-01-01T00:00:00.000Z`)
+  // The plan's createdAt/updatedAt stamp, from the injected clock (the
+  // session's), read ONCE so the two stamps agree. Through 0.10.0 it was a
+  // frozen 2026-01-01 so that a build was reproducible; a test now gets that by
+  // injecting a fixed clock, and a real build is stamped when it happened.
+  const builtAt = clock().getTime()
+  const now = () => new Date(builtAt)
 
   const endYear = startYear + hh.horizon - 1
   const filing = FILING[hh.filing]
@@ -920,6 +1023,12 @@ function buildTypedPlan(
   const parsed = parsePlan(plan)
   if (!parsed.ok) {
     return { ok: false, startYear, caveats, issues: parsed.issues, ordering_unsupported }
+  }
+  // The typed path writes no pension lump sum, so this finds nothing today; it
+  // runs anyway so every plan this function returns has passed the same check.
+  const asOf = startYearIssues(parsed.plan, startYear)
+  if (asOf.length > 0) {
+    return { ok: false, startYear, caveats, issues: asOf, ordering_unsupported }
   }
 
   return {

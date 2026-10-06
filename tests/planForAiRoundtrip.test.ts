@@ -18,10 +18,13 @@
  *
  * What it pins is the acceptance criterion: the copied payload, passed to
  * `build_plan`, reproduces the plan and the projection the app is showing.
- * `startYear` is the reason it exists — `build_plan` defaults to the literal
- * 2026 while the planner projects from the current year, so an unstamped payload
- * agrees with the app all through 2026 and silently diverges on 2027-01-01. The
- * negative controls below are as load-bearing as the positive one.
+ * `startYear` is the reason it exists. Through 0.10.0 `build_plan` defaulted to
+ * the literal 2026 while the planner projects a user's plan from the current
+ * year, so an unstamped payload agreed with the app all through 2026 and would
+ * have diverged on 2027-01-01. The default now follows the clock as the
+ * planner's does, but a payload pasted in a later year than it was copied still
+ * needs its stamp to reproduce what the user saw. The negative controls below
+ * are as load-bearing as the positive one.
  *
  * Two things are asserted, and they are separate claims. First, that the rebuilt
  * plan re-projected through the browser's OWN stack reproduces the app's ledger —
@@ -44,19 +47,21 @@ import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema/current'
 import { buildExampleCouple as createSamplePlan } from '@retiregolden/planner-ui/planner/examples/buildExampleCouple'
 // The app reads these through `planner/useProjection`, which only re-exports
 // them from here and adds a React hook this headless suite cannot load.
-import { currentStartYear, projectPlan } from '@retiregolden/planner-ui/projection'
+// `projectPlan` takes its start year from the caller (planner-ui 0.11.0 dropped
+// the clock default); the app passes `projectionStartYear(plan)`, as below.
+import { currentStartYear, projectionStartYear, projectPlan } from '@retiregolden/planner-ui/projection'
 import { serializeSinglePlan, type SinglePlanExport } from '@retiregolden/planner-ui/plan-format'
 
 import * as adapter from '../src/adapter.js'
-import { buildPlanFromParams, type BuildPlanInput } from '../src/buildPlan.js'
+import { buildPlanFromParams, type BuildPlanInput, type BuildPlanOptions } from '../src/buildPlan.js'
 import { createSession } from '../src/session.js'
 import { builtOk } from './fixtures.js'
 import { TOOL_TABLE } from '../src/toolTable.js'
 
 /**
  * The plan type the PUBLISHED planner-ui produces — whatever engine it binds,
- * which is not necessarily this package's. Today planner-ui 0.10.0 resolves
- * engine ^0.3.0, the same 0.3.0 this package exact-pins, so the alias is
+ * which is not necessarily this package's. Today planner-ui 0.11.0 resolves
+ * engine ^0.4.0, the same 0.4.0 this package exact-pins, so the alias is
  * currently identical to `Plan`. It is kept as an alias rather than collapsed
  * because the two have already diverged once (planner-ui 0.9.0 on engine
  * ^0.1.12, plan schema v4, against this package's 0.2.0, v5) and will again
@@ -124,13 +129,13 @@ const buildPlanArgs = z.object(TOOL_TABLE.find((t) => t.name === 'build_plan')!.
  * the real document validator and `build_plan` warns rather than refuses — so a
  * malformed plan still arrives as `issues`, not as a parse failure here.
  */
-function buildFrom(payload: SinglePlanExport | Partial<BuildPlanInput>) {
+function buildFrom(payload: SinglePlanExport | Partial<BuildPlanInput>, options: BuildPlanOptions = {}) {
   const parsed = buildPlanArgs.safeParse(payload)
   expect(
     parsed.success,
     parsed.success ? '' : `payload is not a valid build_plan argument: ${parsed.error.message}`,
   ).toBe(true)
-  return buildPlanFromParams((parsed.success ? parsed.data : payload) as BuildPlanInput)
+  return buildPlanFromParams((parsed.success ? parsed.data : payload) as BuildPlanInput, options)
 }
 
 /**
@@ -163,8 +168,8 @@ function buildFrom(payload: SinglePlanExport | Partial<BuildPlanInput>) {
  * declared `^0.1.12`), so pnpm nested a second engine copy under planner-ui
  * and its payloads were stamped by that copy — engine 0.1.12, plan schema v4 —
  * exercising the skew branch and the `documentVersion` lag on the schema
- * axis. With planner-ui 0.10.0 on `^0.3.0` and this package on 0.3.0 the tree
- * holds one engine again and the agreeing branch is the live one. Nothing
+ * axis. With planner-ui 0.11.0 on `^0.4.0` and this package on 0.4.0 the tree
+ * holds one engine and the agreeing branch is the live one. Nothing
  * here changed between the two states, which is the point.
  */
 function expectNoPayloadSkew(caveats: string[], stampedEngine: string, documentVersion: number) {
@@ -207,7 +212,7 @@ function expectNoPayloadSkew(caveats: string[], stampedEngine: string, documentV
 describe('copied plan → build_plan', () => {
   it('rebuilds the same plan and start year, reporting release lag but never skew', () => {
     const plan = createSamplePlan()
-    const view = projectPlan(plan)
+    const view = projectPlan(plan, projectionStartYear(plan))
     const payload = copiedPayload(plan, view.startYear)
     const built = buildFrom(payload)
 
@@ -224,7 +229,7 @@ describe('copied plan → build_plan', () => {
 
   it('reproduces the projection the results page is showing', () => {
     const plan = createSamplePlan()
-    const shown = projectPlan(plan)
+    const shown = projectPlan(plan, projectionStartYear(plan))
     const built = buildFrom(copiedPayload(plan, shown.startYear))
     expect(builtOk(built).plan).toBeTruthy()
 
@@ -297,7 +302,7 @@ describe("this package's own run_projection", () => {
    */
   it('reproduces the projection the browser is showing', () => {
     const plan = createSamplePlan()
-    const shown = projectPlan(plan)
+    const shown = projectPlan(plan, projectionStartYear(plan))
     const session = createSession()
     adapter.setPlanFromBuild(session, copiedPayload(plan, shown.startYear) as BuildPlanInput)
     const viaMcp = adapter.runProjection(session)
@@ -318,21 +323,23 @@ describe("this package's own run_projection", () => {
 describe('the siblings are load-bearing, not decoration', () => {
   it('emits the start year the app actually projected from', () => {
     const plan = createSamplePlan()
-    const view = projectPlan(plan)
+    const view = projectPlan(plan, projectionStartYear(plan))
     expect(copiedPayload(plan, view.startYear).startYear).toBe(currentStartYear())
   })
 
   it('would diverge from the app if startYear were dropped', () => {
     // The bug this field prevents, made explicit: without it build_plan falls
-    // back to the literal 2026. Assert both halves — the fallback value, and
-    // that projecting from a different year is a materially different plan.
+    // back to the clock's year at the paste, which is the copy's year only when
+    // both happen in the same calendar year. Assert both halves — the fallback
+    // value, and that projecting from a different year is a materially
+    // different plan. The clock is injected, so this does not depend on today.
     const plan = createSamplePlan()
     const { startYear, ...withoutStartYear } = copiedPayload(plan, 2031)
     expect(startYear).toBe(2031)
 
-    const built = buildFrom(withoutStartYear)
-    expect(built.startYear).toBe(2026)
-    expect(projectPlan(plan, 2026).result.endingNetWorth).not.toBeCloseTo(
+    const built = buildFrom(withoutStartYear, { clock: () => new Date(2033, 5, 15) })
+    expect(built.startYear).toBe(2033)
+    expect(projectPlan(plan, 2033).result.endingNetWorth).not.toBeCloseTo(
       projectPlan(plan, 2031).result.endingNetWorth,
       2,
     )

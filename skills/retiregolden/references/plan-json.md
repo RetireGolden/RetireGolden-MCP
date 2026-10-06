@@ -4,24 +4,27 @@ The `plan` argument to `build_plan` accepts a complete engine plan document at a
 
 The engine validates with `parsePlan`; on failure `build_plan` returns `ok: false` with `issues[]`. **Engine rates are percents here** (`annualReturnPct: 5`, `inflationPct: 3`, `heirTaxRatePct: 24`) — this is the internal model, unlike the typed path's fractions.
 
-The example below is minimal and round-trips through `build_plan`. It is the `plan` document out of a real `export_plan` response — the MFJ household from `examples.md` §2, built through the typed path with that example's `assumptions` overrides and then exported — so every field is one the current engine writes and reads. It is the `plan` field ALONE: the response also carries `startYear`, `conventions`, `caveats`, and the `schemaVersion` / `engineVersion` / `mcpVersion` siblings, and those are not shown here. Pass them back alongside the plan when you round-trip (`build_plan({ plan, startYear, conventions, schemaVersion, engineVersion })`); dropping `startYear` re-runs a non-2026 session from the default year and its projection will diverge. A document written against an older plan-schema version is migrated forward on import and accepted with a caveat naming both versions — re-export it afterwards to persist the upgrade.
+The example below is minimal and round-trips through `build_plan`. It is the `plan` document out of a real `export_plan` response — the MFJ household from `examples.md` §2, built through the typed path with that example's `assumptions` overrides and then exported — so every field is one the current engine writes and reads. It is the `plan` field ALONE: the response also carries `startYear`, `conventions`, `caveats`, and the `schemaVersion` / `engineVersion` / `mcpVersion` siblings, and those are not shown here. Pass them back alongside the plan when you round-trip (`build_plan({ plan, startYear, conventions, schemaVersion, engineVersion })`).
+
+**Always pass `startYear`.** It is the calendar year the projection starts in, and the document itself does not carry it. Omitted, `build_plan` starts the projection in the current calendar year on the server's clock (as the RetireGolden app does for a user's plan), so a document exported in one year and rebuilt without its `startYear` in a later year starts later, and every figure moves. When you author a document yourself, pass the year its balances are as of. Every projecting tool echoes the `startYear` it ran from; report it with the figures. A pension lump-sum election dated before `startYear` is refused, with the engine's two ways to restate it. A document written against an older plan-schema version is migrated forward on import and accepted with a caveat naming both versions — re-export it afterwards to persist the upgrade.
 
 ## Section notes
 
-- **top-level ids/timestamps** — `schemaVersion` is the version the document was written against (`5` here, which is what a freshly exported document carries); `id`, `name`, `origin`, and the two ISO timestamps identify the document.
+- **top-level ids/timestamps** — `schemaVersion` is the version the document was written against (`7` here, which is what a freshly exported document carries); `id`, `name`, `origin`, and the two ISO timestamps identify the document.
 - **household** — filing status, state of residence, and the `people[]` (each with `dob`, `sex`, `retirementAge`, and a `longevity.planningAge` horizon endpoint).
 - **accounts** — a discriminated union by `type` (`traditional`/`roth`/`taxable`/`hsa`/`cash`/…); balances, `annualReturnPct`, and per-type fields like the taxable account's `costBasis` and `qualifiedRatio`.
-- **incomes** — a union by `type`: `socialSecurity` (with `piaMonthly` and `claimAge`), `recurring` (pensions/other, with `taxTreatment`), `wages`, and `oneTime`. Both `recurring` and `oneTime` carry a required `inflationAdjusted` boolean: `true` means the amount is in today's dollars and grows to the year it pays; `false` means it is that year's dollars, taken as written. Documents from before plan-schema v5 had no election on `oneTime` and migrate in as `false`, which preserves what they already projected; when you author a new one-time amount in today's dollars, set it `true`. (One-time spending goals carry no such election — their `amount` is always today's dollars and always grown to the goal year — so `true` gives a one-time income that same reading; there is no goal-side field to mirror.)
+- **incomes** — a union by `type`: `socialSecurity` (with `piaMonthly` and `claimAge`), `recurring` (pensions/other, with `taxTreatment`), `wages`, and `oneTime`. Both `recurring` and `oneTime` carry a required `inflationAdjusted` boolean: `true` means the amount is in today's dollars and grows to the year it pays; `false` means it is that year's dollars, taken as written. Documents from before plan-schema v5 had no election on `oneTime` and migrate in as `false`, which preserves what they already projected; when you author a new one-time amount in today's dollars, set it `true`. (One-time spending goals carry no such election — their `amount` is always today's dollars and always grown to the goal year — so `true` gives a one-time income that same reading; there is no goal-side field to mirror.) A `socialSecurity` income can also carry `disability` for a disability benefit (SSDI): `onsetAge` (40–75) is required, and `incomes[].disability.onsetMonth` (1–12) is the month the disability began; a blank month reads as January 1, so the five-month waiting period runs January to May and the first payment is for June of the onset year. Set the month when you know it.
 - **expenses** — `baseAnnual` spending plus phases, one-time goals, and the `healthcare` premium/Medicare block.
 - **strategies** — `withdrawalOrder`, `rothConversion` (here `fillToTarget` at top of the 24% bracket for 2026–2031), `qcdAnnual`, and `retirementActions` (an explicit per-year action list, empty here).
 - **assumptions** — economic knobs: inflation, SS COLA, state/local tax, `historicalAnnualMagiByYear` (exact IRMAA lookback tax years; `recentAnnualMagi` is the scalar fallback), heir tax rate, safe-withdrawal rate. The values below come from the `examples.md` §2 overrides; a document you author supplies your own (the typed path fills unset fields from the engine defaults).
+- **tax facts** — `annualFederalTaxFacts`, `stateTaxFacts`, `inheritedRothTaxCharacterPools` and `employerElectiveDeferralHistory` hold tax facts a plan can state beyond its accounts and incomes. An export writes them empty when the plan has none, as here; `describe_plan_schema` gives the shape of each.
 - **scenarios** — named `patch` overlays for comparison; empty here.
 
 ## Example
 
 ```json
 {
-  "schemaVersion": 5,
+  "schemaVersion": 7,
   "id": "id-2",
   "name": "mcp-session",
   "origin": "user",
@@ -95,6 +98,10 @@ The example below is minimal and round-trips through `build_plan`. It is the `pl
     "heirTaxRatePct": 24,
     "safeWithdrawalRatePct": 4
   },
+  "annualFederalTaxFacts": { "foreignIncomeAdjustments": [] },
+  "stateTaxFacts": { "householdYearFacts": [], "hsaYearEvidence": [], "iraBasisYearEvidence": [] },
+  "inheritedRothTaxCharacterPools": [],
+  "employerElectiveDeferralHistory": [],
   "scenarios": []
 }
 ```

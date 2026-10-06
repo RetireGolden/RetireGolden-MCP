@@ -107,4 +107,4 @@ First `build_plan` a household (above), then sweep policies against it in **one*
 }
 ```
 
-`objective` is one of `after_tax_estate` (default), `cumulative_tax`, or `ending_trad`. The result is `{ ok: true, objective, results[], count }`; each `results[i]` has `{ index, policy, objective, ok, caveats }` (and `error` when `ok: false`). Rank the winner by the `objective` value and **surface `caveats`** (e.g. `traditional-first` is approximate).
+`objective` is one of `after_tax_estate` (default), `cumulative_tax`, or `ending_trad`. The result is `{ ok: true, startYear, objective, results[], count, warnings }`; each `results[i]` has `{ index, policy, objective, ok, caveats }` (and `error` when `ok: false`), and `warnings` is the engine's list for the session plan's own projection. Rank the winner by the `objective` value and **surface `caveats` and `warnings`** (e.g. `traditional-first` is approximate).

@@ -122,8 +122,10 @@ describe('batchEvaluate — ordering modes', () => {
     // `claim_ages` is documented as aligned to household.persons order. A plan
     // whose Social Security incomes are listed in the opposite order (an imported
     // document, or one reshaped by update_plan) must still get each person their
-    // OWN claim age — the two orders have to price identically.
-    const policy = { ...mfjPolicy, claim_ages: [70, 62] }
+    // OWN claim age — the two orders have to price identically. Both ages are
+    // still open in 2026 for people born 1958 and 1960 (an age already passed
+    // fails the row: tests/batchClaimsMade.test.ts).
+    const policy = { ...mfjPolicy, claim_ages: [70, 68] }
     const inOrder = mfjSession()
     const reordered = mfjSession()
     const incomes = reordered.plan!.incomes
@@ -142,7 +144,7 @@ describe('batchEvaluate — ordering modes', () => {
 
     // Guard the guard: swapping the AGES really does move the number, so the
     // assertion above is not vacuously true for any pair of claim ages.
-    const swapped = adapter.batchEvaluate(mfjSession(), [{ ...mfjPolicy, claim_ages: [62, 70] }])
+    const swapped = adapter.batchEvaluate(mfjSession(), [{ ...mfjPolicy, claim_ages: [68, 70] }])
     expect(swapped.ok).toBe(true)
     if (!swapped.ok) return
     expect(swapped.results[0]!.objective).not.toBe(a.results[0]!.objective)

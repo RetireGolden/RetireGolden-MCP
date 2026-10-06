@@ -49,6 +49,27 @@
  * for these fixtures — the protocol baseline's engine-numeric steps were
  * byte-identical across both bumps).
  *
+ * Regenerated for engine 0.4.0. These fixtures were replayed on every engine
+ * commit from 0.3.0 to 0.4.0, and every moved literal traces to one of three
+ * engine changes, or to the FI basis this package now asks for (CHANGELOG
+ * 0.11.0 has the figures):
+ *  - Kentucky (engine #710, which the engine CHANGELOG does not record): the
+ *    $31,110 retirement exclusion now applies to each owner's own IRA
+ *    distributions, Roth conversions included, where engine 0.3.0 applied the
+ *    household's combined cap to traditional withdrawals only; and the standard
+ *    deduction is $3,360 once per joint return, not $6,720.
+ *    The single fixtures pay $1,102.46 less KY tax in 2026 (3.5% of the
+ *    $31,110 excluded and of the $388.79 less gain sold to pay); in the MFJ
+ *    fixtures the halved deduction adds $117.60 a year (3.5% of $3,360).
+ *  - Medicare IRMAA from CMS's published table (engine #770): 4 or 8 cents a
+ *    month a person at four of the five tiers, so cents to tens of dollars here.
+ *  - The FI number (engine #765, with the conversion-free run this package now
+ *    passes `summarizeProjection`, as the app does): a Roth conversion's one-off
+ *    tax is no longer priced as FI spending, which moves `fiNumber` and
+ *    `coastFireNumber` on all four fixtures by far the most.
+ * Monte Carlo success moves only on the single new-defaults fixture (0.32 to
+ * 0.33, from the Kentucky change).
+ *
  * Generation recipe — `pnpm run goldens:print` (scripts/gen-goldens.mjs) prints
  * these literals from a fresh build; it never edits this file:
  *   session = createSession()
@@ -194,39 +215,39 @@ describe('golden numbers — SINGLE fixture [legacy bench conventions via explic
   it('projection summary headline numbers', () => {
     const s = g.proj.ok ? g.proj.summary : null
     expect(s).toBeTruthy()
-    expect(s!.lifetimeTaxesAndPenalties).toBe(250388.2838890143)
-    expect(s!.lifetimeRothConversions).toBe(651410.5572395471)
-    expect(s!.endingInvestable).toBe(668917.7285081611)
-    expect(s!.endingNetWorth).toBe(668917.7285081611)
-    expect(s!.endingAfterTaxEstate).toBe(668917.7285081611)
+    expect(s!.lifetimeTaxesAndPenalties).toBe(246942.47617152243)
+    expect(s!.lifetimeRothConversions).toBe(658146.6108525584)
+    expect(s!.endingInvestable).toBe(685126.9476692764)
+    expect(s!.endingNetWorth).toBe(685126.9476692764)
+    expect(s!.endingAfterTaxEstate).toBe(685126.9476692764)
     expect(s!.endingEstateHeirTax).toBe(0)
     expect(s!.endingEstateToCharity).toBe(0)
     expect(s!.endingByCategory.cash).toBe(0)
     expect(s!.endingByCategory.taxable).toBe(0)
     expect(s!.endingByCategory.traditional).toBe(0)
-    expect(s!.endingByCategory.roth).toBe(668917.7285081611)
+    expect(s!.endingByCategory.roth).toBe(685126.9476692764)
     expect(s!.endingByCategory.hsa).toBe(0)
     expect(s!.depletionYear).toBeNull()
     expect(s!.averagePreRetirementSavingsRatePct).toBe(0)
-    expect(s!.fiNumber).toBe(3072179.647177051)
-    expect(s!.coastFireNumber).toBe(3072179.647177051)
+    expect(s!.fiNumber).toBe(2335173.6926357476)
+    expect(s!.coastFireNumber).toBe(2335173.6926357476)
   })
 
   it('first projection year', () => {
     const y = g.firstYear
     expect(y.year).toBe(2026)
-    expect(y.tax).toBe(30452.385887082044)
+    expect(y.tax).toBe(29286.01083127988)
     expect(y.penalties).toBe(0)
-    expect(y.magi).toBe(167707.67584712929)
+    expect(y.magi).toBe(167318.88419315655)
     expect(y.medicarePremiums).toBe(2434.8)
     expect(y.irmaaTier).toBe(0)
     expect(y.rothConversion).toBe(126745.28136849403)
     expect(y.withdrawals.cash).toBe(0)
-    expect(y.withdrawals.taxable).toBe(122887.18343590572)
+    expect(y.withdrawals.taxable).toBe(121720.80847398753)
     expect(y.withdrawals.traditional).toBe(0)
     expect(y.withdrawals.roth).toBe(0)
     expect(y.withdrawals.hsa).toBe(0)
-    expect(y.withdrawals.total).toBe(122887.18343590572)
+    expect(y.withdrawals.total).toBe(121720.80847398753)
     expect(y.shortfall).toBe(0)
   })
 
@@ -245,8 +266,8 @@ describe('golden numbers — SINGLE fixture [legacy bench conventions via explic
   })
 
   it('totalTax and totalConversions', () => {
-    expect(g.totalTax).toBe(250388.2838890143)
-    expect(g.totalConversions).toBe(651410.5572395471)
+    expect(g.totalTax).toBe(246942.47617152243)
+    expect(g.totalConversions).toBe(658146.6108525584)
   })
 
   it('monte carlo (pathCount 300, seed 7)', () => {
@@ -256,7 +277,7 @@ describe('golden numbers — SINGLE fixture [legacy bench conventions via explic
 
   it('batch objectives (base policy, then no-conversion policy)', () => {
     expect(g.batch.results.map((r) => r.objective)).toEqual([
-      668917.7285081611, 833828.4656568047,
+      685126.9476692764, 833828.4656568047,
     ])
   })
 })
@@ -273,63 +294,63 @@ describe('golden numbers — MFJ fixture [legacy bench conventions via explicit 
   it('projection summary headline numbers', () => {
     const s = g.proj.ok ? g.proj.summary : null
     expect(s).toBeTruthy()
-    expect(s!.lifetimeTaxesAndPenalties).toBe(447253.2197470774)
-    expect(s!.lifetimeRothConversions).toBe(1465361.931736874)
-    expect(s!.endingInvestable).toBe(5217056.354866119)
-    expect(s!.endingNetWorth).toBe(5217056.354866119)
-    expect(s!.endingAfterTaxEstate).toBe(5217056.354866119)
+    expect(s!.lifetimeTaxesAndPenalties).toBe(447275.41652856366)
+    expect(s!.lifetimeRothConversions).toBe(1465384.4101757968)
+    expect(s!.endingInvestable).toBe(5223715.316928832)
+    expect(s!.endingNetWorth).toBe(5223715.316928832)
+    expect(s!.endingAfterTaxEstate).toBe(5223715.316928832)
     expect(s!.endingEstateHeirTax).toBe(0)
     expect(s!.endingEstateToCharity).toBe(0)
     expect(s!.endingByCategory.cash).toBe(0)
-    expect(s!.endingByCategory.taxable).toBe(687678.1433585073)
+    expect(s!.endingByCategory.taxable).toBe(688555.4888558467)
     expect(s!.endingByCategory.traditional).toBe(0)
-    expect(s!.endingByCategory.roth).toBe(4529378.211507612)
+    expect(s!.endingByCategory.roth).toBe(4535159.828072986)
     expect(s!.endingByCategory.hsa).toBe(0)
     expect(s!.depletionYear).toBeNull()
     expect(s!.averagePreRetirementSavingsRatePct).toBe(0)
-    expect(s!.fiNumber).toBe(6931783.7683923105)
-    expect(s!.coastFireNumber).toBe(6931783.7683923105)
+    expect(s!.fiNumber).toBe(3527917.0011233026)
+    expect(s!.coastFireNumber).toBe(3527917.0011233026)
   })
 
   it('first projection year', () => {
     const y = g.firstYear
     expect(y.year).toBe(2026)
-    expect(y.tax).toBe(144836.55073569246)
+    expect(y.tax).toBe(144984.4825407516)
     expect(y.penalties).toBe(0)
-    expect(y.magi).toBe(582352.2935296915)
+    expect(y.magi).toBe(582435.0006429022)
     expect(y.medicarePremiums).toBe(2434.8)
     expect(y.irmaaTier).toBe(0)
     expect(y.rothConversion).toBe(419400)
     expect(y.withdrawals.cash).toBe(0)
-    expect(y.withdrawals.taxable).toBe(54468.77105429562)
-    expect(y.withdrawals.traditional).toBe(128611.66221340286)
-    expect(y.withdrawals.roth).toBe(76190.91695074874)
+    expect(y.withdrawals.taxable).toBe(54499.84993345193)
+    expect(y.withdrawals.traditional).toBe(128685.0456628667)
+    expect(y.withdrawals.roth).toBe(76234.39008691256)
     expect(y.withdrawals.hsa).toBe(0)
-    expect(y.withdrawals.total).toBe(259271.35021844722)
+    expect(y.withdrawals.total).toBe(259419.2856832312)
     expect(y.shortfall).toBe(0)
   })
 
   it('last projection year', () => {
     const y = g.lastYear
     expect(y.year).toBe(2055)
-    expect(y.tax).toBe(584.3276188169453)
+    expect(y.tax).toBe(703.412444520821)
     expect(y.penalties).toBe(0)
-    expect(y.magi).toBe(40639.90079009457)
+    expect(y.magi).toBe(40662.791853029325)
     expect(y.medicarePremiums).toBe(4869.6)
     expect(y.irmaaTier).toBe(0)
     expect(y.rothConversion).toBe(0)
     expect(y.withdrawals.cash).toBe(0)
-    expect(y.withdrawals.taxable).toBe(6436.424102663116)
+    expect(y.withdrawals.taxable).toBe(6452.378771098813)
     expect(y.withdrawals.traditional).toBe(0)
-    expect(y.withdrawals.roth).toBe(41593.502396800206)
+    expect(y.withdrawals.roth).toBe(41696.63232594861)
     expect(y.withdrawals.hsa).toBe(0)
-    expect(y.withdrawals.total).toBe(48029.92649946332)
+    expect(y.withdrawals.total).toBe(48149.01109704742)
     expect(y.shortfall).toBeCloseTo(0, 6)
   })
 
   it('totalTax and totalConversions', () => {
-    expect(g.totalTax).toBe(447253.2197470774)
-    expect(g.totalConversions).toBe(1465361.931736874)
+    expect(g.totalTax).toBe(447275.41652856366)
+    expect(g.totalConversions).toBe(1465384.4101757968)
   })
 
   it('monte carlo (pathCount 300, seed 7)', () => {
@@ -339,7 +360,7 @@ describe('golden numbers — MFJ fixture [legacy bench conventions via explicit 
 
   it('batch objectives (base policy, then no-conversion policy)', () => {
     expect(g.batch.results.map((r) => r.objective)).toEqual([
-      5217056.354866119, 4517886.078238976,
+      5223715.316928832, 4491786.426559193,
     ])
   })
 })
@@ -383,7 +404,7 @@ describe('golden numbers — SINGLE fixture [new engine defaults, no assumptions
   it('projection summary headline numbers', () => {
     const s = g.proj.ok ? g.proj.summary : null
     expect(s).toBeTruthy()
-    expect(s!.lifetimeTaxesAndPenalties).toBe(248916.78354709756)
+    expect(s!.lifetimeTaxesAndPenalties).toBe(247155.9751336773)
     expect(s!.lifetimeRothConversions).toBe(620061.0887504726)
     expect(s!.endingInvestable).toBe(0)
     expect(s!.endingNetWorth).toBe(0)
@@ -398,19 +419,19 @@ describe('golden numbers — SINGLE fixture [new engine defaults, no assumptions
     // Real inflation depletes this household within the horizon — the sharpest
     // contrast with the legacy goldens, where depletionYear is null.
     expect(s!.depletionYear).toBe(2049)
-    expect(s!.fiNumber).toBe(3072179.647177051)
-    expect(s!.coastFireNumber).toBe(3072179.647177051)
+    expect(s!.fiNumber).toBe(2335173.6926357476)
+    expect(s!.coastFireNumber).toBe(2335173.6926357476)
   })
 
   it('first projection year matches legacy (year one, pre-compounding)', () => {
     const y = g.firstYear
     expect(y.year).toBe(2026)
-    expect(y.tax).toBe(30452.385887082044)
-    expect(y.magi).toBe(167707.67584712929)
+    expect(y.tax).toBe(29286.01083127988)
+    expect(y.magi).toBe(167318.88419315655)
     expect(y.medicarePremiums).toBe(2434.8)
     expect(y.rothConversion).toBe(126745.28136849403)
-    expect(y.withdrawals.taxable).toBe(122887.18343590572)
-    expect(y.withdrawals.total).toBe(122887.18343590572)
+    expect(y.withdrawals.taxable).toBe(121720.80847398753)
+    expect(y.withdrawals.total).toBe(121720.80847398753)
     expect(y.shortfall).toBe(0)
   })
 
@@ -430,13 +451,13 @@ describe('golden numbers — SINGLE fixture [new engine defaults, no assumptions
   })
 
   it('totalTax and totalConversions', () => {
-    expect(g.totalTax).toBe(248916.78354709756)
+    expect(g.totalTax).toBe(247155.9751336773)
     expect(g.totalConversions).toBe(620061.0887504726)
   })
 
   it('monte carlo (pathCount 300, seed 7) — lower success under real inflation', () => {
-    expect(g.mc.successRate).toBe(0.32)
-    expect(g.mc.requiredFloorSuccessRate).toBe(0.32)
+    expect(g.mc.successRate).toBe(0.33)
+    expect(g.mc.requiredFloorSuccessRate).toBe(0.33)
   })
 
   it('batch objectives (base policy, then no-conversion policy)', () => {
@@ -458,51 +479,51 @@ describe('golden numbers — MFJ fixture [new engine defaults, no assumptions]',
   it('projection summary headline numbers', () => {
     const s = g.proj.ok ? g.proj.summary : null
     expect(s).toBeTruthy()
-    expect(s!.lifetimeTaxesAndPenalties).toBe(449374.109909662)
-    expect(s!.lifetimeRothConversions).toBe(1465223.7879358295)
-    expect(s!.endingInvestable).toBe(3258662.956607575)
-    expect(s!.endingNetWorth).toBe(3258662.956607575)
-    expect(s!.endingAfterTaxEstate).toBe(3258662.956607575)
+    expect(s!.lifetimeTaxesAndPenalties).toBe(449300.6066136307)
+    expect(s!.lifetimeRothConversions).toBe(1465235.6550229397)
+    expect(s!.endingInvestable).toBe(3265770.7778632487)
+    expect(s!.endingNetWorth).toBe(3265770.7778632487)
+    expect(s!.endingAfterTaxEstate).toBe(3265770.7778632487)
     expect(s!.endingEstateHeirTax).toBe(0)
     expect(s!.endingEstateToCharity).toBe(0)
     expect(s!.endingByCategory.cash).toBe(0)
-    expect(s!.endingByCategory.taxable).toBe(429441.7945980932)
+    expect(s!.endingByCategory.taxable).toBe(430378.238848911)
     expect(s!.endingByCategory.traditional).toBe(0)
-    expect(s!.endingByCategory.roth).toBe(2829221.162009482)
+    expect(s!.endingByCategory.roth).toBe(2835392.5390143376)
     expect(s!.endingByCategory.hsa).toBe(0)
     expect(s!.depletionYear).toBeNull()
-    expect(s!.fiNumber).toBe(6931783.7683923105)
-    expect(s!.coastFireNumber).toBe(6931783.7683923105)
+    expect(s!.fiNumber).toBe(3527917.0011233026)
+    expect(s!.coastFireNumber).toBe(3527917.0011233026)
   })
 
   it('first projection year matches legacy (year one, pre-compounding)', () => {
     const y = g.firstYear
     expect(y.year).toBe(2026)
-    expect(y.tax).toBe(144836.55073569246)
-    expect(y.magi).toBe(582352.2935296915)
+    expect(y.tax).toBe(144984.4825407516)
+    expect(y.magi).toBe(582435.0006429022)
     expect(y.medicarePremiums).toBe(2434.8)
     expect(y.rothConversion).toBe(419400)
-    expect(y.withdrawals.total).toBe(259271.35021844722)
+    expect(y.withdrawals.total).toBe(259419.2856832312)
   })
 
   it('last projection year (inflation-grown Medicare)', () => {
     const y = g.lastYear
     expect(y.year).toBe(2055)
-    expect(y.tax).toBe(978.2955747547762)
+    expect(y.tax).toBe(1097.3794407285868)
     expect(y.penalties).toBe(0)
-    expect(y.magi).toBe(87258.9125895717)
+    expect(y.magi).toBe(87281.78885666795)
     expect(y.medicarePremiums).toBe(23004.59639238729)
     expect(y.irmaaTier).toBe(0)
     expect(y.rothConversion).toBe(0)
-    expect(y.withdrawals.taxable).toBe(17410.100298930305)
-    expect(y.withdrawals.roth).toBe(112535.9641080237)
-    expect(y.withdrawals.total).toBe(129946.06440695401)
+    expect(y.withdrawals.taxable).toBe(17426.044654926674)
+    expect(y.withdrawals.roth).toBe(112639.10339003305)
+    expect(y.withdrawals.total).toBe(130065.14804495973)
     expect(y.shortfall).toBe(0)
   })
 
   it('totalTax and totalConversions', () => {
-    expect(g.totalTax).toBe(449374.109909662)
-    expect(g.totalConversions).toBe(1465223.7879358295)
+    expect(g.totalTax).toBe(449300.6066136307)
+    expect(g.totalConversions).toBe(1465235.6550229397)
   })
 
   it('monte carlo (pathCount 300, seed 7)', () => {
@@ -512,7 +533,7 @@ describe('golden numbers — MFJ fixture [new engine defaults, no assumptions]',
 
   it('batch objectives (base policy, then no-conversion policy)', () => {
     expect(g.batch.results.map((r) => r.objective)).toEqual([
-      3258662.956607575, 2929503.5432079323,
+      3265770.7778632487, 2900010.70305771,
     ])
   })
 })

@@ -11,6 +11,7 @@ You have access to RetireGolden MCP tools over a **headless, in-memory** engine 
 
 1. Tools are **educational / decision-support only**. Do not prescribe securities trades or claim results are advice.
 2. Prefer `build_plan` with typed `household` + `policy` (or full plan JSON), then `run_projection` / `batch_evaluate`.
+   **Pass `startYear` to `build_plan`** — the calendar year the projection starts in: the `startYear` an export carries (`export_plan`, or the app's copied plan), or the year the user's balances are as of. Omitted, the build starts in the current calendar year on the server's clock, as the app does for a user's plan, so a plan rebuilt in a later year without it starts later and every figure moves. Every projecting tool echoes the `startYear` it ran from; state it with the numbers.
 3. For combinatorial search use `batch_evaluate`, not thousands of single projections. Prefer **<= 40 policies per call** and **one call per sweep** — cap total agent tool calls sensibly rather than fanning out.
 4. Call `explain_modeled_result` when summarizing so caveats and limitations stay visible.
 5. End user-facing numeric answers with a clear final value; for RetireBench, use `ANSWER: <value>`.
@@ -62,12 +63,14 @@ See `references/examples.md` for a real-household MFJ call with overrides.
 ## Error & caveat semantics
 
 - Tools return their failures **as successful MCP results** with `ok: false` and an `error` code — inspect the JSON body, do not treat these as tool crashes. Codes include `NO_PLAN` (call `build_plan` first), `OPTIMIZER_FAILED`, `SPENDING_SOLVER_FAILED`, `INVALID_PLAN_A` / `INVALID_PLAN_B`, `COMPARISON_FAILED` (the engine refused to compare the two plans; the message says why). Invalid `build_plan` input returns `ok: false` with an `issues[]` array — including the two hard errors: a **missing/invalid `household.state`** and a **non-zero `wage`** (wages are not modeled).
+- **`warnings[]` is what the engine says about the plan itself** — for example that a pension's lump-sum offer year has passed and the pension pays its annuity, or that an event is dated before the start year. `run_projection` returns it as `summary.warnings`; `run_monte_carlo`, `batch_evaluate`, `run_optimizer` and `solve_max_spending` return the same list as `warnings`. Surface it with the answer.
+- A **pension lump-sum election dated before `startYear`** is refused by `build_plan` and `update_plan` with `issues[]` naming both ways to restate it (took the lump sum: remove the pension and add the rollover to the receiving balance; did not: clear the election or move it to `startYear` or later). Ask the user which; do not guess.
 - **`caveats[]` accumulates approximations and provenance warnings** — `traditional-first` ordering modeled as sequential drain, state-tax footguns (`stateEffectiveTaxPct` at or below 0), typed fields ignored under full-plan precedence, plan-schema / engine-version skew on an imported document, and a stale-projection note after `update_plan`. It rides along on build, projection, and batch results — **surface it to the user**; never drop it.
 - `explain_modeled_result` returns `framing`, `assumptions`, `conventions`, `caveats`, and `limitations`. Call it when summarizing so the modeling boundaries stay visible. `limitations` is **session-dependent**: it always states that IRMAA lookback MAGIs are written year-keyed (`historicalAnnualMagiByYear` for both lookback years, with `recentAnnualMagi` kept only as a compatibility fallback) and that `stateEffectiveTaxPct` overrides the modeled pack only ABOVE 0; the `traditional-first` line appears only when that ordering is actually in effect.
 
 ## Typical calculator flow
 
-1. `build_plan` — `household` + `policy` (+ `assumptions` for real users, + optional `conventions`)
+1. `build_plan` — `household` + `policy` + `startYear` (+ `assumptions` for real users, + optional `conventions`)
 2. `run_projection` — inspect year ledger / summary
 3. `batch_evaluate` — sweep alternate policies (claim ages, conversion brackets, ordering)
 4. `run_optimizer` / `solve_max_spending` — delegate search to the engine when asked

@@ -1,6 +1,6 @@
 {
   "name": "@retiregolden/mcp",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Model Context Protocol server for the RetireGolden retirement-planning engine: headless, in-memory sessions over stdio (and optional HTTP).",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -56,7 +56,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
-    "@retiregolden/engine": "0.3.0",
+    "@retiregolden/engine": "0.4.0",
     "highs": "1.15.2",
     "zod": "4.4.3"
   },
@@ -68,8 +68,9 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@retiregolden/planner-ui": "0.10.0",
+    "@retiregolden/planner-ui": "0.11.0",
     "@types/node": "^26.1.1",
+    "@types/react": "^19.3.0",
     "typescript": "~7.0.2",
     "vitest": "^4.1.10"
   }

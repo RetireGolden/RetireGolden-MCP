@@ -13,12 +13,15 @@ describe('session helpers', () => {
     expect(session.lastProjection).toBeNull()
   })
 
-  it('defaults the start year to 2026', () => {
-    expect(createSession().startYear).toBe(2026)
+  it("defaults the start year to the injected clock's year", () => {
+    // Through 0.10.0 the default was the literal 2026. tests/startYear.test.ts
+    // covers the clock in full; this pins that createSession reads it.
+    expect(createSession(undefined, { clock: () => new Date(2034, 6, 1) }).startYear).toBe(2034)
   })
 
   it('clearSession resets plan, caveats, conventions, and lastProjection', () => {
-    const session = createSession(2026)
+    // The build names no startYear, so it reads the session clock: pinned here.
+    const session = createSession(2026, { clock: () => new Date(2026, 5, 15) })
     adapter.setPlanFromBuild(session, {
       household: singleHousehold,
       policy: singlePolicy,

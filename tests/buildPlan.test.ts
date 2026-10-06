@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { buildPlanFromParams } from '../src/buildPlan.js'
-import { DEFAULT_START_YEAR } from '../src/session.js'
 import { argsSchemaFor, getTool, validateToolArgs } from '../src/toolTable.js'
 import {
   builtFailed,
@@ -41,30 +40,28 @@ describe('buildPlanFromParams — typed household branch', () => {
   })
 })
 
-describe('buildPlanFromParams — frozen build clock', () => {
-  const frozen = `${DEFAULT_START_YEAR}-01-01T00:00:00.000Z`
+describe('buildPlanFromParams — injected build clock', () => {
+  // Through 0.10.0 the stamp was a frozen 2026-01-01 and the default start year
+  // the literal 2026. Both now come from the clock the caller injects (the
+  // session's, via setPlanFromBuild), so a test pins them by pinning the clock.
+  const instant = '2031-03-04T05:06:07.000Z'
+  const clock = () => new Date(instant)
 
-  it('stamps createdAt/updatedAt from DEFAULT_START_YEAR, not the wall clock', () => {
-    const res = buildPlanFromParams({ household: singleHousehold, policy: singlePolicy })
-    expect(builtOk(res).plan.createdAtIso).toBe(frozen)
-    expect(builtOk(res).plan.updatedAtIso).toBe(frozen)
+  it('stamps createdAt/updatedAt from the injected clock, not the wall clock', () => {
+    const res = buildPlanFromParams({ household: singleHousehold, policy: singlePolicy }, { clock })
+    expect(builtOk(res).plan.createdAtIso).toBe(instant)
+    expect(builtOk(res).plan.updatedAtIso).toBe(instant)
   })
 
-  it('keeps that stamp even when the caller names an explicit startYear', () => {
-    // The coupling worth stating out loud: the frozen clock tracks
-    // DEFAULT_START_YEAR, so a plan built for 2029 is still stamped for the
-    // default year. That is deliberate — one literal instead of two — but it
-    // means a future change to DEFAULT_START_YEAR moves the timestamps on
-    // EVERY newly built plan, including ones that never used the default.
-    // The protocol baseline replaces timestamps with a sentinel, so it would
-    // not catch that; this test is what catches it.
-    const res = buildPlanFromParams({
-      household: singleHousehold,
-      policy: singlePolicy,
-      startYear: 2029,
-    })
+  it('stamps the build instant even when the caller names an explicit startYear', () => {
+    // The stamp says when the plan was built; the start year says where its
+    // projection begins. An explicit year moves only the second.
+    const res = buildPlanFromParams(
+      { household: singleHousehold, policy: singlePolicy, startYear: 2029 },
+      { clock },
+    )
     expect(res.startYear).toBe(2029)
-    expect(builtOk(res).plan.createdAtIso).toBe(frozen)
+    expect(builtOk(res).plan.createdAtIso).toBe(instant)
   })
 })
 
@@ -455,6 +452,9 @@ describe('buildPlanFromParams — conventions and caveats', () => {
     const res = buildPlanFromParams({
       household: singleHousehold,
       policy: singlePolicy,
+      // The pair is keyed to [startYear-2, startYear-1]; named so the keys
+      // below do not depend on the clock's year.
+      startYear: 2026,
       conventions: { irmaaLookbackMagis: [111_000, 222_000] },
     })
     expect(res.ok).toBe(true)

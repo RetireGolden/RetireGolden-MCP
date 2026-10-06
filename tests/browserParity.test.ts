@@ -25,6 +25,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { simulatePlan, summarizeProjection, type Plan } from '@retiregolden/engine'
+import { conversionFreeRun } from '@retiregolden/engine/projection/compare'
 import {
   combineTaxCalculators,
   createFederalTaxCalculator,
@@ -77,13 +78,23 @@ function seeded() {
   return session
 }
 
-/** What the app would show for this plan. */
+/**
+ * What the app would show for this plan. The summary call is transcribed from
+ * planner-ui/src/projection.ts's `projectPlan`: the FI figures are priced from
+ * the conversion-free run of the same plan on the same options. This file's
+ * policy converts for six years, so a summary priced any other way would differ
+ * in `fiNumber`, `coastFireNumber` and `fiBasis`, and the whole-summary
+ * equalities below would fail.
+ */
 function asTheAppWouldRunIt(plan: Plan) {
-  const result = simulatePlan(plan, {
-    startYear: START_YEAR,
-    taxCalculator: taxCalculatorFor(plan),
-  })
-  return { result, summary: summarizeProjection(plan, result) }
+  const simulateOptions = { startYear: START_YEAR, taxCalculator: taxCalculatorFor(plan) }
+  const result = simulatePlan(plan, simulateOptions)
+  return {
+    result,
+    summary: summarizeProjection(plan, result, {
+      conversionFreeRun: conversionFreeRun(plan, simulateOptions),
+    }),
+  }
 }
 
 describe('run_projection agrees with the web app, year for year', () => {
@@ -132,7 +143,8 @@ describe('run_projection agrees with the web app, year for year', () => {
       startYear: START_YEAR,
       taxCalculator: createFederalTaxCalculator(),
     })
-    const federalOnlySummary = summarizeProjection(plan, federalOnly)
+    // Only tax and net-worth figures are read, so the FI basis is not priced.
+    const federalOnlySummary = summarizeProjection(plan, federalOnly, { conversionFreeRun: null })
 
     expect(viaMcp.summary.lifetimeTaxesAndPenalties).toBeGreaterThan(
       federalOnlySummary.lifetimeTaxesAndPenalties,

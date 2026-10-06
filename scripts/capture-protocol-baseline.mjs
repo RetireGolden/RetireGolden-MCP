@@ -20,6 +20,18 @@ export const TIMESTAMP_SENTINEL = '<timestamp>'
 export const PACKAGE_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 export const BASELINE_PATH = resolve(PACKAGE_ROOT, 'tests/protocol-baseline/baseline.json')
 
+/**
+ * The instant every captured session reads as "now". A session's default start
+ * year follows the clock (src/session.ts), and `get_session` reports it before
+ * any build, so an unpinned capture would drift every 1 January. Mid-year, so
+ * the local calendar year is 2026 in every time zone, matching the fixtures'
+ * explicit `startYear: 2026`. The stdio child reads it through
+ * scripts/baseline-clock.mjs; the in-memory lane injects it as the session's
+ * clock.
+ */
+export const BASELINE_NOW = '2026-06-15T12:00:00.000Z'
+const BASELINE_CLOCK_MODULE = new URL('./baseline-clock.mjs', import.meta.url).href
+
 let machineHomedir
 try {
   machineHomedir = os.homedir()
@@ -397,10 +409,12 @@ export async function captureStdioLane({ root = PACKAGE_ROOT, fixtures }) {
     throw new Error('dist/cli.js is required for protocol capture; run pnpm run build first')
   }
 
+  // The child runs on the baseline's clock. @see BASELINE_NOW
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [cliPath],
+    args: ['--import', BASELINE_CLOCK_MODULE, cliPath],
     cwd: root,
+    env: { RETIREGOLDEN_MCP_BASELINE_NOW: BASELINE_NOW },
   })
   // The v1 Client has getters for capabilities and instructions but none for
   // the complete initialize result (e.g. _meta), so intercept the transport's
@@ -550,7 +564,7 @@ export async function captureInMemoryLane({ root = PACKAGE_ROOT, fixtures }) {
   const { McpServer, InMemoryTransport } = await import('@modelcontextprotocol/server')
   const { Client } = await import('@modelcontextprotocol/client')
   const server = new McpServer({ name: 'protocol-baseline-in-memory', version: '0.0.0' })
-  const session = sessionModule.createSession()
+  const session = sessionModule.createSession(undefined, { clock: () => new Date(BASELINE_NOW) })
   toolsModule.registerTools(server, session, {
     authorize: (request) => {
       // The no-arguments privacy contract, enforced: an authorization request
