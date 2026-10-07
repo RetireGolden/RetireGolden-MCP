@@ -60,9 +60,9 @@ import { TOOL_TABLE } from '../src/toolTable.js'
 
 /**
  * The plan type the PUBLISHED planner-ui produces — whatever engine it binds,
- * which is not necessarily this package's. Today planner-ui 0.11.0 resolves
- * engine ^0.4.0, the same 0.4.0 this package exact-pins, so the alias is
- * currently identical to `Plan`. It is kept as an alias rather than collapsed
+ * which is not necessarily this package's. Today planner-ui 0.11.0 declares
+ * engine ^0.4.0, which resolves to the 0.4.1 this package exact-pins, so the
+ * alias is currently identical to `Plan`. It is kept as an alias rather than collapsed
  * because the two have already diverged once (planner-ui 0.9.0 on engine
  * ^0.1.12, plan schema v4, against this package's 0.2.0, v5) and will again
  * the next time one side moves first; a value that came out of planner-ui is
@@ -168,7 +168,7 @@ function buildFrom(payload: SinglePlanExport | Partial<BuildPlanInput>, options:
  * declared `^0.1.12`), so pnpm nested a second engine copy under planner-ui
  * and its payloads were stamped by that copy — engine 0.1.12, plan schema v4 —
  * exercising the skew branch and the `documentVersion` lag on the schema
- * axis. With planner-ui 0.11.0 on `^0.4.0` and this package on 0.4.0 the tree
+ * axis. With planner-ui 0.11.0 on `^0.4.0` and this package on 0.4.1 the tree
  * holds one engine and the agreeing branch is the live one. Nothing
  * here changed between the two states, which is the point.
  */

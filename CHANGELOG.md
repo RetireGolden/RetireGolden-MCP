@@ -3,6 +3,62 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.11.1
+
+**Moves the exact `@retiregolden/engine` dependency from 0.4.0 to 0.4.1, a patch
+of state income tax fixes.** No tool, argument or result shape changes, and
+plans stay plan-schema 7. `@retiregolden/planner-ui` stays 0.11.0: its
+`^0.4.0` admits 0.4.1, and the tree holds one engine. `highs` stays at 1.15.2,
+still the version in the engine repository's lockfile at the 0.4.1 commit
+(RetireGolden 3a6e845b resolves `highs@1.15.2`).
+
+### Changed
+
+- **State income tax, as engine 0.4.1 corrects it.** Virginia's age deduction
+  ($12,000 for each taxpayer 65 or older, reduced dollar for dollar above
+  $50,000 of adjusted federal AGI single or $75,000 married) is applied again,
+  as Form 760's worksheet computes it: since engine #710 no projected Virginia
+  year took it, so a couple both 70 with $60,000 of pensions now pays $622.00
+  of 2026 Virginia tax, not $1,987.30. Virginia's $800 aged exemption counts a
+  January 1 birthday, and a part-year resident is taxed as Form 760PY taxes
+  one. Kansas flags a missing plan code only where the code decides the tax,
+  so an IRA, a private pension or a 401(k), 401(a) or 457(b) plan no longer
+  shows incomplete years for it, and it subtracts Washburn University's
+  403(b). A Roth conversion follows each state's own rule instead of counting
+  as a retirement distribution everywhere: Maine gives it no pension
+  deduction, Pennsylvania does not tax it, South Carolina counts it toward the
+  $3,000 deduction at any age, and Michigan and New York count it only when it
+  is made at 59 and a half or older. Connecticut subtracts IRA distributions,
+  conversions included, on its federal-AGI schedule (all of them below $75,000,
+  $100,000 joint; none from $100,000, $150,000 joint) and nothing of a Roth
+  IRA's taxable earnings, where it subtracted every IRA dollar at any income.
+  New Jersey's pension exclusion is income-tested and per return: up to
+  $75,000, or $100,000 joint, at $100,000 of income or less, stepping down to
+  nothing above $150,000, where it gave $50,000 to each member 62 or older.
+  Until this release MCP 0.11.0's state tax had each of these defects. Two
+  more engine changes move no figure: Colorado's 2026 rate is confirmed (no
+  TABOR cut), and the engine's changelog now records #710, which the 0.11.0
+  entry below traced from the engine's history.
+
+### Verified
+
+- Every recorded figure here is a Kentucky plan: the protocol baseline's
+  fixtures, both golden sets and the browser-parity household (whose
+  comparison twin is in Florida). California and Texas appear only in
+  input-validation tests, and California also in the engine-values parity
+  test, which records no literals and recomputes the engine comparison at
+  run time. None is in a state engine 0.4.1 corrects, and
+  Kentucky's treatment does not change, so the goldens pass unregenerated.
+- The protocol baseline was regenerated and read leaf by leaf. Only
+  `meta.enginePackage` and the six `engineVersion` stamps move, 0.4.0 → 0.4.1
+  (`get_session` three times, `export_plan` twice, `explain_modeled_result`),
+  with the `build_plan` round trip's argument digest, which carries the stamp.
+  No figure, tool, resource or schema moves.
+- The lockfile moves only the engine entry, resolved from npm (integrity
+  `sha512-VPj04CY8…`).
+- `pnpm test`, `pnpm run build` and `pnpm run test:packed` pass, and
+  `pnpm run contract:generate` leaves `schemas/tools.v1.json` unchanged.
+
 ## 0.11.0
 
 **Moves the exact `@retiregolden/engine` dependency from 0.3.0 to 0.4.0 and the
