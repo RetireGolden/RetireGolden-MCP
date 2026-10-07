@@ -53,7 +53,7 @@
  * commit from 0.3.0 to 0.4.0, and every moved literal traces to one of three
  * engine changes, or to the FI basis this package now asks for (CHANGELOG
  * 0.11.0 has the figures):
- *  - Kentucky (engine #710, which the engine CHANGELOG does not record): the
+ *  - Kentucky (engine #710, which the engine CHANGELOG records from 0.4.1): the
  *    $31,110 retirement exclusion now applies to each owner's own IRA
  *    distributions, Roth conversions included, where engine 0.3.0 applied the
  *    household's combined cap to traditional withdrawals only; and the standard
@@ -69,6 +69,11 @@
  *    `coastFireNumber` on all four fixtures by far the most.
  * Monte Carlo success moves only on the single new-defaults fixture (0.32 to
  * 0.33, from the Kentucky change).
+ *
+ * Verified UNCHANGED under engine 0.4.1 (state income tax corrections in
+ * Virginia, Kansas, Maine, Pennsylvania, South Carolina, Michigan, New York,
+ * Connecticut and New Jersey; these fixtures are Kentucky plans, and Kentucky
+ * does not change): the goldens pass without regeneration.
  *
  * Generation recipe — `pnpm run goldens:print` (scripts/gen-goldens.mjs) prints
  * these literals from a fresh build; it never edits this file:

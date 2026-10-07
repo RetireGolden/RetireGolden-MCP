@@ -9,7 +9,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 of state income tax fixes.** No tool, argument or result shape changes, and
 plans stay plan-schema 7. `@retiregolden/planner-ui` stays 0.11.0: its
 `^0.4.0` admits 0.4.1, and the tree holds one engine. `highs` stays at 1.15.2,
-still the version in the engine repository's lockfile.
+still the version in the engine repository's lockfile at the 0.4.1 commit
+(RetireGolden 3a6e845b resolves `highs@1.15.2`).
 
 ### Changed
 
@@ -43,8 +44,10 @@ still the version in the engine repository's lockfile.
 
 - Every recorded figure here is a Kentucky plan: the protocol baseline's
   fixtures, both golden sets and the browser-parity household (whose
-  comparison twin is in Florida; California and Texas appear only in
-  input-validation tests). None is in a state engine 0.4.1 corrects, and
+  comparison twin is in Florida). California and Texas appear only in
+  input-validation tests, and California also in the engine-values parity
+  test, which records no literals and recomputes the engine comparison at
+  run time. None is in a state engine 0.4.1 corrects, and
   Kentucky's treatment does not change, so the goldens pass unregenerated.
 - The protocol baseline was regenerated and read leaf by leaf. Only
   `meta.enginePackage` and the six `engineVersion` stamps move, 0.4.0 → 0.4.1
