@@ -75,6 +75,14 @@
  * Connecticut and New Jersey; these fixtures are Kentucky plans, and Kentucky
  * does not change): the goldens pass without regeneration.
  *
+ * Verified UNCHANGED under engine 0.4.3, which contains 0.4.2 (state military
+ * retirement, Utah's credits, New Jersey's personal exemptions, pooled
+ * spousal-election RMDs, and part-year pricing of a year split between states,
+ * Kentucky's part-year cap included): these fixtures are full-year Kentucky
+ * plans with an untagged pension, no state move and no inherited IRA, so none
+ * of those reaches them, and `pnpm run goldens:print` prints every literal
+ * below unchanged.
+ *
  * Generation recipe — `pnpm run goldens:print` (scripts/gen-goldens.mjs) prints
  * these literals from a fresh build; it never edits this file:
  *   session = createSession()

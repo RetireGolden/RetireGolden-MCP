@@ -31,6 +31,11 @@ import {
   createFederalTaxCalculator,
 } from '@retiregolden/engine/tax/federalTax'
 import { createStateTaxCalculator } from '@retiregolden/engine/tax/stateTax'
+import { headlineMonteCarloOptions } from '@retiregolden/engine/montecarlo/headline'
+import { createLognormalModel, createMarketModel } from '@retiregolden/engine/montecarlo/marketModels'
+import { DEFAULT_MONTE_CARLO_SEED } from '@retiregolden/engine/montecarlo/rng'
+import { aggregateMonteCarlo, runMonteCarloPaths } from '@retiregolden/engine/montecarlo/run'
+import { comparePlanHeadlines } from '@retiregolden/engine/scenarios/planHeadlines'
 
 import * as adapter from '../src/adapter.js'
 import { createSession } from '../src/session.js'
@@ -193,7 +198,8 @@ describe('every simulating path runs the same stack', () => {
     // FL keeps more, precisely because it is not taxed at KY's rates. A shared
     // calculator built from one side would have made these two agree.
     expect(cmp.b.lifetimeTaxesAndPenalties).toBeLessThan(cmp.a.lifetimeTaxesAndPenalties)
-    expect(cmp.deltaEndingAfterTaxEstate).toBeGreaterThan(0)
+    expect(cmp.deltaEndingAfterTaxEstateNominal).toBeGreaterThan(0)
+    expect(cmp.headline.endingAfterTaxEstate.delta).toBeGreaterThan(0)
     expect(cmp.a).toEqual(asTheAppWouldRunIt(ky).summary)
     expect(cmp.b).toEqual(asTheAppWouldRunIt(fl).summary)
   })
@@ -229,6 +235,141 @@ describe('every simulating path runs the same stack', () => {
     expect(batch.results[0]!.objective).toBe(
       asTheAppWouldRunIt(session.plan!).summary.endingAfterTaxEstate,
     )
+  })
+})
+
+/**
+ * The Compare page's comparison of two plans. Transcribed from
+ * planner-ui/src/planner/ComparePlansPage.tsx: each side is `projectPlan`'s
+ * result and summary (`asTheAppWouldRunIt` above) from one start year, and the
+ * page prints the engine's `comparePlanHeadlines` of the two, Plan A the
+ * baseline and Plan B the proposal.
+ */
+function asTheComparePageWouldCompareThem(planA: Plan, planB: Plan) {
+  const left = asTheAppWouldRunIt(planA)
+  const right = asTheAppWouldRunIt(planB)
+  return comparePlanHeadlines(
+    { plan: planA, result: left.result, summary: left.summary },
+    { plan: planB, result: right.result, summary: right.summary },
+  )
+}
+
+describe("compare_scenarios' headline is the app's Compare page", () => {
+  function expectTheComparePage(planA: Plan, planB: Plan) {
+    const cmp = adapter.compareScenarios(seeded(), planA, planB, START_YEAR)
+    expect(cmp.ok).toBe(true)
+    if (!cmp.ok) throw new Error('comparison failed')
+    const page = asTheComparePageWouldCompareThem(planA, planB)
+    expect(cmp.headline).toEqual({
+      moneyBasis: page.moneyBasis,
+      endYear: page.endYear,
+      endingAfterTaxEstate: page.endingAfterTaxEstate,
+    })
+    return cmp
+  }
+
+  it('in nominal dollars when the plans end in the same year', () => {
+    const ky = seeded().plan!
+    const fl = structuredClone(ky) as Plan
+    fl.household.state = 'FL'
+    const cmp = expectTheComparePage(ky, fl)
+    expect(cmp.headline.moneyBasis).toBe('nominal')
+    expect(cmp.headline.endingAfterTaxEstate.delta).toBe(cmp.deltaEndingAfterTaxEstateNominal)
+  })
+
+  it("in today's dollars when they end in different years, where the nominal field differs", () => {
+    const shorter = seeded().plan!
+    const longerSession = createSession()
+    expect(
+      adapter.setPlanFromBuild(longerSession, {
+        household: { ...household, horizon: household.horizon + 5 },
+        policy,
+        startYear: START_YEAR,
+      }).ok,
+    ).toBe(true)
+    const cmp = expectTheComparePage(shorter, longerSession.plan!)
+    expect(cmp.headline.moneyBasis).toBe('today')
+    expect(cmp.headline.endYear.delta).toBe(5)
+    expect(cmp.headline.endingAfterTaxEstate.delta).not.toBe(cmp.deltaEndingAfterTaxEstateNominal)
+  })
+})
+
+/**
+ * The app's headline Monte Carlo run at `pathCount` paths. Transcribed from
+ * planner-ui: `useMcSuccessRate.ts#headlineMcRunOptions` takes the engine's
+ * `headlineMonteCarloOptions` whole, `mc/runRequest.ts#runMcRequest` runs them
+ * with `createMarketModel` and the plan's own tax stack (no stochastic
+ * longevity, no care shock), and `mc/pool.ts` aggregates the paths with
+ * `aggregateMonteCarlo`. The app runs 1,000 paths; the tests below run fewer,
+ * because path i is the same market at any count (the full count's own
+ * wiring is pinned in tests/monteCarloHeadline.wiring.test.ts).
+ */
+function asTheAppsHeadlineRunWouldRunIt(plan: Plan, pathCount: number) {
+  const options = headlineMonteCarloOptions(plan, START_YEAR, pathCount)
+  return aggregateMonteCarlo(
+    runMonteCarloPaths(plan, {
+      startYear: options.startYear,
+      taxCalculator: taxCalculatorFor(plan),
+      model: createMarketModel(options.model),
+      seed: options.seed,
+      pathCount: options.pathCount,
+    }),
+  )
+}
+
+const MC_PATHS = 40
+
+// Each case runs two or three Monte Carlo batches of 40 thirty-year paths: under
+// a second apiece locally, several on a hosted runner.
+describe("run_monte_carlo's defaults are the app's headline run", { timeout: 60_000 }, () => {
+  function expectTheHeadline(session: ReturnType<typeof seeded>) {
+    const mc = adapter.runMonteCarlo(session, { pathCount: MC_PATHS })
+    expect(mc.ok).toBe(true)
+    if (!mc.ok) throw new Error('monte carlo failed')
+    const app = asTheAppsHeadlineRunWouldRunIt(session.plan!, MC_PATHS)
+    expect(mc.successRate).toBe(app.successRate)
+    expect(mc.requiredFloorSuccessRate).toBe(app.requiredFloorSuccessRate)
+    const p = app.endingInvestable.percentiles
+    expect(mc.percentiles).toEqual({ p10: p.p10, p25: p.p25, p50: p.p50, p75: p.p75, p90: p.p90 })
+    return mc
+  }
+
+  it('draws the same markets for a single-return plan', () => {
+    const mc = expectTheHeadline(seeded())
+    expect(mc.seed).toBe(DEFAULT_MONTE_CARLO_SEED)
+    expect(mc.returnVolPct).toBe(12)
+    // The 0.11.x default seed draws other markets, so the default is not inert.
+    const seed42 = adapter.runMonteCarlo(seeded(), { pathCount: MC_PATHS, seed: 42 })
+    if (!seed42.ok) throw new Error('monte carlo failed')
+    expect(seed42.percentiles).not.toEqual(mc.percentiles)
+  })
+
+  it("draws per-class shocks for a plan with an allocated account, as the app's model does", () => {
+    const allocated = structuredClone(seeded().plan!) as Plan
+    const account = allocated.accounts.find((a) => a.type === 'traditional')!
+    Object.assign(account, {
+      allocation: { mode: 'static', rebalancing: 'annual', weights: { usStocks: 60, intlStocks: 10, bonds: 30, cash: 0 } },
+    })
+    const session = createSession()
+    expect(adapter.setPlanFromBuild(session, { plan: allocated, startYear: START_YEAR }).ok).toBe(true)
+    const mc = expectTheHeadline(session)
+    // The plain lognormal model 0.11.x ran, on the same seed: without the class
+    // shocks an allocated plan draws different markets.
+    const plain = aggregateMonteCarlo(
+      runMonteCarloPaths(session.plan!, {
+        startYear: START_YEAR,
+        taxCalculator: taxCalculatorFor(session.plan!),
+        model: createLognormalModel({
+          type: 'lognormal',
+          inflationMeanPct: session.plan!.assumptions.inflationPct,
+          returnVolPct: 12,
+        }),
+        seed: DEFAULT_MONTE_CARLO_SEED,
+        pathCount: MC_PATHS,
+      }),
+    )
+    const q = plain.endingInvestable.percentiles
+    expect(mc.percentiles).not.toEqual({ p10: q.p10, p25: q.p25, p50: q.p50, p75: q.p75, p90: q.p90 })
   })
 })
 

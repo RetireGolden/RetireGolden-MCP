@@ -444,17 +444,19 @@
       "type": "object",
       "properties": {
         "pathCount": {
+          "description": "Number of simulated market paths. Default 1000, the app's headline path count. Run time grows in proportion to it.",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 5000
         },
         "seed": {
+          "description": "Base seed of the market draws (each path's seed is derived from it and the path's index, so path i draws the same market at any pathCount). Default 6221293, the engine's DEFAULT_MONTE_CARLO_SEED, which the app uses for every plan; pass another to draw different markets.",
           "type": "integer",
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
         },
         "returnVolPct": {
-          "description": "Annual return volatility for the lognormal market model, in PERCENT (12 = 12%). Default 12. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation.",
+          "description": "Annual return volatility of the lognormal model's market factor, in PERCENT (12 = 12%), which every account without an asset allocation draws. An account that holds an asset allocation draws each asset class's own volatility (the plan's assetClassParams) instead, at any returnVolPct. Default 12, the headline model's. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation only on a plan with no allocated account.",
           "type": "number",
           "minimum": 0,
           "maximum": 100
