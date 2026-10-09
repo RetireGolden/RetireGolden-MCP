@@ -25,14 +25,9 @@ describe('run_monte_carlo percentiles', { timeout: 60_000 }, () => {
     expect(p.p75).toBeLessThanOrEqual(p.p90)
   })
 
-  it('echoes the three run inputs, defaulting pathCount/seed/returnVolPct', () => {
-    const defaults = adapter.runMonteCarlo(session())
-    expect(defaults.ok).toBe(true)
-    if (!defaults.ok) return
-    expect(defaults.pathCount).toBe(200)
-    expect(defaults.seed).toBe(42)
-    expect(defaults.returnVolPct).toBe(12)
-
+  // The defaulted echo (the headline's 1,000 paths) is pinned without a
+  // 1,000-path run in tests/monteCarloHeadline.wiring.test.ts.
+  it('echoes the three run inputs it was given', () => {
     const configured = adapter.runMonteCarlo(session(), {
       pathCount: 64,
       seed: 7,

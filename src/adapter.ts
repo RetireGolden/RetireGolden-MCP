@@ -19,7 +19,13 @@ import {
 import { combineTaxCalculators, createFederalTaxCalculator } from '@retiregolden/engine/tax/federalTax'
 import { createStateTaxCalculator } from '@retiregolden/engine/tax/stateTax'
 import { runMonteCarloPaths, aggregateMonteCarlo } from '@retiregolden/engine/montecarlo/run'
-import { createLognormalModel } from '@retiregolden/engine/montecarlo/marketModels'
+import { buildLognormalModelConfigForPlan, createMarketModel } from '@retiregolden/engine/montecarlo/marketModels'
+import {
+  HEADLINE_MONTE_CARLO_PATH_COUNT,
+  HEADLINE_MONTE_CARLO_RETURN_VOL_PCT,
+  headlineMonteCarloOptions,
+} from '@retiregolden/engine/montecarlo/headline'
+import { DEFAULT_MONTE_CARLO_SEED } from '@retiregolden/engine/montecarlo/rng'
 import { optimizePlan } from '@retiregolden/engine/projection/optimizePlan'
 import { solveMaxSustainableSpending } from '@retiregolden/engine/decisions/spendingSolver'
 import { isExactAnswerDiagnostic } from '@retiregolden/engine/decisions/spendingSolverDiagnostics'
@@ -29,6 +35,8 @@ import {
   isClaimAlreadyMade,
 } from '@retiregolden/engine/socialSecurity/openClaims'
 import { compareScenarioPlans } from '@retiregolden/engine/scenarios/comparison'
+import { comparePlanHeadlines } from '@retiregolden/engine/scenarios/planHeadlines'
+import type { ScalarComparison } from '@retiregolden/engine/scenarios/scalarComparison'
 import {
   buildPlanFromParams,
   droppedFields,
@@ -318,7 +326,15 @@ export function runProjection(
 }
 
 /**
- * Monte Carlo defaults, named rather than spelled inline three times.
+ * Monte Carlo defaults: the RetireGolden app's headline run, as the engine
+ * publishes it for every host (`montecarlo/headline.ts#headlineMonteCarloOptions`,
+ * decision D-MC-DEFAULT-SEED). The constants are the engine's own, re-exported
+ * under this package's names, so they cannot drift from what the app runs.
+ *
+ * Through 0.11.x they were this package's own choice (200 paths, seed 42, a
+ * plain lognormal model), so a defaulted `run_monte_carlo` drew different
+ * markets from the app's for the same plan and reported a different success
+ * rate.
  *
  * All three are ECHOED in the response and stated in the `run_monte_carlo` tool
  * description, so a caller can tell a defaulted run from a configured one without
@@ -327,11 +343,24 @@ export function runProjection(
  * of them therefore moves a `tools/list` description, and the protocol baseline
  * must be regenerated in the same change.
  */
-export const MC_DEFAULT_PATH_COUNT = 200
-export const MC_DEFAULT_SEED = 42
+export const MC_DEFAULT_PATH_COUNT = HEADLINE_MONTE_CARLO_PATH_COUNT
+/** The engine's `DEFAULT_MONTE_CARLO_SEED` (0x5eeded), the one base seed the app draws every plan's markets from. */
+export const MC_DEFAULT_SEED = DEFAULT_MONTE_CARLO_SEED
 /** Annual return volatility, in percent, for the lognormal market model. */
-export const MC_DEFAULT_RETURN_VOL_PCT = 12
+export const MC_DEFAULT_RETURN_VOL_PCT = HEADLINE_MONTE_CARLO_RETURN_VOL_PCT
 
+/**
+ * A Monte Carlo summary of the session plan. With no options it is the app's
+ * headline run: the engine's `headlineMonteCarloOptions` for the session plan
+ * and start year (1,000 paths, the default seed, and the lognormal model the
+ * engine builds from the plan: its inflation mean, 12 percent return volatility,
+ * and per-class shocks when an account holds an asset allocation), priced with
+ * the app's tax stack (`taxCalc`), with no stochastic longevity and no care
+ * shock. That is every condition the engine names for a host to show the app's
+ * rate. Each option given replaces only its own default: an explicit `seed` or
+ * `pathCount` wins, and an explicit `returnVolPct` rebuilds the same plan model
+ * at that volatility.
+ */
 export function runMonteCarlo(
   session: SessionState,
   opts: { pathCount?: number; seed?: number; returnVolPct?: number } = {},
@@ -339,21 +368,24 @@ export function runMonteCarlo(
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
-  const pathCount = opts.pathCount ?? MC_DEFAULT_PATH_COUNT
-  const seed = opts.seed ?? MC_DEFAULT_SEED
+  // An omitted pathCount takes the engine's default parameter, the headline's.
+  const headline = headlineMonteCarloOptions(session.plan, session.startYear, opts.pathCount)
+  const pathCount = headline.pathCount
+  const seed = opts.seed ?? headline.seed
   const returnVolPct = opts.returnVolPct ?? MC_DEFAULT_RETURN_VOL_PCT
-  const model = createLognormalModel({
-    type: 'lognormal',
-    inflationMeanPct: session.plan.assumptions.inflationPct,
-    returnVolPct,
-  })
+  const modelConfig =
+    opts.returnVolPct === undefined
+      ? headline.model
+      : buildLognormalModelConfigForPlan(session.plan, opts.returnVolPct)
   const simulateOptions = {
-    startYear: session.startYear,
+    startYear: headline.startYear,
     taxCalculator: taxCalc(session.plan),
   }
   const paths = runMonteCarloPaths(session.plan, {
     ...simulateOptions,
-    model,
+    // The app's own construction (planner-ui mc/runRequest.ts): the config's
+    // market model, built by the engine's dispatcher.
+    model: createMarketModel(modelConfig),
     seed,
     pathCount,
   })
@@ -844,6 +876,11 @@ function limitationsFor(session: SessionState): string[] {
   return limitations
 }
 
+/** One engine comparison row, as compare_scenarios publishes it. */
+function pickComparison(row: ScalarComparison): ScalarComparison {
+  return { baseline: row.baseline, proposal: row.proposal, delta: row.delta }
+}
+
 export function compareScenarios(
   session: SessionState,
   planA: unknown,
@@ -876,17 +913,39 @@ export function compareScenarios(
   // as the app prices it. @see publishedSummary
   const sa = publishedSummary(a.plan, ra, optionsA)
   const sb = publishedSummary(b.plan, rb, optionsB)
-  // The delta is the engine's own comparison (proposal minus baseline, each side
-  // priced with its own calculator), not a subtraction here. It projects each
-  // plan again: the engine's comparison does not return the full summaries this
-  // tool also reports, and a deterministic projection is cheap next to that.
-  // The engine refuses a comparison with a non-finite figure by throwing; that
-  // is returned in the tool's ok:false envelope like the optimizer's and the
-  // spending solver's failures, never thrown past the handler.
-  let delta: number
+  // Both comparisons are the engine's (proposal minus baseline: Plan B minus
+  // Plan A), never a subtraction here.
+  //
+  // `headline` is the RetireGolden app's Compare page basis
+  // (`comparePlanHeadlines`, owner decision R13): nominal dollars when the two
+  // plans end in the same year, today's (start-year) dollars when they end in
+  // different years, each ending figure divided by its own plan's inflation
+  // factor at its own end year. It reads the projections and published
+  // summaries above, as the Compare page reads `projectPlan`'s.
+  //
+  // `deltaEndingAfterTaxEstateNominal` is the field 0.11.x published as
+  // `deltaEndingAfterTaxEstate`, renamed rather than redefined so that no caller
+  // reading the old name silently gets the other basis: each estate in its own
+  // plan's last-year dollars, subtracted as they are, so across two horizons it
+  // counts inflation as a difference between the plans. It comes from
+  // `compareScenarioPlans`, which projects each plan again: that comparison does
+  // not return the full summaries this tool also reports, and a deterministic
+  // projection is cheap next to that.
+  //
+  // The engine refuses a comparison it cannot publish (a non-finite figure; for
+  // the headline also a depleting side whose first person has no YYYY-MM-DD
+  // birth date, which parsePlan already requires of every person) by throwing;
+  // that is returned in the tool's ok:false envelope like the optimizer's and
+  // the spending solver's failures, never thrown past the handler.
+  let headline: ReturnType<typeof comparePlanHeadlines>
+  let nominalDelta: number
   try {
+    headline = comparePlanHeadlines(
+      { plan: a.plan, result: ra, summary: sa },
+      { plan: b.plan, result: rb, summary: sb },
+    )
     const comparison = compareScenarioPlans(a.plan, b.plan, { startYear: year, taxCalculatorForPlan: taxCalc })
-    delta = comparison.headline.endingAfterTaxEstate.delta
+    nominalDelta = comparison.headline.endingAfterTaxEstate.delta
   } catch (e) {
     return {
       ok: false as const,
@@ -901,7 +960,14 @@ export function compareScenarios(
     startYear: year,
     a: sa,
     b: sb,
-    deltaEndingAfterTaxEstate: delta,
+    // The engine's fields under the engine's names, picked rather than spread so
+    // that a field the engine adds later does not reach the wire unannounced.
+    headline: {
+      moneyBasis: headline.moneyBasis,
+      endYear: pickComparison(headline.endYear),
+      endingAfterTaxEstate: pickComparison(headline.endingAfterTaxEstate),
+    },
+    deltaEndingAfterTaxEstateNominal: nominalDelta,
   }
 }
 

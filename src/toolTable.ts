@@ -225,22 +225,35 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   {
     name: 'run_monte_carlo',
     // The three defaults are INTERPOLATED from the constants the handler actually
-    // applies, so this prose cannot drift from the behaviour. It renders
-    // byte-identically to the literals it replaced, so the inventory hash in
-    // tests/protocol-baseline/baseline.json does not move; changing a constant
-    // moves this description and the baseline with it.
+    // applies, which are the engine's headline constants, so this prose cannot
+    // drift from the behaviour; changing a constant moves this description and
+    // the protocol baseline (tests/protocol-baseline/baseline.json) with it.
     // @see adapter.MC_DEFAULT_PATH_COUNT
-    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). Defaults, all echoed back in the result: pathCount ${adapter.MC_DEFAULT_PATH_COUNT}, seed ${adapter.MC_DEFAULT_SEED}, returnVolPct ${adapter.MC_DEFAULT_RETURN_VOL_PCT}. ${RUN_ECHO}`,
+    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). With no arguments it runs the RetireGolden app's headline Monte Carlo configuration (the engine's headlineMonteCarloOptions): pathCount ${adapter.MC_DEFAULT_PATH_COUNT}, seed ${adapter.MC_DEFAULT_SEED} (the engine's DEFAULT_MONTE_CARLO_SEED), and the lognormal market model the engine builds from the plan at returnVolPct ${adapter.MC_DEFAULT_RETURN_VOL_PCT} (with per-asset-class shocks when an account holds an asset allocation), priced with the app's tax stack, so successRate is the rate the app shows for the same plan document and startYear. Each argument given replaces only its own default; all three values used are echoed back in the result. ${RUN_ECHO}`,
     inputShape: {
-      pathCount: z.number().int().positive().max(5000).optional(),
-      seed: z.number().int().optional(),
+      pathCount: z
+        .number()
+        .int()
+        .positive()
+        .max(5000)
+        .optional()
+        .describe(
+          `Number of simulated market paths. Default ${adapter.MC_DEFAULT_PATH_COUNT}, the app's headline path count. Run time grows in proportion to it.`,
+        ),
+      seed: z
+        .number()
+        .int()
+        .optional()
+        .describe(
+          `Base seed of the market draws (each path's seed is derived from it and the path's index, so path i draws the same market at any pathCount). Default ${adapter.MC_DEFAULT_SEED}, the engine's DEFAULT_MONTE_CARLO_SEED, which the app uses for every plan; pass another to draw different markets.`,
+        ),
       returnVolPct: z
         .number()
         .min(0)
         .max(100)
         .optional()
         .describe(
-          `Annual return volatility for the lognormal market model, in PERCENT (12 = 12%). Default ${adapter.MC_DEFAULT_RETURN_VOL_PCT}. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation.`,
+          `Annual return volatility for the lognormal market model, in PERCENT (12 = 12%). Default ${adapter.MC_DEFAULT_RETURN_VOL_PCT}, the headline model's. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation.`,
         ),
     },
     handler: (session, args) =>
@@ -294,7 +307,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'compare_scenarios',
-    description: `${EDUCATIONAL} Compare two plan JSON documents via projection summaries. Both plans are projected from one startYear, which the result echoes, and each is checked against it as build_plan checks a plan: a side with a pension lump-sum election dated before that year is refused (INVALID_PLAN_A or INVALID_PLAN_B).`,
+    description: `${EDUCATIONAL} Compare two plan JSON documents via projection summaries (a for planA, b for planB). Both plans are projected from one startYear, which the result echoes, and each is checked against it as build_plan checks a plan: a side with a pension lump-sum election dated before that year is refused (INVALID_PLAN_A or INVALID_PLAN_B). headline is the RetireGolden app's Compare-page comparison, planA the baseline and planB the proposal, every delta proposal minus baseline: headline.endYear gives each plan's last projection year, and headline.endingAfterTaxEstate gives both estates and their delta in headline.moneyBasis, 'nominal' when the plans end in the same year and 'today' (start-year dollars, each estate divided by its own plan's inflation factor at its own end year) when they do not. Quote that delta with its basis. deltaEndingAfterTaxEstateNominal subtracts the two nominal estates as they are (each in its own plan's last-year dollars), so when the end years differ it counts inflation as a difference between the plans; the a and b summaries are nominal too.`,
     inputShape: {
       planA: z.unknown(),
       planB: z.unknown(),

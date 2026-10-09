@@ -73,11 +73,11 @@ Session state (e.g. `build_plan`, `clear_session`) is held in memory only.
 | `build_plan` | Build an in-memory plan from typed household/policy params or full plan JSON |
 | `validate_plan` | Validate the current session plan (or supplied JSON) |
 | `run_projection` | Deterministic year-by-year projection |
-| `run_monte_carlo` | Stochastic success rate and required-floor success rate |
+| `run_monte_carlo` | Stochastic success rate and required-floor success rate; with no arguments, the app's headline run (1,000 paths, the engine's default seed and plan model) |
 | `batch_evaluate` | Evaluate many policies against one household (search-friendly) |
 | `run_optimizer` | Engine optimizer / conversion schedule search |
 | `solve_max_spending` | Sustainable-spending bisection |
-| `compare_scenarios` | Diff two projection summaries |
+| `compare_scenarios` | Diff two projection summaries; `headline` is the app's Compare-page after-tax estate comparison with its money basis (today's dollars when the plans end in different years) |
 | `explain_modeled_result` | Compact evidence / assumptions / limitations payload |
 | `export_plan` | Return the session plan as full plan JSON (round-trips via `build_plan`) |
 | `describe_plan_schema` | Return the engine's versioned Plan JSON Schema (full or a `path` subtree); also served as the `plan-schema` MCP resource |

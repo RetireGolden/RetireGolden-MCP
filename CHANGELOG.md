@@ -3,6 +3,211 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.12.0
+
+**`run_monte_carlo` with no arguments now runs the RetireGolden app's headline
+Monte Carlo configuration, and `compare_scenarios` publishes the app's
+Compare-page comparison of the two after-tax estates, with its money basis,
+beside the nominal delta, which is renamed.** A minor, because default outputs
+change and a result field is renamed. Both were known differences from the app
+when 0.11.0 shipped. Everything those two changes read has been in the engine
+since 0.4.0 (`headlineMonteCarloOptions`, `DEFAULT_MONTE_CARLO_SEED`,
+`buildLognormalModelConfigForPlan`, `comparePlanHeadlines`).
+
+**The release also moves the exact `@retiregolden/engine` dependency from 0.4.1
+to 0.4.3**, a patch of state income tax and required-distribution corrections
+(below). Engine 0.4.2 was never published; 0.4.3 contains it. The engine move
+changes no tool, argument or result field, and plans stay plan-schema 7.
+`@retiregolden/planner-ui` stays 0.11.0: its `^0.4.0` admits 0.4.3, and the
+tree holds one engine. `highs` stays at 1.15.2, still the version in the engine
+repository's lockfile at the 0.4.3 commit (RetireGolden 084ee643 resolves
+`highs@1.15.2`), and engine 0.4.3 still declares `^1.15.2`.
+
+### Changed (wire-visible)
+
+- **`run_monte_carlo` defaults to the app's headline run** (the engine's
+  `headlineMonteCarloOptions`, decision D-MC-DEFAULT-SEED): 1,000 paths where
+  0.11.x ran 200, the engine's `DEFAULT_MONTE_CARLO_SEED` (6,221,293, 0x5eeded)
+  where it used 42, and the lognormal model the engine builds from the plan
+  (`buildLognormalModelConfigForPlan`: the plan's inflation mean, 12 percent
+  return volatility, and per-asset-class shocks when an account holds an asset
+  allocation) where it built a plain lognormal model. Priced with the tax stack
+  the app runs, with no stochastic longevity and no care shock, that is every
+  condition the engine names for a host to show the app's rate, so a defaulted
+  `successRate` is now the rate the app shows for the same plan document and
+  start year. On the parity suite's Kentucky couple (a 30-year plan from 2026)
+  the default success rate is 84.0 percent; 0.11.x's defaults gave 83.5. On
+  the MFJ test fixture both give 100 percent, and the median ending investable
+  balance moves from $2,828,144.72 to $2,567,617.46: different paths, not a
+  different model, since that plan holds no allocated account.
+- **Each argument replaces only its own default.** An explicit `seed` or
+  `pathCount` wins as before; an explicit `returnVolPct` rebuilds the plan's own
+  model at that volatility. On a plan with no allocated account the model is the
+  plain one 0.11.x built, so a run that names its seed and path count returns
+  exactly what 0.11.x returned. On a plan with an allocated account every run
+  now draws the per-class shocks the app's model draws, so even such a run
+  moves.
+- **A defaulted run costs about five times as much** (five times the paths):
+  about 11.6 seconds for the Kentucky couple on a development machine, where
+  0.11.x's default took 2.2. Path i is the same market at any `pathCount`, so a
+  smaller count is a quick look at the first paths of the headline run.
+- The tool description and the `pathCount`, `seed` and `returnVolPct` input
+  descriptions state the defaults and where they come from; the result still
+  echoes `pathCount`, `seed` and `returnVolPct`. The programmatic
+  `adapter.MC_DEFAULT_PATH_COUNT`, `adapter.MC_DEFAULT_SEED` and
+  `adapter.MC_DEFAULT_RETURN_VOL_PCT` are now the engine's constants: 1000,
+  6221293 and 12.
+- **`compare_scenarios` gains `headline`**, the engine's `comparePlanHeadlines`
+  over the two projections and summaries the tool reports, as the app's Compare
+  page reads it (owner decision R13): `headline.moneyBasis`, `headline.endYear`
+  (each plan's last projection year and the difference) and
+  `headline.endingAfterTaxEstate` (both estates and their delta, Plan B the
+  proposal minus Plan A the baseline). The basis is `nominal` when the plans end
+  in the same year and `today` (start-year dollars, each estate divided by its
+  own plan's published inflation factor at its own end year) when they do not.
+  A pair the engine refuses to compare returns `COMPARISON_FAILED` with the
+  engine's reason, as before; a parsed plan carries the birth date the headline
+  needs, so this is not expected in practice.
+- **`deltaEndingAfterTaxEstate` is renamed `deltaEndingAfterTaxEstateNominal`**,
+  with the same value as before: each estate in its own plan's last-year
+  dollars, subtracted as they are. Redefining the old name would have changed
+  what it meant for every caller that reads it, without a word; keeping it
+  would have left the obvious name on the basis the app does not show. Renamed,
+  a caller that reads the old name gets nothing instead of a different number,
+  and the new name says its basis. When the two plans end in the same year (the
+  common case: one household, another policy) the two deltas are one number.
+  When they do not, the nominal one counts inflation as a difference between
+  the plans: the Kentucky couple at 30 and 35 years from 2026 ends with
+  $3,265,770.78 in 2055 and $3,468,227.63 in 2060, a nominal delta of
+  +$202,456.85, while in today's dollars the estates are $1,595,855.64 and
+  $1,497,946.04, a delta of −$97,909.59.
+
+### Changed (engine 0.4.3)
+
+What engine 0.4.2 and 0.4.3 correct, for a plan that reaches it. No recorded
+figure here moves: every protocol-baseline fixture and golden is a full-year
+Kentucky plan with an untagged pension, no state move and no inherited IRA.
+
+- **Military retired pay and Survivor Benefit Plan annuities take each state's
+  own rule.** A pension whose `source` is `militaryRetirement` or
+  `militarySurvivor` now takes the state's own subtraction first, per
+  recipient, where engine 0.4.1 priced it under the state's general retirement
+  rules: in full in Wisconsin, Indiana, Minnesota, Louisiana, Maine, Michigan,
+  Oklahoma and Pennsylvania; capped or age-tested in Colorado, Maryland,
+  Georgia, New Mexico and Montana; and in Kansas with no plan code. A single
+  filer with a $100,000 military pension in 2026 paid $2,950.00 of Indiana tax
+  and now pays $0.00, and $3,691.60 of Colorado tax at 60, now $2,811.60.
+  Military retired pay is no longer an early distribution at any age (South
+  Carolina under 59½: $4,244.00 and incomplete, now $0.00 and complete), and
+  Missouri taxes a survivor annuity as a public pension ($0.00 at 60, now
+  $1,461.22). The typed `household` path writes an untagged pension, so only a
+  plan document reaches this. No baseline fixture or golden carries a military
+  pension.
+- **Utah's credits are priced in every projected year.** Through engine 0.4.1
+  every projected Utah year withheld the retirement, Social Security and
+  military credits and was marked incomplete, an ordinary plan's included: the
+  credit election asked for Utah's MAGI additions, which the projection never
+  supplied. Single filers, 2026: born 1956 with Social Security and $20,000 of
+  other income, $1,063.55 and incomplete, now $890.00; born 1950 with $25,920
+  of Social Security and a $20,000 pension, $1,067.11 and incomplete, now
+  $617.11; born 1960 with $60,000 of other income, $2,670.00 either way, now
+  complete. The Social Security credit now phases out on income after the
+  railroad retirement subtraction, as the 2025 TC-40 worksheet computes it. A
+  typed Utah `household` reaches this. No baseline fixture or golden is in
+  Utah.
+- **New Jersey's personal exemptions** (N.J.S.A. 54A:3-1), none of which was
+  modeled, now come off New Jersey gross income: $1,000 for the taxpayer and
+  for a spouse on a joint return, $1,000 more for each 65 or older, $1,000 for
+  each blind or disabled and $6,000 for each honorably discharged veteran.
+  $50,000 of income in 2026: single at 60, $1,270.00, now $1,214.75; joint,
+  both 60, $805.00, now $770.00. A typed New Jersey `household` takes the
+  personal and age exemptions; blindness comes from a plan's stored
+  eligibility, disability from a pension marked for a disabled recipient, and
+  the veteran exemption from a pension tagged Military retirement, which only a
+  plan document carries. No baseline fixture or golden is in New Jersey.
+- **The District of Columbia's standard deduction** now rests on its permanent
+  law (D.C. Law 26-189, in force October 2, 2026). No figure moves: $15,000
+  single and $30,000 joint for 2026.
+- **Pooled spousal-election RMDs.** In the year a surviving spouse's
+  treat-as-own election takes effect on two or more inherited IRAs from one
+  decedent, each IRA's owner RMD is now figured on its own prior December 31
+  balance (Treas. Reg. 1.408-8), where every IRA took it on the pool's one
+  shared reference balance, and a distribution taken before the election
+  counts once toward the pool. A $29,600 IRA pooled with a $100,000 one under a
+  $100,000 reference, owner 75: $4,065.04 required on the $29,600 IRA and
+  $8,130.08 for the owner, now $1,203.25 and $5,268.29. Only a plan document
+  with spousal election facts reaches this. No baseline fixture or golden
+  holds an inherited IRA.
+- **A year split between two states is priced by each state's own part-year
+  method** (phase 1 in engine 0.4.2, phase 2 in 0.4.3). Through 0.4.1 every
+  state but Virginia priced its part of the year as the months' share of a
+  full-year resident's tax. Now the resident-period states tax the income of
+  the months resident on their ordinary schedule, and the income-percentage
+  states take the tax on the whole year's income as if resident, times their
+  own income ratio; a dated distribution or QCD goes whole into the slice of
+  its month, Social Security by the months it is paid, and each slice sees the
+  year's household facts. A single filer of 50, resident six months in the
+  state and six in Texas, with $100,000 of ordinary income spread over the
+  year: New Jersey $2,090.03, now $1,242.38; Hawaii $2,941.60, now $2,395.20;
+  Wisconsin $1,798.39, now $2,232.31. Only a plan document with
+  `household.stateMoves` splits a year; the typed path writes none. No
+  baseline fixture or golden moves between states.
+- **Kentucky's part-year cap.** A Kentucky slice takes the pension income
+  received while resident up to the whole $31,110 exclusion, as its 2025
+  Schedule P does, where 0.4.1 prorated the cap by the months. A full-year
+  Kentucky resident's exclusion does not change, so no baseline fixture or
+  golden moves.
+
+The engine's CHANGELOG (RetireGolden `CHANGELOG.md`, the entries above
+"Prepared `@retiregolden/engine` 0.4.1") has the rest: each state's part-year
+method and the form it follows, the limits that remain, and the changes that
+move no MCP figure (the stated limits of state military pricing, the Railroad
+Tier I label, and the app's bundle headroom).
+
+### Verified
+
+- The protocol baseline was regenerated and read leaf by leaf. The inventory
+  moves (the `run_monte_carlo` and `compare_scenarios` descriptions, new
+  `pathCount` and `seed` input descriptions, the `returnVolPct` description,
+  and so the inventory digest), and so does the `compare_scenarios` step:
+  `deltaEndingAfterTaxEstate: 0` becomes `deltaEndingAfterTaxEstateNominal: 0`
+  and `headline` is added (basis `nominal`, both plans ending in 2035, both
+  estates $983,477.50, delta 0), with that step's payload and envelope digests.
+  No figure moves. The seeded Monte Carlo step names its seed (7) and path
+  count (300) and its plan holds no allocated account, so its model
+  configuration is the one 0.11.x built and its payload is byte-identical.
+  The engine move adds only `meta.enginePackage` and the six `engineVersion`
+  stamps, 0.4.1 → 0.4.3 (`get_session` three times, `export_plan` twice,
+  `explain_modeled_result`), with the `build_plan` round trip's argument
+  digest, which carries the stamp (recomputed from the recorded export, it
+  matches). No other leaf moves, so every recorded figure is byte-identical
+  across the move.
+- The goldens pass unregenerated for the same reason: every Monte Carlo golden
+  is a 300-path, seed-7 run on a plan with no allocated account. Across the
+  engine move, `pnpm run goldens:print` prints every committed literal
+  unchanged.
+- The figures above, computed on engine 0.4.1, were recomputed on 0.4.3 and
+  hold: the Kentucky couple's 84.0 and 83.5 percent, the MFJ fixture's
+  $2,567,617.46 and $2,828,144.72, and the 30- and 35-year comparison's
+  estates and deltas.
+- The lockfile moves only the engine entry, resolved from npm (integrity
+  `sha512-ITX3pZK7…`), and `pnpm why` finds one engine, 0.4.3, and one
+  `highs`, 1.15.2.
+- New tests: the browser-parity suite runs the app's headline construction
+  (`headlineMonteCarloOptions`, `createMarketModel`, the app's tax stack) beside
+  `run_monte_carlo` on a single-return plan and on one with an allocated
+  account, and the Compare page's `comparePlanHeadlines` beside
+  `compare_scenarios` for plans ending in the same year and five years apart;
+  wiring tests hold that the defaults reach the engine as the headline options
+  (1,000 paths, checked where they are handed over, without a 1,000-path run),
+  that each argument replaces only its own default, and that `headline` is the
+  engine's. Reverting the default seed, the model, the path count, the
+  headline delta or its basis each fails the suite.
+- `pnpm test`, `pnpm run build` and `pnpm run test:packed` pass (the packed
+  artifact installs one engine at 0.4.3 and one `highs` at 1.15.2 through
+  npm), and `pnpm run contract:generate` rewrote `schemas/tools.v1.json` with
+  the three `run_monte_carlo` input descriptions.
+
 ## 0.11.1
 
 **Moves the exact `@retiregolden/engine` dependency from 0.4.0 to 0.4.1, a patch
@@ -462,17 +667,6 @@ rollover; every fixture starts in 2026) and #771 (railroad annuities and
   move no golden: every fixture's claims fall in 2029 or 2030.
 - `pnpm test`, `pnpm run build` and `pnpm run test:packed` pass; the packed
   artifact installs one engine at 0.4.0 and one `highs` at 1.15.2 through npm.
-
-### Known differences
-
-- `run_monte_carlo`'s defaults (seed 42, 200 paths, plain lognormal) are not
-  yet the app's headline Monte Carlo options (`DEFAULT_MONTE_CARLO_SEED`,
-  `headlineMonteCarloOptions`), so its default success rate for a plan can
-  differ from the rate the app shows.
-- `compare_scenarios`' `deltaEndingAfterTaxEstate` still subtracts nominal
-  estates, so two plans that end in different years are compared in two
-  different years' dollars; the app's Compare page reads
-  `comparePlanHeadlines`, which this tool does not yet.
 
 ### Why this release exists
 

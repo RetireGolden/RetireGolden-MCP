@@ -277,8 +277,13 @@ describe('compareScenarios', () => {
     const cmp = adapter.compareScenarios(session, planJson, planJson)
     expect(cmp.ok).toBe(true)
     if (cmp.ok) {
-      expect(cmp.deltaEndingAfterTaxEstate).toBe(0)
+      expect(cmp.deltaEndingAfterTaxEstateNominal).toBe(0)
       expect(cmp.a.endingAfterTaxEstate).toBe(cmp.b.endingAfterTaxEstate)
+      expect(cmp.headline).toEqual({
+        moneyBasis: 'nominal',
+        endYear: { baseline: cmp.headline.endYear.baseline, proposal: cmp.headline.endYear.baseline, delta: 0 },
+        endingAfterTaxEstate: { baseline: cmp.a.endingAfterTaxEstate, proposal: cmp.b.endingAfterTaxEstate, delta: 0 },
+      })
     }
   })
 
