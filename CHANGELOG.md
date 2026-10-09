@@ -66,8 +66,10 @@ repository's lockfile at the 0.4.3 commit (RetireGolden 084ee643 resolves
   in the same year and `today` (start-year dollars, each estate divided by its
   own plan's published inflation factor at its own end year) when they do not.
   A pair the engine refuses to compare returns `COMPARISON_FAILED` with the
-  engine's reason, as before; a parsed plan carries the birth date the headline
-  needs, so this is not expected in practice.
+  engine's reason. The headline adds one refusal 0.11.x did not have: a side
+  with no birth date (`PlanHeadlineRefusal`), and such a pair now loses the
+  nominal delta and the summaries too, since both come from one call. A parsed
+  plan always carries the birth date, so this is not expected in practice.
 - **`deltaEndingAfterTaxEstate` is renamed `deltaEndingAfterTaxEstateNominal`**,
   with the same value as before: each estate in its own plan's last-year
   dollars, subtracted as they are. Redefining the old name would have changed
@@ -667,6 +669,18 @@ rollover; every fixture starts in 2026) and #771 (railroad annuities and
   move no golden: every fixture's claims fall in 2029 or 2030.
 - `pnpm test`, `pnpm run build` and `pnpm run test:packed` pass; the packed
   artifact installs one engine at 0.4.0 and one `highs` at 1.15.2 through npm.
+### Known differences
+
+Both are resolved in 0.12.0.
+
+- `run_monte_carlo`'s defaults (seed 42, 200 paths, plain lognormal) are not
+  yet the app's headline Monte Carlo options (`DEFAULT_MONTE_CARLO_SEED`,
+  `headlineMonteCarloOptions`), so its default success rate for a plan can
+  differ from the rate the app shows.
+- `compare_scenarios`' `deltaEndingAfterTaxEstate` still subtracts nominal
+  estates, so two plans that end in different years are compared in two
+  different years' dollars; the app's Compare page reads
+  `comparePlanHeadlines`, which this tool does not yet.
 
 ### Why this release exists
 

@@ -229,7 +229,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     // drift from the behaviour; changing a constant moves this description and
     // the protocol baseline (tests/protocol-baseline/baseline.json) with it.
     // @see adapter.MC_DEFAULT_PATH_COUNT
-    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). With no arguments it runs the RetireGolden app's headline Monte Carlo configuration (the engine's headlineMonteCarloOptions): pathCount ${adapter.MC_DEFAULT_PATH_COUNT}, seed ${adapter.MC_DEFAULT_SEED} (the engine's DEFAULT_MONTE_CARLO_SEED), and the lognormal market model the engine builds from the plan at returnVolPct ${adapter.MC_DEFAULT_RETURN_VOL_PCT} (with per-asset-class shocks when an account holds an asset allocation), priced with the app's tax stack, so successRate is the rate the app shows for the same plan document and startYear. Each argument given replaces only its own default; all three values used are echoed back in the result. ${RUN_ECHO}`,
+    description: `${EDUCATIONAL} Run a Monte Carlo summary on the session plan. Always starts at the session plan's startYear (rebuild via build_plan to change it). With no arguments it runs the RetireGolden app's headline Monte Carlo configuration (the engine's headlineMonteCarloOptions): pathCount ${adapter.MC_DEFAULT_PATH_COUNT}, seed ${adapter.MC_DEFAULT_SEED} (the engine's DEFAULT_MONTE_CARLO_SEED), and the lognormal market model the engine builds from the plan at returnVolPct ${adapter.MC_DEFAULT_RETURN_VOL_PCT} (with per-asset-class shocks when an account holds an asset allocation), priced with the app's tax stack, so successRate is the rate the app shows for the same plan document and startYear. Each argument given replaces only its own default; all three values used are echoed back in the result. A defaulted run is the expensive one: ${adapter.MC_DEFAULT_PATH_COUNT} paths cost about five times what 0.11.x's 200-path default did (about 12 seconds for a 30-year plan on a development machine, longer for a longer horizon or a slower host); pass a smaller pathCount for a quicker look at the headline run's first paths, and say so when you report its rate. ${RUN_ECHO}`,
     inputShape: {
       pathCount: z
         .number()
@@ -253,7 +253,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         .max(100)
         .optional()
         .describe(
-          `Annual return volatility for the lognormal market model, in PERCENT (12 = 12%). Default ${adapter.MC_DEFAULT_RETURN_VOL_PCT}, the headline model's. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation.`,
+          `Annual return volatility of the lognormal model's market factor, in PERCENT (12 = 12%), which every account without an asset allocation draws. An account that holds an asset allocation draws each asset class's own volatility (the plan's assetClassParams) instead, at any returnVolPct. Default ${adapter.MC_DEFAULT_RETURN_VOL_PCT}, the headline model's. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation only on a plan with no allocated account.`,
         ),
     },
     handler: (session, args) =>

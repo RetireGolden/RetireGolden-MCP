@@ -401,9 +401,12 @@ export function runMonteCarlo(
     startYear: session.startYear,
     pathCount,
     seed,
-    // Echoed like pathCount and seed: the volatility is a real input to the
-    // distribution below, and a response that reported percentiles without
-    // saying which volatility produced them is not reproducible.
+    // Echoed like pathCount and seed: the market factor's volatility is a real
+    // input to the distribution below (every unallocated account draws it; an
+    // account with an asset allocation draws each class's own volatility from
+    // the plan's assetClassParams instead), and a response that reported
+    // percentiles without saying which volatility produced them is not
+    // reproducible. A defaulted run echoes the headline model's 12.
     returnVolPct,
     successRate: agg.successRate,
     requiredFloorSuccessRate: agg.requiredFloorSuccessRate,

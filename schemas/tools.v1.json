@@ -456,7 +456,7 @@
           "maximum": 9007199254740991
         },
         "returnVolPct": {
-          "description": "Annual return volatility for the lognormal market model, in PERCENT (12 = 12%). Default 12, the headline model's. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation.",
+          "description": "Annual return volatility of the lognormal model's market factor, in PERCENT (12 = 12%), which every account without an asset allocation draws. An account that holds an asset allocation draws each asset class's own volatility (the plan's assetClassParams) instead, at any returnVolPct. Default 12, the headline model's. Raising it widens the ending-balance percentile spread and usually lowers the success rate; 0 makes every path deterministic apart from inflation only on a plan with no allocated account.",
           "type": "number",
           "minimum": 0,
           "maximum": 100

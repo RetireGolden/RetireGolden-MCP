@@ -98,10 +98,36 @@ describe('run_monte_carlo defaults to the headline options', () => {
 
   it("rebuilds the plan's model at a given volatility, keeping the other defaults", () => {
     const session = mfjSession()
-    const mc = adapter.runMonteCarlo(session, { pathCount: 3, returnVolPct: 20 })
+    shortenNextRun()
+    const mc = adapter.runMonteCarlo(session, { returnVolPct: 20 })
     expect(mc.ok && mc.returnVolPct).toBe(20)
+    expect(mc.ok && mc.pathCount).toBe(HEADLINE_MONTE_CARLO_PATH_COUNT)
     expect(modelMock.mock.calls[0]![0]).toStrictEqual(models.buildLognormalModelConfigForPlan(session.plan!, 20))
-    expect(pathsMock.mock.calls[0]![1].seed).toBe(DEFAULT_MONTE_CARLO_SEED)
+    const [, options] = pathsMock.mock.calls[0]!
+    expect(options.pathCount).toBe(HEADLINE_MONTE_CARLO_PATH_COUNT)
+    expect(options.seed).toBe(DEFAULT_MONTE_CARLO_SEED)
+  })
+
+  it('keeps each asset class its own volatility on an allocated account, at returnVolPct 0', () => {
+    const session = mfjSession()
+    const plan = session.plan!
+    const index = plan.accounts.findIndex((account) => account.type === 'traditional' || account.type === 'taxable')
+    expect(index).toBeGreaterThanOrEqual(0)
+    session.plan = {
+      ...plan,
+      accounts: plan.accounts.map((account, i) => (i === index
+        ? { ...account, allocation: { mode: 'static', rebalancing: 'annual', weights: { usStocks: 60, intlStocks: 10, bonds: 30, cash: 0 } } }
+        : account)) as typeof plan.accounts,
+    }
+    const mc = adapter.runMonteCarlo(session, { pathCount: 2, returnVolPct: 0 })
+    expect(mc.ok && mc.returnVolPct).toBe(0)
+    // returnVolPct sets only the market factor; the allocated account draws
+    // each class's own volatility, so a 0 here does not make the paths
+    // deterministic (the tool's description says so).
+    const config = modelMock.mock.calls[0]![0] as { returnVolPct: number; classShocks?: { volatilityPctByClass: Record<string, number> } }
+    expect(config.returnVolPct).toBe(0)
+    expect(config.classShocks).toBeDefined()
+    expect(Object.values(config.classShocks!.volatilityPctByClass).some((pct) => pct > 0)).toBe(true)
   })
 
   it('states the defaults it applies', () => {
