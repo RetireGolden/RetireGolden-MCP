@@ -289,7 +289,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
   },
   {
     name: 'run_optimizer',
-    description: `${EDUCATIONAL} Run the engine optimizer / conversion schedule search on the session plan. ${RUN_ECHO}`,
+    description: `${EDUCATIONAL} Run the engine optimizer / conversion schedule search on the session plan. The schedule's dollar figures are the solver's own, not the plan's projection; when the solver finds no solution, schedule.endingAfterTax and schedule.lifetimeTax are null with an empty schedule (schedule.schedule and schedule.conversions), and schedule.projectionDepletionYear then gives the year the plan's projection runs short (null if it does not). schedule.status is optimal, node-limit (the solver stopped at its search limit; the figures describe the best schedule it had), timeout (its 60-second guard), infeasible or feasible. ${RUN_ECHO}`,
     inputShape: {},
     handler: (session) => adapter.runOptimizer(session),
     httpExposed: true,

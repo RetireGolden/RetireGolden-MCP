@@ -387,7 +387,9 @@ describe('packed npm artifact', () => {
         )
       }
     }
-  }, 300_000)
+    // The install, the harness lanes, and up to two captures that can each
+    // reach the optimizer's 60-second guard under contention.
+  }, 360_000)
 
   afterAll(async () => {
     // The tarball and its npm consumer are test-only artifacts; cleanup must
@@ -448,11 +450,13 @@ describe('packed npm artifact', () => {
     expect(enginePackages).toHaveLength(1)
     expect(enginePackages[0]?.version).toBe(enginePin)
 
-    // The engine's optimizer solves with HiGHS, and the engine declares it as a
-    // caret range. Left to npm, a consumer gets the newest match, which is not
-    // the version the engine's lockfile or this package's protocol baseline is
-    // tested with (highs 1.15.3 moved run_optimizer's output). This package pins
-    // it, so npm hoists exactly the pinned solver and the engine uses that one.
+    // The engine's optimizer solves with HiGHS. Through engine 0.4.x the engine
+    // declared it as a caret range, which npm resolves to the newest match, not
+    // the version this package's protocol baseline is tested with (highs 1.15.3
+    // moved run_optimizer's output). Since 0.5.0 the engine declares it exactly
+    // too, and this package pins the same version, so npm installs exactly one
+    // solver and the engine uses it. Pins that disagree nest a second copy,
+    // which fails here.
     const solverPin = packageManifest.dependencies.highs
     if (!solverPin) throw new Error('package.json did not pin highs')
     const solverPackages = installedPackages.filter((installed) => installed.name === 'highs')

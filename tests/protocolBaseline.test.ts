@@ -121,7 +121,9 @@ describe('protocol baseline', () => {
         )
       }
     }
-  }, 120_000)
+    // Two captures, each of which can reach the optimizer's 60-second guard
+    // under contention, plus the build and the other steps.
+  }, 180_000)
 
   it('matches the committed v1 protocol contract', () => {
     // During the planned SDK v2 swap, meta fields (e.g. sdkPackage) change

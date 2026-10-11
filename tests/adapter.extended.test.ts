@@ -255,6 +255,41 @@ describe('runOptimizer', () => {
   })
 })
 
+describe('runOptimizer with no solution', () => {
+  it('stays ok, publishes null figures and no rows, and names the projection\'s depletion year', async () => {
+    // The single Kentucky fixture spending $90,000 a year on $130,000 of
+    // savings: no schedule funds every year, in the solver's terms or the
+    // projection's.
+    const session = createSession(2026)
+    const built = adapter.setPlanFromBuild(session, {
+      household: {
+        ...singleHousehold,
+        persons: [{ ...singleHousehold.persons[0]!, trad: 100_000, roth: 0 }],
+        taxable: 30_000,
+        taxable_basis: 30_000,
+        spending: 90_000,
+      },
+      policy: singlePolicy,
+      startYear: 2026,
+    })
+    expect(built.ok).toBe(true)
+    const proj = adapter.runProjection(session)
+    expect(proj.ok).toBe(true)
+    if (!proj.ok) return
+    expect(proj.summary.depletionYear).not.toBeNull()
+    const opt = await adapter.runOptimizer(session)
+    expect(opt.ok).toBe(true)
+    if (!opt.ok) return
+    expect(opt.schedule.status).toBe('infeasible')
+    expect(opt.schedule.endingAfterTax).toBeNull()
+    expect(opt.schedule.lifetimeTax).toBeNull()
+    expect(opt.schedule.schedule).toEqual([])
+    expect(opt.schedule.conversions).toEqual([])
+    expect(opt.schedule.conversionTotal).toBe(0)
+    expect(opt.schedule.projectionDepletionYear).toBe(proj.summary.depletionYear)
+  })
+})
+
 describe('solveMaxSpending', () => {
   it('bisects a positive maximum sustainable base annual spend', () => {
     const session = mfjSession()
