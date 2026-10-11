@@ -15,8 +15,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0
       '@retiregolden/engine':
-        specifier: 0.4.3
-        version: 0.4.3
+        specifier: 0.5.0
+        version: 0.5.0
       highs:
         specifier: 1.15.2
         version: 1.15.2
@@ -31,8 +31,8 @@ importers:
         specifier: 1.30.0
         version: 1.30.0(zod@4.4.3)
       '@retiregolden/planner-ui':
-        specifier: 0.11.0
-        version: 0.11.0(@types/react@19.3.0)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react-router@8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(redux@5.0.1)
+        specifier: 0.12.0
+        version: 0.12.0(@types/react@19.3.0)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react-router@8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(redux@5.0.1)
       '@types/node':
         specifier: ^26.1.1
         version: 26.2.0
@@ -109,12 +109,12 @@ packages:
       react-redux:
         optional: true
 
-  '@retiregolden/engine@0.4.3':
-    resolution: {integrity: sha512-ITX3pZK7BoPOQfdwQspJEscILxWjXuE3YqIC2/W3lB5FDQ3gypN9KCDsw8uPzrt1dqzjekA7Q1wsjlxuBmqgRg==}
+  '@retiregolden/engine@0.5.0':
+    resolution: {integrity: sha512-ypPfJt6T/IrOjq+2jBTa4xLdE4990faXb1IubiqR6HvW1ASMvam2Fluvmfkd9Cw5Lch2joy8BVrCIe4V/a20Mw==}
     engines: {node: '>=24'}
 
-  '@retiregolden/planner-ui@0.11.0':
-    resolution: {integrity: sha512-4jEPlUSiaIfVN5xsEWgpsW1933sftTZj0vg8T0bmH3J2jAXitbG3ue3ypWHd/dk0YK31pJW1PCX+4+9+hKyn5w==}
+  '@retiregolden/planner-ui@0.12.0':
+    resolution: {integrity: sha512-S+kygapv/MZoLZV6yxG9CCsFrbAE1aiCd931f+iG3dl52S0+si5w8DaNUrArQOhgAspSnDSTRU4AVnpQ5GHWQQ==}
     engines: {node: '>=24'}
     peerDependencies:
       pdfjs-dist: ^6.2.108
@@ -1284,14 +1284,14 @@ snapshots:
       react: 19.2.8
       react-redux: 9.3.0(@types/react@19.3.0)(react@19.2.8)(redux@5.0.1)
 
-  '@retiregolden/engine@0.4.3':
+  '@retiregolden/engine@0.5.0':
     dependencies:
       highs: 1.15.2
       zod: 4.6.5
 
-  '@retiregolden/planner-ui@0.11.0(@types/react@19.3.0)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react-router@8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(redux@5.0.1)':
+  '@retiregolden/planner-ui@0.12.0(@types/react@19.3.0)(react-dom@19.2.8(react@19.2.8))(react-is@19.2.8)(react-router@8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(redux@5.0.1)':
     dependencies:
-      '@retiregolden/engine': 0.4.3
+      '@retiregolden/engine': 0.5.0
       highs: 1.15.2
       idb: 8.0.3
       react: 19.2.8

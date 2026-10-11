@@ -30,18 +30,16 @@ is what creates the `pnpm` executable
 (see [Corepack](https://github.com/nodejs/corepack#how-to-install)).
 
 **The engine and its solver move together.** `@retiregolden/engine` is pinned
-exactly, and so is `highs`, the solver the engine's optimizer uses: the engine
-only declares a range for it, so without the pin an npm install picks the newest
-match rather than the version the engine and this package's protocol baseline
-are tested with. When you bump the engine, set `highs` to the version in the
-engine repository's lockfile in the same change; `pnpm run test:packed` checks
-that exactly one solver at the pinned version is installed, the protocol
-baseline records it (`meta.solverPackage`), and Dependabot is told to leave it
-alone. The pin binds npm and `npx` installs, where npm hoists one solver that
-satisfies both. It does not bind a consumer that installs this package with
-pnpm or Yarn Berry, which resolve the engine's own range separately; that needs
-the engine to pin its solver exactly, which is the engine repository's change to
-make.
+exactly, and so is `highs`, the solver the engine's optimizer uses, at the
+version the engine declares. Since engine 0.5.0 the engine declares it exactly
+too; through 0.4.x it declared a range, which npm resolved to the newest match
+rather than the version this package's protocol baseline is tested with. When
+you bump the engine, set `highs` to the version the engine's `package.json`
+declares in the same change; `pnpm run test:packed` checks that exactly one
+solver at the pinned version is installed (pins that disagree install a second
+copy), the protocol baseline records it (`meta.solverPackage`), and Dependabot
+is told to leave it alone. With both pins exact and equal, npm, `npx`, pnpm and
+Yarn Berry installs all get that one solver.
 
 ## Licensing of contributions
 

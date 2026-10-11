@@ -3,6 +3,122 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.13.0
+
+**`run_optimizer` returns engine 0.5.0's conversion optimizer: a solve with no
+solution publishes no figures and names the year the plan's projection runs
+short, the solver is read at full precision and stops at a node limit instead
+of a clock, and `endingAfterTax` is stated on the projection's today's-dollar
+basis.** A minor, because `run_optimizer`'s output changes meaning: two figures
+can now be null, a status is added, and every `endingAfterTax` moves. The tool
+returns the engine's schedule whole and its tool schema does not type it, so
+each change reaches callers as the engine publishes it (engine decision
+D-OPTIMIZER-SOLVER-OUTPUT, RetireGolden#793).
+
+**The release moves the exact `@retiregolden/engine` dependency from 0.4.3 to
+0.5.0, and the `@retiregolden/planner-ui` dev dependency from 0.11.0 to
+0.12.0**, whose engine range is `^0.5.0`, so the tree holds one engine. `highs`
+stays at 1.15.2, which engine 0.5.0 now declares exactly too (0.4.3 declared
+`^1.15.2`). Plans stay plan-schema 7, and no other tool, argument or result
+field changes.
+
+### Changed (wire-visible): `run_optimizer`
+
+- **No solution, no figures.** When the solver finds no feasible solution (an
+  infeasible model, or a limit reached before any incumbent),
+  `schedule.endingAfterTax` and `schedule.lifetimeTax` are null,
+  `schedule.schedule` and `schedule.conversions` are empty and
+  `schedule.conversionTotal` is 0, and the new `schedule.projectionDepletionYear`
+  gives the depletion year of the plan's own projection (null when it does not
+  deplete). 0.12.0 returned the solver's objective as `endingAfterTax`
+  (infinite, so JSON null, when the model has IRMAA binaries, and 0 when it has
+  none), a `lifetimeTax` of 0 and a row of zeros per year. A 10-year single
+  Kentucky plan spending $90,000 a year on $130,000 of savings is infeasible
+  either way: 0.12.0 returned `lifetimeTax: 0` and ten zero rows, 0.13.0
+  returns nulls, no rows and `projectionDepletionYear: 2027`, the
+  `depletionYear` `run_projection` reports. The result is still `ok: true` with
+  the status and the exact-ledger `tournament`. A caller that reads either
+  figure must handle null.
+- **Full precision.** Per-year amounts and conversions are read from HiGHS's
+  raw solution and rounded to cents, where the highs package's
+  six-significant-digit parse published a $107,028.88 conversion as $107,029.
+  Figures move by up to half a unit in the sixth significant digit: up to
+  $0.50 on a six-figure balance. If the raw solution is missing or does not
+  parse, the engine throws, and `run_optimizer` returns that as any solver
+  failure: `ok: false` with `OPTIMIZER_FAILED`.
+- **A node limit, status `node-limit`.** The solve stops at 5,000
+  branch-and-bound nodes with status `'node-limit'` and the incumbent it held,
+  so a plan stops at the same schedule on any machine. The time limit rises
+  from 10 to 60 seconds and is now a guard against a hang: `'timeout'` appears
+  only on a machine too slow to reach the node limit in 60 seconds. A plan that
+  stopped at 10 seconds can take longer to return (the engine reports its
+  rmd-irmaa example stopping at the node limit in about 8 seconds).
+- **`endingAfterTax` on the projection's basis.** The objective is deflated by
+  the plan's general-inflation factor for its last year (n − 1 years), the
+  basis of the projection's today's dollars, where 0.12.0 deflated over n
+  years. Every `endingAfterTax` with a solution moves by one year of the plan's
+  inflation (a factor of 1.025 at 2.5 percent), plus cents. It is still the
+  solver's own figure, not the projection of the schedule.
+- **Property-sale proceeds and a death benefit are the year's cash** in the
+  solver's model: a planned sale's net proceeds and a permanent-life death
+  benefit. A plan with neither solves the same model. The engine's
+  example-couple, with a $350,000 death benefit, moves from $1,102,321.89 to
+  $1,353,421.34 (`endingAfterTax`) and from $494,228.41 to $475,933.01
+  (`lifetimeTax`).
+- The tool description says that the schedule's dollar figures are the
+  solver's own, not the plan's projection, and what a solve with no solution
+  returns. Programmatic callers of `adapter.runOptimizer` see the engine's
+  types: `endingAfterTax` and `lifetimeTax` are `number | null`, and `status`
+  includes `'node-limit'`.
+
+The engine's CHANGELOG (RetireGolden `CHANGELOG.md`, the entries above
+"Prepared `@retiregolden/engine` 0.4.3") has the rest: the restated optimizer
+calculation records, the output census that now covers the whole schedule this
+tool returns, and text fixes that move no figure.
+
+### Verified
+
+- The protocol baseline was regenerated and read leaf by leaf; 79 leaves move,
+  each for one of these reasons:
+  - **`run_optimizer_default`** (the 10-year single Kentucky fixture, 2.5
+    percent inflation; status `optimal` before and after). `endingAfterTax`
+    moves from $775,795.86 to $795,190.74, a factor of 1.02499998: the basis
+    change. Recomputed from the published 2035 balances with the engine's
+    eight-decimal weights, the same solution gives $775,795.86 deflated over
+    10 years and $795,190.74 over 9, so only the basis moved; the $0.02 short
+    of exactly 1.025 times is the conversion tie-break ($0.000001 per converted
+    dollar, $0.27 here), which is not deflated, and the weights' rounding. Full
+    precision moves 45 of the 110 per-year amounts and 8 of the 10 conversions
+    by cents, each old figure the six-significant-digit reading of the new one
+    (the largest, 2026's ending traditional balance, $760,404 to $760,403.50),
+    and `conversionTotal` from $272,086.10 to $272,086.26. `lifetimeTax` stays
+    $27,757.51: it is recomputed from each year's taxable ordinary income,
+    which moves by a cent in two years. No `projectionDepletionYear` appears
+    (the solve has a solution), and the tournament and warnings do not move.
+    With the step's payload and envelope digests, 57 leaves.
+  - **The inventory**: the `run_optimizer` description and the inventory
+    digest.
+  - **The engine stamp**: `meta.enginePackage` and the six `engineVersion`
+    stamps, 0.4.3 → 0.5.0 (`get_session` three times, `export_plan` twice,
+    `explain_modeled_result`), with their digests and the `build_plan` round
+    trip's argument digest, which carries one (recomputed from the recorded
+    export, it matches).
+- No other tool moves. The projection, Monte Carlo, `batch_evaluate`,
+  `solve_max_spending` and `compare_scenarios` steps are byte-identical; none
+  reads the optimizer. The baseline has no solve without a solution and none
+  stopped at a limit, so neither the null figures nor `node-limit` appears in
+  it; the infeasible plan above was run on 0.12.0's engine and on 0.13.0's.
+- The goldens pass unregenerated: they run the projection, Monte Carlo and
+  batch evaluation, never the optimizer, and `pnpm run goldens:print` prints
+  every committed literal unchanged.
+- The lockfile moves only the engine and planner-ui entries, resolved from npm
+  (integrity `sha512-ypPfJt6T…` and `sha512-S+kygapv…`), and `pnpm why` finds
+  one engine, 0.5.0, and one `highs`, 1.15.2.
+- `pnpm test`, `pnpm run build` and `pnpm run test:packed` pass (the packed
+  artifact installs one engine at 0.5.0 and one `highs` at 1.15.2 through
+  npm). `pnpm run contract:generate` leaves `schemas/tools.v1.json` unchanged:
+  it publishes input schemas, and `run_optimizer` takes no input.
+
 ## 0.12.0
 
 **`run_monte_carlo` with no arguments now runs the RetireGolden app's headline

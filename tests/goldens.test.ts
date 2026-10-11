@@ -83,6 +83,11 @@
  * of those reaches them, and `pnpm run goldens:print` prints every literal
  * below unchanged.
  *
+ * Verified UNCHANGED under engine 0.5.0, whose change is the conversion
+ * optimizer's solver output (D-OPTIMIZER-SOLVER-OUTPUT): these goldens run the
+ * projection, Monte Carlo and batch evaluation, never the optimizer, and
+ * `pnpm run goldens:print` prints every literal below unchanged.
+ *
  * Generation recipe — `pnpm run goldens:print` (scripts/gen-goldens.mjs) prints
  * these literals from a fresh build; it never edits this file:
  *   session = createSession()
