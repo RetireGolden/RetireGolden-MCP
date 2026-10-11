@@ -5,8 +5,8 @@ updates:
     schedule:
       interval: weekly
     ignore:
-      # The optimizer's solver is pinned to the version in the engine
-      # repository's lockfile and moves only with an engine bump
+      # The optimizer's solver is pinned to the version the engine's
+      # package.json declares (exact since engine 0.5.0) and moves only with an engine bump
       # (CONTRIBUTING.md), never on its own: a solver bump changes
       # run_optimizer's output and the protocol baseline.
       - dependency-name: highs

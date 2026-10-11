@@ -9,8 +9,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 solution publishes no figures and names the year the plan's projection runs
 short, the solver is read at full precision and stops at a node limit instead
 of a clock, and `endingAfterTax` is stated on the projection's today's-dollar
-basis.** A minor, because `run_optimizer`'s output changes meaning: two figures
-can now be null, a status is added, and every `endingAfterTax` moves. The tool
+basis.** A minor, because `run_optimizer`'s output changes meaning: `lifetimeTax`
+can now be null (`endingAfterTax` already could), a status value is added, and
+every `endingAfterTax` moves. The tool
 returns the engine's schedule whole and its tool schema does not type it, so
 each change reaches callers as the engine publishes it (engine decision
 D-OPTIMIZER-SOLVER-OUTPUT, RetireGolden#793).
@@ -69,7 +70,13 @@ field changes.
   solver's own, not the plan's projection, and what a solve with no solution
   returns. Programmatic callers of `adapter.runOptimizer` see the engine's
   types: `endingAfterTax` and `lifetimeTax` are `number | null`, and `status`
-  includes `'node-limit'`.
+  includes `'node-limit'`. The description also names each status: `node-limit`
+  is the solver's search limit, its figures describing the best schedule it had,
+  and `timeout` is its 60-second guard.
+- The skill (`skills/retiregolden/SKILL.md`) says that a `run_optimizer` with no
+  solution is still `ok: true`, with null figures, no rows and
+  `projectionDepletionYear`, so an assistant says the plan runs short rather
+  than quoting $0.
 
 The engine's CHANGELOG (RetireGolden `CHANGELOG.md`, the entries above
 "Prepared `@retiregolden/engine` 0.4.3") has the rest: the restated optimizer
@@ -107,7 +114,15 @@ tool returns, and text fixes that move no figure.
   `solve_max_spending` and `compare_scenarios` steps are byte-identical; none
   reads the optimizer. The baseline has no solve without a solution and none
   stopped at a limit, so neither the null figures nor `node-limit` appears in
-  it; the infeasible plan above was run on 0.12.0's engine and on 0.13.0's.
+  it. A new test (`tests/adapter.extended.test.ts`, "runOptimizer with no
+  solution") pins the no-solution shape on the single Kentucky fixture spending
+  $90,000 a year on $130,000 of savings: `ok: true`, status `infeasible`, null
+  figures, no rows or conversions, a total of 0, and `projectionDepletionYear`
+  equal to `run_projection`'s `depletionYear`. `node-limit` is the engine's own
+  tested status; no fixture here reaches 5,000 nodes.
+- The baseline replays' time budgets cover two captures that can each reach
+  the optimizer's 60-second guard under contention: 180 seconds for the
+  protocol replay (was 120) and 360 for the packed one (was 300).
 - The goldens pass unregenerated: they run the projection, Monte Carlo and
   batch evaluation, never the optimizer, and `pnpm run goldens:print` prints
   every committed literal unchanged.

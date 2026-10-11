@@ -387,7 +387,9 @@ describe('packed npm artifact', () => {
         )
       }
     }
-  }, 300_000)
+    // The install, the harness lanes, and up to two captures that can each
+    // reach the optimizer's 60-second guard under contention.
+  }, 360_000)
 
   afterAll(async () => {
     // The tarball and its npm consumer are test-only artifacts; cleanup must
