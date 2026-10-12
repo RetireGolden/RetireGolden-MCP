@@ -11,9 +11,9 @@
 #
 #   review / openrouter-first-pass-gate
 #
-# The central pin defines permitted profiles: standard uses required GPT-6 Sol
-# (Azure route) plus optional GLM 5.3 Flash; deep adds required Astra Flex. GPT 5.6 Luna
-# is the merge judge. Initial and verification effort follow the selected profile.
+# The central pin defines permitted profiles: standard uses required
+# GPT-6 Sol (Azure route) plus optional GLM 5.3 Flash; deep adds required
+# Astra Flex. GPT 5.6 Luna is the merge judge. Initial and verification effort follow the selected profile.
 
 name: OpenRouter code review
 run-name: "${{ format('OpenRouter PR #{0}: {1}', github.event.pull_request.number || inputs.pr_number, inputs.review_level || 'auto') }}"
