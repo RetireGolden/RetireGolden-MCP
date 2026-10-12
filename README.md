@@ -127,7 +127,7 @@ document and exercise this upstream behavior.
 
 ## Review profiles and CI proof
 
-The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/a190c3d834f2e3048b4eef8129fa3c8e10891aa0/README.md). Code uses required Grok plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
+The caller enables trusted profiles from the [organization workflow](https://github.com/RetireGolden/.github/blob/7cb4c04abfb03f81cd70c2e16a5d48e389e944dd/README.md). Code uses required GPT-6 Sol (Azure route) plus optional GLM; deep adds required Astra Flex. This preserves the standing baseline; `REVIEW.md` cannot name arbitrary models or remove required lanes.
 
 From Actions → **OpenRouter code review**, dispatch from `main` with a PR number and `review_level: auto`, `deep`, or `cancel`. Deep requests require repository write/maintain/admin permission, retain existing findings, and stay pending across retries and pushes until their own required review succeeds. Cancel removes a manual pending request; it cannot lower a policy requirement. Leave `reset_review` false.
 
