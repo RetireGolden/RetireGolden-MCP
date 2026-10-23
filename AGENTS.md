@@ -32,8 +32,9 @@ Do not add private planning, strategy, or competitor material here.
 
 ## Tooling
 
-pnpm + Corepack (`packageManager` in `package.json`). Node 24+; Node 25+
-needs `npm install -g corepack` before `corepack enable`.
+pnpm + Corepack (`packageManager` in `package.json`). Develop on Node 24 or
+26+ (Node 25 is not supported for the test suite while vitest 5 excludes it);
+Node 26+ needs `npm install -g corepack` before `corepack enable`.
 
 ```bash
 corepack enable
