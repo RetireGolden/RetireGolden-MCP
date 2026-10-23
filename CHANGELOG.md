@@ -3,6 +3,19 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Dependencies
+
+- **`@modelcontextprotocol/server` is now locked, tested and packed at 2.3.0
+  (from 2.0.0); the declared range stays `^2.0.0`.** No tool, argument, result
+  or protocol field changes, and the committed protocol baseline replays
+  unchanged. One upstream change matters to programmatic embedders: from 2.3.0
+  a `McpServer` serves one connection at a time (a second `connect()` rejects
+  with `ALREADY_CONNECTED`). Build a server and call `registerTools` on it per
+  connection, as this package's own stdio entry point does. The range already
+  admitted 2.3.0, so an embedder's install could resolve it before this change.
+
 ## 0.13.0
 
 **`run_optimizer` returns engine 0.5.0's conversion optimizer: a solve with no
