@@ -30,8 +30,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   field, same-origin-only redirects, accepting omitted `arguments`) do not
   reach this stdio observer's captures.
 - **The `@types/node` dev dependency is locked at 26.6.2 (from 26.2.0)**; the
-  declared range stays `^26.1.1`. Type declarations only, so nothing at runtime
-  changes.
+  declared range stays `^26.1.1`. Its `undici-types` dependency moves with it
+  (8.3.0 → 8.9.0), and the `vite`/`vitest` lock entries are re-keyed on the new
+  `@types/node` version without changing their own versions. Type declarations
+  only, so nothing at runtime changes.
 
 ## 0.13.0
 
