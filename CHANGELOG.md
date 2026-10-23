@@ -20,6 +20,15 @@ adheres to [Semantic Versioning](https://semver.org/).
   lane connect with. The committed baseline replays unchanged through it, so
   nothing was regenerated; the frozen v1 observer (`@modelcontextprotocol/sdk`)
   is a separate pin.
+- **The frozen v1 observer, the `@modelcontextprotocol/sdk` dev dependency, is
+  re-pinned from 1.30.0 to 1.32.0, a decision the maintainer approved.** It is
+  the stdio client the protocol baseline is observed through. Before the move,
+  the full baseline was re-captured through 1.32.0 and compared with the
+  committed one: every `inventory`, resource, `payloadHash` and `envelopeHash`
+  value is byte-identical. Only `meta.sdkPackage` changes, which records the
+  new observer. The 1.31.0–1.32.0 client changes (an OAuth credential `issuer`
+  field, same-origin-only redirects, accepting omitted `arguments`) do not
+  reach this stdio observer's captures.
 
 ## 0.13.0
 
