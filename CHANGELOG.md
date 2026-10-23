@@ -15,6 +15,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   with `ALREADY_CONNECTED`). Build a server and call `registerTools` on it per
   connection, as this package's own stdio entry point does. The range already
   admitted 2.3.0, so an embedder's install could resolve it before this change.
+- **The `@modelcontextprotocol/client` dev dependency moves from 2.0.0 to
+  2.3.0.** It is the client the tests and the protocol baseline's in-memory
+  lane connect with. The committed baseline replays unchanged through it, so
+  nothing was regenerated; the frozen v1 observer (`@modelcontextprotocol/sdk`)
+  is a separate pin.
 
 ## 0.13.0
 
