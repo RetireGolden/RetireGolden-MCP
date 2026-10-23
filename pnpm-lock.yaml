@@ -70,10 +70,6 @@ packages:
     resolution: {integrity: sha512-pbHtGj6EeFCHngFE8gtNPaKrsj8Mb1IMw45BLcaPML/m2WTxI7pyYmeNQvaux88Lw8BSO5r7nyRbUyIkICmGrg==}
     engines: {node: '>=20'}
 
-  '@modelcontextprotocol/core@2.0.0':
-    resolution: {integrity: sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA==}
-    engines: {node: '>=20'}
-
   '@modelcontextprotocol/core@2.3.0':
     resolution: {integrity: sha512-09BHFaNVBe5pB2AhzCfLj0cqmsKLERvZQ4FblzP90UMGLaXVqdZPByFjURwsUYCmxonUW2yAwgTTvle+8O2/8w==}
     engines: {node: '>=20'}
@@ -1241,10 +1237,6 @@ snapshots:
       eventsource-parser: 3.1.1
       jose: 6.2.13
       pkce-challenge: 5.0.1
-      zod: 4.4.3
-
-  '@modelcontextprotocol/core@2.0.0':
-    dependencies:
       zod: 4.4.3
 
   '@modelcontextprotocol/core@2.3.0':
