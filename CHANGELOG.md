@@ -34,6 +34,12 @@ adheres to [Semantic Versioning](https://semver.org/).
   (8.3.0 → 8.9.0), and the `vite`/`vitest` lock entries are re-keyed on the new
   `@types/node` version without changing their own versions. Type declarations
   only, so nothing at runtime changes.
+- **The `vitest` dev dependency moves from 4.1.11 to 5.0.1** (range `^4.1.10` →
+  `^5.0.1`), a major version of the test runner only. No test, config or
+  shipped file changes, and the suite runs the same 385 tests. Its own
+  dependencies move with it in the lockfile (`@vitest/*`, `chai`, `tinybench`,
+  `std-env` and similar); none of them is in the published package's
+  dependency tree.
 
 ## 0.13.0
 
