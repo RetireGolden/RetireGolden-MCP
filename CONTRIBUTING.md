@@ -29,6 +29,11 @@ Node 25+ does not, so install it with `npm install -g corepack` before
 is what creates the `pnpm` executable
 (see [Corepack](https://github.com/nodejs/corepack#how-to-install)).
 
+For development, use Node 24 or Node 26+. The test runner (vitest 5) declares
+`node: ^22.12.0 || ^24.0.0 || >=26.0.0`, so Node 25 is not supported for running
+the suite even though the published package's `engines.node` (`>=24`) allows it
+at runtime.
+
 **The engine and its solver move together.** `@retiregolden/engine` is pinned
 exactly, and so is `highs`, the solver the engine's optimizer uses, at the
 version the engine declares. Since engine 0.5.0 the engine declares it exactly
