@@ -29,6 +29,9 @@ adheres to [Semantic Versioning](https://semver.org/).
   new observer. The 1.31.0–1.32.0 client changes (an OAuth credential `issuer`
   field, same-origin-only redirects, accepting omitted `arguments`) do not
   reach this stdio observer's captures.
+- **The `@types/node` dev dependency is locked at 26.6.2 (from 26.2.0)**; the
+  declared range stays `^26.1.1`. Type declarations only, so nothing at runtime
+  changes.
 
 ## 0.13.0
 
