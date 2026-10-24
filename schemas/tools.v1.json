@@ -162,7 +162,10 @@
                 {
                   "type": "number"
                 }
-              ]
+              ],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
             },
             "heir_ordinary_rate": {
               "type": "number",
@@ -286,24 +289,16 @@
         },
         "engineVersion": {
           "description": "Provenance only: the `engineVersion` sibling from an export_plan response, i.e. the @retiregolden/engine build that exported the supplied `plan`. Differing from the running engine adds a caveat (defaults and modeling semantics can move between engine versions) and NOTHING else — the document is still imported. This is the version skew that can actually occur between two builds that can exchange documents at all. Accepts null, which is what export_plan emits when it cannot resolve the installed version; null is treated as 'unknown' and warns on nothing.",
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
+          "type": [
+            "string",
+            "null"
           ]
         },
         "mcpVersion": {
           "description": "Provenance only: the `mcpVersion` sibling from an export_plan response, accepted so a whole export can be spread straight back into build_plan (including the null export_plan emits when the version is unresolvable). Recorded, never warned on — for a full plan document the document itself is the model.",
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
+          "type": [
+            "string",
+            "null"
           ]
         },
         "conventions": {
@@ -322,7 +317,10 @@
                     {
                       "type": "number"
                     }
-                  ]
+                  ],
+                  "items": false,
+                  "minItems": 2,
+                  "maxItems": 2
                 },
                 {
                   "type": "null"
@@ -369,13 +367,9 @@
             },
             "state": {
               "description": "2-letter state-of-residence OVERRIDE (e.g. \"CA\"); when omitted or null, the required household.state is used. This selects which state's modeled income tax applies — that is how state tax is switched on, not stateEffectiveTaxPct",
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
+              "type": [
+                "string",
+                "null"
               ]
             },
             "stateEffectiveTaxPct": {

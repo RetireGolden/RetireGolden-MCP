@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Dependencies
 
+- **`zod` moves from 4.4.3 to 4.6.7**, which clears GHSA-mrhx-c7xc-m3w5
+  (high: zod before 4.6.6 can exhaust memory validating oversized
+  constrained collections, and this server validates untrusted tool
+  arguments with it). The published input schemas in `schemas/tools.v1.json`
+  change only in how zod 4.6 emits JSON Schema, with no tool, argument or
+  result change. Nullable strings are written as `"type": ["string", "null"]`
+  instead of an equivalent `anyOf`. The two-number tuples
+  (`conventions.irmaaLookbackMagis`, `household.pre_horizon_magi`) now carry
+  `items: false`, `minItems: 2` and `maxItems: 2`, so the schema states the
+  length the server already enforced. The protocol baseline was re-captured
+  deliberately for the bump. Only those `tools/list` schema fields, the
+  inventory hash and `meta.zodPackage` change.
 - **`@modelcontextprotocol/server` is now locked, tested and packed at 2.3.0
   (from 2.0.0); the declared range stays `^2.0.0`.** No tool, argument, result
   or protocol field changes, and the committed protocol baseline replays
