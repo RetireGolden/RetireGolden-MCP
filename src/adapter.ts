@@ -805,9 +805,10 @@ export function exportPlan(session: SessionState) {
     ok: true as const,
     // Annotated, not inferred: the emitted declaration must name the engine's
     // `Plan`. Inferred, it spells out the type's zod brand, which lives in the
-    // engine's own zod (engine 0.4.0 needs ^4.6.2; this package pins 4.4.3 for
-    // its tool schemas), and a declaration cannot name a module it does not
-    // depend on.
+    // engine's own zod (the engine declares `^4.6.2`, separately from this
+    // package's exact pin for its tool schemas, so a consumer's install can
+    // resolve two copies even though this lockfile dedupes them today), and a
+    // declaration cannot name a module it does not depend on.
     plan: structuredClone(session.plan) as Plan,
     startYear: session.startYear,
     conventions: snapshotConventions(session),
