@@ -66,7 +66,7 @@
     }
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.3.0",
+    "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/sdk": "1.32.0",
     "@retiregolden/planner-ui": "0.12.0",
     "@types/node": "^26.1.1",
