@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Dependencies
 
+- **Four development-only patch bumps, with no change to the published
+  package's dependency tree.** The `@modelcontextprotocol/client` dev
+  dependency moves from 2.3.0 to 2.3.1 (it brings its own
+  `@modelcontextprotocol/core` 2.3.1; the server stays on 2.3.0). `vitest` is
+  locked at 5.0.5 (from 5.0.1; range unchanged), and `@types/node` at 26.6.5
+  (from 26.6.2; range unchanged). The frozen v1 observer,
+  `@modelcontextprotocol/sdk`, is re-pinned from 1.32.0 to 1.32.1 by the
+  documented procedure: the full baseline was re-captured through 1.32.1 and is
+  byte-identical to the committed one except `meta.sdkPackage`, so that is the
+  only baseline change. The suite runs the same 385 tests.
 - **`zod` moves from 4.4.3 to 4.6.7**, which clears GHSA-mrhx-c7xc-m3w5
   (high: zod before 4.6.6 can exhaust memory validating oversized
   constrained collections, and this server validates untrusted tool
