@@ -447,7 +447,7 @@ function zodIssues(error: z.ZodError): string {
  * against the locked SDK: @modelcontextprotocol/server's
  * `normalizeRawShapeSchema` returns an already-Standard-Schema value untouched
  * (it only wraps a RAW shape in `z.object`), and never writes to it — checked
- * in 2.0.0 and re-checked in 2.3.0, whose function body is unchanged. Zod
+ * in 2.0.0 and re-checked in 2.3.0 and 2.4.0, whose function body is unchanged. Zod
  * schemas are themselves immutable under parsing. If that ever changes, give
  * registration its own instance. (Registration now passes a thin wrapper whose
  * `~standard` delegates to this object and only records the raw arguments;

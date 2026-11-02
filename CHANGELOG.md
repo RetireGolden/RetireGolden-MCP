@@ -17,7 +17,12 @@ adheres to [Semantic Versioning](https://semver.org/).
   documented procedure: the full baseline was re-captured through 1.32.2 and is
   byte-identical to the committed one except `meta.sdkPackage`, so that is the
   only baseline change. The tool contract regenerates unchanged, and the suite
-  runs the same 385 tests.
+  runs the same 385 tests. The lockfile refresh also moves two development-only
+  transitive packages: `tslib` 2.8.1 to 2.9.1 (through `@emnapi/*` and
+  `@tybys/wasm-util`) and `postcss` 8.5.31 to 8.5.32 (through `vite`). The
+  server's `normalizeRawShapeSchema` was re-checked at 2.4.0: its body is
+  unchanged from 2.3.0, so the shared compiled-schema note in
+  `src/toolTable.ts` still holds.
 - **Four development-only patch bumps, with no change to the published
   package's dependency tree.** The `@modelcontextprotocol/client` dev
   dependency moves from 2.3.0 to 2.3.1 (it brings its own
