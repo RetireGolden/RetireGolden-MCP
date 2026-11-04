@@ -3,7 +3,102 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.13.1
+
+**Moves the exact `@retiregolden/engine` dependency from 0.5.0 to 0.6.0, and
+`highs` with it from 1.15.2 to 1.15.4.** A patch, as 0.11.1 was for engine
+0.4.1: no tool, argument, result field or tool description changes, the tool
+contract (`schemas/tools.v1.json`) regenerates unchanged, and plans stay
+plan-schema 7 with a byte-identical `describe_plan_schema` and `plan-schema`
+resource. What changes is figures the engine corrects, for a plan document that
+reaches them (below). Engine 0.6.0 is a minor because its `ParameterPack` type
+(`@retiregolden/engine/params/types`) gains the required
+`contributionLimits.section401a17CompensationLimit`, which breaks a host that
+builds a parameter pack itself. This package does not: it never imports
+`params/types` or builds a `ParameterPack`, it reads only the engine's state
+packs (`stateParamsFor`), every projection takes the engine's own year data, and
+no type this package publishes names a parameter pack. So the engine's break
+does not reach this package's callers or embedders.
+
+**The `@retiregolden/planner-ui` dev dependency moves from 0.12.0 to 0.13.0**,
+whose engine range is `^0.6.0`, so the tree holds one engine. Engine 0.6.0 and
+planner-ui 0.13.0 both declare `highs` at exactly 1.15.4, and this package pins
+the same version, so the tree also holds one solver. Engine 0.6.0's optimizer
+reads HiGHS through the highs package's persistent model API (`withModel`),
+which highs 1.15.2 does not have, so on 1.15.2 every solve fails closed. The lockfile otherwise moves only planner-ui's own `idb`
+(8.0.3 to 8.0.4, development only).
+
+### Changed (engine 0.6.0)
+
+What engine 0.6.0 corrects, for a plan that reaches it. The typed `household`
+path reaches none of it: it refuses wages, writes no employer plan, QCD or HSA
+evidence and no New Jersey IRA basis, and a typed single and married plan in
+each of the 50 states and the District, with Roth conversions, returned a
+byte-identical `run_projection` (detail `years`) under 0.5.0 and 0.6.0.
+
+- **An employer match is measured on wages held to the IRC 401(a)(17)
+  compensation limit**, $360,000 for 2026 (Notice 2025-67), growing with the
+  other plan limits in later years. Only a plan document with wages above the
+  limit and an employer account's `employerMatch` moves. A single filer of 66
+  in Texas with $500,000 of wages and an employer traditional account deferring
+  $24,500 under a 100% match up to 6% of pay, over a one-year plan: the match is $21,600 where it was
+  $24,500, so `run_projection`'s `summary.endingInvestable` falls from
+  $1,500,042.39 to $1,496,997.39 ($2,900 less match after a year at the
+  account's 5%), `endingEstateHeirTax` by $730.80 (24% of that), and
+  `averagePreRetirementSavingsRatePct` from 66.64 to 66.06. With $300,000 of
+  wages nothing moves. The engine keeps the match on uncapped wages for an
+  account labelled `457b`, and pools a person's wages across employers (its
+  CHANGELOG states both limits).
+- **Custodian QCD evidence wins over the projection's runtime defaults.** A
+  `stateTaxFacts.qcdEventEvidence` row's residency, transaction kind and
+  direct-transfer flag are now read, so a full-year New Jersey QCD is priced
+  rather than incomplete and a split-interest transfer reaches its refusal. An
+  incomplete, unmatched or colliding QCD collection is withheld rather than
+  priced: the state year is incomplete and a projection warning
+  (`summary.warnings`) names the row.
+- **Asserted HSA evidence wins over a runtime zero.** A plan's
+  `stateTaxFacts.hsaYearEvidence` deduction is no longer replaced by the zero
+  the projection passes when it modeled no contribution (California and New
+  Jersey price these facts). The engine's other HSA change, reading the
+  residence state's evidence when the runtime has no rows and giving no facts
+  without a residence state, fixes its facts adapter; the engine records no
+  known projection it changes.
+- **New Jersey IRA owner pools** (Worksheet C) keep a partially filled
+  exempt-obligation amount, reject a negative one, match basis rows in any
+  case and honour an asserted `fullLiquidation`. A projected year with no basis
+  evidence uses the modeled December 31 value and the year's distributions,
+  QCDs included; a projected QCD with unknown basis stays unpriced
+  (`nj-qcd-basis-unknown`).
+- **The optimizer reads HiGHS through the highs 1.15.4 persistent model API.**
+  The engine reports no figure change, and `run_optimizer_default` in the
+  protocol baseline is byte-identical.
+- The engine also restates two inherited-IRA approximations as conventions
+  (no figure moves) and corrects methodology texts this package does not
+  publish.
+
+Not in engine 0.6.0, though the engine's CHANGELOG lists them under Unreleased
+beside it: the qualifying-surviving-spouse state filing rows (Georgia,
+Virginia, Kansas), Virginia's and Vermont's dependent exemption counts, and the
+later New Jersey QCD and Wisconsin and Delaware changes landed after the
+`engine-v0.6.0` tag (RetireGolden cac78f74) and wait for a later engine
+release. The engine's CHANGELOG (RetireGolden `CHANGELOG.md`, the "Prepared
+`@retiregolden/engine` 0.6.0" entry and the entries it references) has the rest.
+
+### Verified
+
+- The protocol baseline was regenerated by `pnpm run baseline:capture` and
+  read leaf by leaf; 21 leaves move, and no figure. `meta.enginePackage`
+  0.5.0 → 0.6.0 and `meta.solverPackage` 1.15.2 → 1.15.4; the six
+  `engineVersion` stamps (`get_session` three times, `export_plan` twice,
+  `explain_modeled_result`) with each step's `payloadHash` and `envelopeHash`;
+  and the `build_plan` round trip's `argsDigest`, which carries the stamp.
+  The inventory, the resources, `run_optimizer_default` and every other step
+  are byte-identical. A second capture matched the first byte for byte.
+- The goldens pass unregenerated: they are retired full-year Kentucky plans
+  with no wages, employer plan, QCD or HSA evidence or New Jersey year.
+- `pnpm test` (385 tests), `pnpm run build` and `pnpm run test:packed` pass on
+  Node 24, and `pnpm run contract:generate` leaves `schemas/tools.v1.json`
+  unchanged.
 
 ### Dependencies
 
