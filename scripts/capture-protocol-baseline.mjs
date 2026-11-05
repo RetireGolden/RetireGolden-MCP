@@ -227,7 +227,7 @@ async function captureToolCall({ client, lane, step, tool, args, includePayload 
       envelopeHash: canonicalSha256(envelopeView(result)),
       ...(includePayload ? { payload: canonicalPayload } : {}),
     }
-    return { entry, payload }
+    return { entry, payload, result }
   } catch (error) {
     const surface = protocolSurface(error)
     return {
@@ -238,20 +238,48 @@ async function captureToolCall({ client, lane, step, tool, args, includePayload 
         surface: canonicalize(surface),
       },
       payload: undefined,
+      error,
     }
   }
 }
 
+/**
+ * What a failed step actually returned, for the thrown message only (never the
+ * baseline): its kind and isError, then the tool payload, the raw result's
+ * content (an SDK-flattened throw is a text block, not JSON), or the protocol
+ * error's code and message. Without it a CI failure says only that a step
+ * failed, not why.
+ */
+function describeRecord(record) {
+  const { entry } = record
+  const parts = [`kind=${entry.kind}`, `isError=${entry.isError === true}`]
+  let detail
+  if (entry.kind === 'protocol-error') {
+    const error = record.error
+    // The stack starts with the message, so it replaces it when present.
+    detail = `code=${String(entry.code)} error=${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
+  } else if (record.payload !== undefined) {
+    detail = `payload=${JSON.stringify(record.payload)}`
+  } else {
+    detail = `result=${JSON.stringify(record.result)}`
+  }
+  const limit = 4000
+  if (detail.length > limit) detail = `${detail.slice(0, limit)}... (${detail.length - limit} more characters)`
+  return `${parts.join(' ')} ${detail}`
+}
+
 function requireSuccessfulResult(record, label) {
   if (record.entry.kind !== 'result' || record.entry.isError || !isRecord(record.payload)) {
-    throw new Error(`${label} did not return a successful MCP result`)
+    throw new Error(`${label} did not return a successful MCP result (${describeRecord(record)})`)
   }
   return record.payload
 }
 
 function requireOkResult(record, label) {
   const payload = requireSuccessfulResult(record, label)
-  if (payload.ok !== true) throw new Error(`${label} returned an unsuccessful tool payload`)
+  if (payload.ok !== true) {
+    throw new Error(`${label} returned an unsuccessful tool payload (${describeRecord(record)})`)
+  }
   return payload
 }
 
