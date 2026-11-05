@@ -9,8 +9,8 @@
  * Registration is the v2 `registerTool` / `registerResource` API. A v1
  * McpServer object cannot be passed in: the methods it used (`tool`,
  * `resource`) are gone, so an embedder must construct a v2 server from
- * `@modelcontextprotocol/server`. From server 2.3.0 (the version the lockfile
- * tests and packs against, and one the `^2.0.0` range already admits) a
+ * `@modelcontextprotocol/server`. From server 2.3.0 (the lockfile now tests
+ * and packs against 2.4.0; both are within the `^2.0.0` range) a
  * `McpServer` serves one connection at a time, so an embedder builds a server
  * and calls `registerTools` per connection, as `src/server.ts` does through
  * the `serveStdio` factory. Cache hints are omitted so modern
