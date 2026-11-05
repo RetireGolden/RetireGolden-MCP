@@ -96,7 +96,15 @@ release. The engine's CHANGELOG (RetireGolden `CHANGELOG.md`, the "Prepared
   are byte-identical. A second capture matched the first byte for byte.
 - The goldens pass unregenerated: they are retired full-year Kentucky plans
   with no wages, employer plan, QCD or HSA evidence or New Jersey year.
-- `pnpm test` (385 tests), `pnpm run build` and `pnpm run test:packed` pass on
+- `tests/engine060Corrections.test.ts` takes full plan documents through the
+  `build_plan` and `run_projection` handlers. A $500,000 earner's match is
+  $21,600 (6% of the $360,000 limit) and a $300,000 earner's $18,000 (6% of
+  all pay), each measured as the matched plan's ending traditional balance
+  minus its no-match twin's at a 0% return. A New Jersey custodian QCD row with
+  no executed distribution is named in `summary.warnings` as leaving the
+  year's state QCD collection incomplete. Engine 0.5.0 gives a $24,500 match
+  and no such warning.
+- `pnpm test` (388 tests), `pnpm run build` and `pnpm run test:packed` pass on
   Node 24, and `pnpm run contract:generate` leaves `schemas/tools.v1.json`
   unchanged.
 
