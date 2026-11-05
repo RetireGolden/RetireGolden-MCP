@@ -97,14 +97,26 @@ release. The engine's CHANGELOG (RetireGolden `CHANGELOG.md`, the "Prepared
 - The goldens pass unregenerated: they are retired full-year Kentucky plans
   with no wages, employer plan, QCD or HSA evidence or New Jersey year.
 - `tests/engine060Corrections.test.ts` takes full plan documents through the
-  `build_plan` and `run_projection` handlers. A $500,000 earner's match is
-  $21,600 (6% of the $360,000 limit) and a $300,000 earner's $18,000 (6% of
-  all pay), each measured as the matched plan's ending traditional balance
-  minus its no-match twin's at a 0% return. A New Jersey custodian QCD row with
-  no executed distribution is named in `summary.warnings` as leaving the
-  year's state QCD collection incomplete. Engine 0.5.0 gives a $24,500 match
-  and no such warning.
-- `pnpm test` (388 tests), `pnpm run build` and `pnpm run test:packed` pass on
+  `build_plan` and `run_projection` handlers, one case per correction, each
+  expected value derived from the cited authority:
+  - A $500,000 earner's match is $21,600 (6% of the $360,000 limit) and a
+    $300,000 earner's $18,000 (6% of all pay), each measured as the matched
+    plan's ending traditional balance minus its no-match twin's at a 0%
+    return.
+  - A New Jersey custodian QCD row with no executed distribution is named in
+    `summary.warnings` as leaving the year's state QCD collection incomplete.
+  - An asserted $4,300 federal HSA deduction on an HSA with no modeled
+    contribution adds $399.90 of California tax (9.3% of the Schedule CA
+    add-back) to a $150,000 earner's year.
+  - A $20,000 New Jersey QCD from two IRAs, one asserting $5,000 of
+    exempt-obligation earnings, is taxed on $19,500 by Worksheet C (ratio
+    195,000 / 200,000), $31.85 less tax at 6.37% than with neither IRA
+    asserting any.
+
+  Run against engine 0.5.0, the four corrected cases fail (a $24,500 match, no
+  QCD warning, no HSA add-back, the $5,000 dropped) and only the $300,000
+  control passes.
+- `pnpm test` (390 tests), `pnpm run build` and `pnpm run test:packed` pass on
   Node 24, and `pnpm run contract:generate` leaves `schemas/tools.v1.json`
   unchanged.
 

@@ -1,7 +1,8 @@
 /**
- * Two engine 0.6.0 corrections, taken through the tool layer with a full plan
+ * Four engine 0.6.0 corrections, taken through the tool layer with a full plan
  * document: `build_plan({ plan })` then `run_projection`. The typed `household`
- * path reaches neither (it refuses wages and writes no QCD evidence), and the
+ * path reaches none of them (it refuses wages and writes no HSA, QCD or IRA
+ * basis evidence), and the
  * goldens and the protocol baseline are retired Kentucky plans, so without this
  * suite nothing here would notice the corrections going unreachable.
  *
@@ -55,7 +56,7 @@ function basePlan(state: string, birthYear: number): Json {
 interface Projection {
   ok: true
   summary: { endingByCategory: { traditional: number }; warnings: string[] }
-  years: { withdrawals: { traditional: number } }[]
+  years: { tax: number; withdrawals: { traditional: number; total: number } }[]
 }
 
 function project(plan: Json): Projection {
@@ -154,5 +155,123 @@ describe('engine 0.6.0: unmatched custodian QCD evidence is withheld, not priced
     expect(named).toHaveLength(1)
     expect(named[0]).toMatch(/no executed distribution/)
     expect(named[0]).toMatch(/incomplete/)
+  })
+})
+
+/**
+ * A 60-year-old single California filer with $150,000 of wages and an HSA that
+ * models no contribution (`annualContribution: 0`), whose 2026 evidence row
+ * asserts `federalHsaDeduction` and states every other category as a known 0.
+ */
+function californiaHsaPlan(federalHsaDeduction: number): Json {
+  const plan = basePlan('CA', 1966)
+  ;(plan.incomes as Json[]).push({ type: 'wages', id: 'wages-1', personId: 'person-0', annualGross: 150_000, endAge: 70, realGrowthPct: 0 })
+  ;(plan.accounts as Json[]).push({ type: 'hsa', id: 'hsa-1', name: 'HSA', ownerPersonId: 'person-0', annualReturnPct: 0, balance: 1000, annualContribution: 0 })
+  ;(plan.stateTaxFacts as Json).hsaYearEvidence = [
+    {
+      taxYear: 2026,
+      state: 'CA',
+      accountId: 'hsa-1',
+      ownerPersonId: 'person-0',
+      federalHsaDeduction,
+      employerContributionExcludedFederally: 0,
+      employerContributionAlreadyInStateWages: 0,
+      interest: 0,
+      dividends: 0,
+      realizedGains: 0,
+      unrealizedAppreciation: 0,
+      qualifiedCashWithdrawals: 0,
+      nonqualifiedDistributionFederalAmount: 0,
+      nonqualifiedCashWithdrawals: 0,
+      stateBasisBeforeYear: 0,
+      annualActivityComplete: true,
+      provenance: { source: 'plan-evidence', asOf: '2026-01-15' },
+    },
+  ]
+  return plan
+}
+
+describe('engine 0.6.0: an asserted HSA deduction is not replaced by a runtime zero', () => {
+  it('adds a $4,300 asserted federal HSA deduction back to California income', () => {
+    // California does not conform to IRC 223: Schedule CA adds back the federal
+    // HSA deduction (FTB 2025 Schedule CA instructions; R&TC 17201(d); the
+    // engine's ca-hsa-state-basis-nonconformity and CA.md "HSA nonconformity").
+    // RetireGolden#812: the projection passes a federal deduction of 0 for an HSA
+    // whose contribution it did not model, and that default no longer replaces
+    // an asserted one. Engine 0.5.0 let it, so the addition was $0.
+    //
+    // Wages cover the year's spending and tax (no withdrawal), so the federal
+    // side is the same in both plans and the tax difference is California's.
+    // California taxable income is $150,000 - $5,706 standard deduction =
+    // $144,294 without the addition and $148,594 with it, both inside the
+    // single 9.3% band ($72,724 to $371,479, FTB 2025 Schedule X), so:
+    //   9.3% x $4,300 = $399.90 more California tax.
+    const asserted = project(californiaHsaPlan(4300))
+    const none = project(californiaHsaPlan(0))
+    expect(asserted.years[0]!.withdrawals.total).toBe(0)
+    expect(none.years[0]!.withdrawals.total).toBe(0)
+    expect(asserted.years[0]!.tax - none.years[0]!.tax).toBeCloseTo(399.9, 2)
+    expect(asserted.summary.warnings).toEqual([])
+  })
+})
+
+/**
+ * A 76-year-old single New Jersey filer with $200,000 of wages, two traditional
+ * IRAs of $100,000 each at a 0% return, and a $20,000 QCD, with one Worksheet C
+ * basis row per IRA and no unrecovered basis. Only IRA A may assert
+ * exempt-obligation earnings.
+ */
+function newJerseyPoolPlan(iraAExemptObligation: number | undefined): Json {
+  const plan = basePlan('NJ', 1950)
+  ;(plan.incomes as Json[]).push({ type: 'wages', id: 'wages-1', personId: 'person-0', annualGross: 200_000, endAge: 80, realGrowthPct: 0 })
+  const accounts = plan.accounts as Json[]
+  const iraA = accounts.find((a) => a.type === 'traditional')!
+  iraA.balance = 100_000
+  accounts.push({ ...structuredClone(iraA), id: 'ira-b', name: 'Trad1' })
+  ;(plan.strategies as Json).qcdAnnual = 20_000
+  // Worksheet C works on the owner's IRAs together. At a 0% return the owner's
+  // year-end value is $200,000 - $20,000 = $180,000 and the year's
+  // distributions are the $20,000 transfer, so each row states half of each.
+  const row = (accountId: unknown, extra: Json) => ({
+    taxYear: 2026,
+    state: 'NJ',
+    ownerPersonId: iraA.ownerPersonId,
+    accountId,
+    unrecoveredStateBasis: 0,
+    annualDistributionsComplete: true,
+    yearEndAccountValue: 90_000,
+    distributionsDuringYear: 10_000,
+    postYearContributionsThroughFilingDeadline: 0,
+    ...extra,
+    provenance: { source: 'NJ Worksheet C annual account statement', asOf: '2026-12-31' },
+  })
+  ;(plan.stateTaxFacts as Json).iraBasisYearEvidence = [
+    row(iraA.id, iraAExemptObligation === undefined ? {} : { exemptObligationAdjustment: iraAExemptObligation }),
+    row('ira-b', {}),
+  ]
+  return plan
+}
+
+describe('engine 0.6.0: a New Jersey IRA owner pool keeps a partial exempt-obligation amount', () => {
+  it('taxes $19,500 of a $20,000 QCD when one of two IRAs asserts $5,000 of exempt earnings', () => {
+    // New Jersey has no QCD exclusion; the taxable part of the transfer is set
+    // by GIT-1 & 2 Worksheet C (January 2026; the engine's
+    // nj-direct-qcd-ira-basis-treatment). Line 3 = $180,000 year-end value +
+    // $20,000 distributed = $200,000; basis $0; IRA A's $5,000 of
+    // exempt-obligation earnings is excludable, IRA B states none. Taxable
+    // ratio (200,000 - 5,000) / 200,000 = 0.975, so the QCD adds $19,500 to
+    // New Jersey income, not $20,000. RetireGolden#814: engine 0.5.0 kept the
+    // amount only when every row stated one, so it dropped IRA A's $5,000.
+    //
+    // New Jersey gross income is over $150,000, so no pension exclusion
+    // applies (N.J.S.A. 54A:6-10), and $200,000 of wages plus the transfer sits
+    // in the single 6.37% band ($75,000 to $500,000, N.J.S.A. 54A:2-1). The
+    // federal side excludes the QCD in both plans, so:
+    //   6.37% x ($20,000 - $19,500) = $31.85 less New Jersey tax.
+    const partial = project(newJerseyPoolPlan(5000))
+    const none = project(newJerseyPoolPlan(undefined))
+    expect(partial.years[0]!.tax - none.years[0]!.tax).toBeCloseTo(-31.85, 2)
+    expect(partial.summary.warnings).toEqual([])
+    expect(none.summary.warnings).toEqual([])
   })
 })
