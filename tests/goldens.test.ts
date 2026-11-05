@@ -88,6 +88,13 @@
  * projection, Monte Carlo and batch evaluation, never the optimizer, and
  * `pnpm run goldens:print` prints every literal below unchanged.
  *
+ * Verified UNCHANGED under engine 0.6.0 (the employer match held to the IRC
+ * 401(a)(17) compensation limit, custodian QCD and asserted HSA evidence kept
+ * ahead of runtime defaults, New Jersey IRA owner pools, and the optimizer
+ * reading highs 1.15.4): these fixtures are retired full-year Kentucky plans
+ * with no wages, no employer plan, no QCD or HSA evidence and no New Jersey
+ * year, and the goldens pass without regeneration.
+ *
  * Generation recipe — `pnpm run goldens:print` (scripts/gen-goldens.mjs) prints
  * these literals from a fresh build; it never edits this file:
  *   session = createSession()
