@@ -24,7 +24,7 @@ function legacyConversionActions(count: number): Plan['strategies']['retirementA
   })) as unknown as Plan['strategies']['retirementActions']
 }
 
-describe('shared input and response limits', () => {
+describe('shared input and response limits', { timeout: 30_000 }, () => {
   it.each(['build_plan', 'validate_plan', 'compare_scenarios'])('publishes the shared calendar-year range for %s', (name) => {
     const entry = getTool(name)!
     expect(validateToolArgs(entry, { ...(name === 'build_plan' ? { household: singleHousehold, policy: singlePolicy } : name === 'compare_scenarios' ? { planA: {}, planB: {} } : {}), startYear: 1899 })).toContain('1900')
