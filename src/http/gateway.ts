@@ -7,12 +7,14 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createSession, type SessionState } from '../session.js'
 import { getTool, parseToolArgs } from '../toolTable.js'
+import { stringifyBoundedJson } from '../limits.js'
 
 /**
  * FENCED SURFACE. This gateway is a RetireBench cost/ops research transport,
- * not a supported product API: it is unauthenticated, it accepts a
+ * not a supported product API: it accepts a
  * client-supplied session id, and it speaks a bespoke /tool protocol rather
  * than Streamable HTTP. It is not exported from the package index and cannot be
  * imported by subpath (the `exports` map has no entry for it), so the only ways
@@ -26,6 +28,29 @@ import { getTool, parseToolArgs } from '../toolTable.js'
  * because opts is a second, equally open channel into `server.listen`.
  */
 export const HTTP_GATEWAY_OPT_IN_ENV = 'RETIREGOLDEN_HTTP_GATEWAY'
+export const HTTP_GATEWAY_TOKEN_ENV = 'RETIREGOLDEN_HTTP_GATEWAY_TOKEN'
+const gatewayTokens = new WeakMap<Server, string>()
+
+export function getHttpGatewayToken(server: Server): string | undefined {
+  return gatewayTokens.get(server)
+}
+
+function validToken(token: string): boolean {
+  return token.length >= 32 && /^[\x21-\x7e]+$/u.test(token)
+}
+
+function resolveToken(explicit?: string): string {
+  const configured = explicit ?? process.env[HTTP_GATEWAY_TOKEN_ENV]
+  if (configured === undefined) return randomBytes(32).toString('base64url')
+  if (!validToken(configured)) throw new Error(`${HTTP_GATEWAY_TOKEN_ENV} must be at least 32 printable ASCII characters with no whitespace`)
+  return configured
+}
+
+function tokenMatches(actual: string, expected: string): boolean {
+  const a = createHash('sha256').update(actual).digest()
+  const b = createHash('sha256').update(expected).digest()
+  return timingSafeEqual(a, b)
+}
 
 /**
  * Literal loopback addresses only. `localhost` is deliberately NOT accepted:
@@ -79,7 +104,7 @@ function sweepExpired(sessions: Map<string, SessionEntry>, now: number): void {
  * tearing the connection down and returns null.
  */
 function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | null> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let received = 0
     let tooLarge = false
@@ -109,10 +134,15 @@ function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | n
       }
       resolve(Buffer.concat(chunks))
     })
-    req.on('error', () => {
+    req.on('error', (error) => {
       if (settled) return
       settled = true
-      resolve(null)
+      reject(error)
+    })
+    req.on('aborted', () => {
+      if (settled) return
+      settled = true
+      reject(new Error('request body aborted'))
     })
   })
 }
@@ -120,7 +150,7 @@ function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | n
 /**
  * Minimal JSON-RPC-ish HTTP facade for smoke tests on the research transport.
  * Not a full MCP Streamable HTTP implementation, and not a supported product
- * API: unauthenticated, loopback-only, and opt-in (see the fence note above).
+ * API: bearer-authenticated, loopback-only, and opt-in (see the fence note above).
  *
  * The tool surface, arg schemas, and handlers are shared with stdio via the
  * declarative table (src/toolTable.ts); only the tools flagged httpExposed are
@@ -130,11 +160,12 @@ function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | n
  * Resolves with the listening http.Server so embedders and tests can close it.
  */
 export async function startHttpGateway(
-  opts: { port?: number; host?: string } = {},
+  opts: { port?: number; host?: string; token?: string } = {},
 ): Promise<Server> {
   assertOptedIn()
   const port = opts.port ?? DEFAULT_PORT
   const host = assertLoopback(opts.host ?? DEFAULT_HOST)
+  const token = resolveToken(opts.token)
 
   // One store per gateway instance, not per module. Plan state is in-memory and
   // must not outlive the listener that accepted it: a module-global map is
@@ -143,8 +174,36 @@ export async function startHttpGateway(
   // process that no longer has a listener.
   const sessions = new Map<string, SessionEntry>()
 
-  const server = createServer(async (req, res) => {
+  let server: Server
+  const handleRequest = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     res.setHeader('Content-Type', 'application/json')
+    const address = server.address()
+    if (!address || typeof address !== 'object') throw new Error('gateway has no bound address')
+    const expectedAuthority = host === '::1' ? `[::1]:${address.port}` : `127.0.0.1:${address.port}`
+    if (req.headers.host !== expectedAuthority) {
+      res.writeHead(403)
+      res.end(JSON.stringify({ error: 'INVALID_HOST' }))
+      return
+    }
+    const origin = req.headers.origin
+    if (origin !== undefined && origin !== `http://${expectedAuthority}`) {
+      res.writeHead(403)
+      res.end(JSON.stringify({ error: 'INVALID_ORIGIN' }))
+      return
+    }
+    const fetchSite = req.headers['sec-fetch-site']
+    if (fetchSite !== undefined && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+      res.writeHead(403)
+      res.end(JSON.stringify({ error: 'INVALID_FETCH_SITE' }))
+      return
+    }
+    const authorization = req.headers.authorization
+    const supplied = typeof authorization === 'string' && authorization.startsWith('Bearer ') ? authorization.slice(7) : ''
+    if (!supplied || !tokenMatches(supplied, token)) {
+      res.writeHead(401, { 'WWW-Authenticate': 'Bearer' })
+      res.end(JSON.stringify({ error: 'UNAUTHORIZED' }))
+      return
+    }
     const now = Date.now()
     sweepExpired(sessions, now)
 
@@ -181,13 +240,20 @@ export async function startHttpGateway(
 
     let body: { tool?: string; arguments?: Record<string, unknown> }
     try {
-      body = JSON.parse(raw.toString('utf8')) as typeof body
+      const decoded: unknown = JSON.parse(raw.toString('utf8'))
+      if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) throw new Error('shape')
+      body = decoded as typeof body
     } catch {
       res.writeHead(400)
       res.end(JSON.stringify({ error: 'INVALID_JSON' }))
       return
     }
     const tool = body.tool
+    if (body.arguments !== undefined && (typeof body.arguments !== 'object' || body.arguments === null || Array.isArray(body.arguments))) {
+      res.writeHead(400)
+      res.end(JSON.stringify({ error: 'INVALID_ARGS' }))
+      return
+    }
     const args = body.arguments ?? {}
 
     const toolEntry = typeof tool === 'string' ? getTool(tool) : undefined
@@ -227,18 +293,31 @@ export async function startHttpGateway(
 
     try {
       const result = await toolEntry.handler(session, toolArgs)
+      const text = stringifyBoundedJson(result)
       res.writeHead(200)
-      res.end(JSON.stringify(result))
+      res.end(text)
     } catch (e) {
       // The response body carries a fixed code, never the exception text. An
       // unexpected throw out of a handler can quote engine internals, a file
       // path, or a fragment of the caller's own plan data, and this listener is
-      // unauthenticated. The detail goes to the operator's stderr instead.
+      // outside the response. The detail goes to the operator's stderr instead.
       console.error('RetireGolden HTTP gateway: tool handler threw', e)
       res.writeHead(500)
       res.end(JSON.stringify({ error: 'TOOL_FAILED' }))
     }
+  }
+  server = createServer((req, res) => {
+    void handleRequest(req, res).catch((error: unknown) => {
+      console.error('RetireGolden HTTP gateway: request failed', error)
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'INTERNAL_ERROR' }))
+      } else {
+        res.destroy()
+      }
+    })
   })
+  gatewayTokens.set(server, token)
 
   server.requestTimeout = 30_000
 
@@ -275,7 +354,7 @@ export async function startHttpGateway(
       const boundPort = addr && typeof addr === 'object' ? addr.port : port
       console.error(
         `RetireGolden MCP HTTP research transport listening on ${host}:${boundPort} ` +
-          `(unauthenticated, loopback-only, opt-in)`,
+          `(bearer-authenticated, loopback-only, opt-in)`,
       )
       resolve()
     })

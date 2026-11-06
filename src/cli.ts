@@ -15,7 +15,11 @@ const mode = process.argv[2] ?? 'stdio'
 async function main(): Promise<void> {
   if (mode === 'http') {
     const { startHttpGateway } = await import('./http/gateway.js')
-    await startHttpGateway()
+    const token = process.env.RETIREGOLDEN_HTTP_GATEWAY_TOKEN
+    if (token === undefined) {
+      throw new Error('RETIREGOLDEN_HTTP_GATEWAY_TOKEN must be set for CLI HTTP mode')
+    }
+    await startHttpGateway({ token })
     return
   }
   await startStdioServer()

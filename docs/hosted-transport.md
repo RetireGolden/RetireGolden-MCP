@@ -5,7 +5,7 @@ Official RetireBench scored runs use **ephemeral stdio** (`npx @retiregolden/mcp
 
 This package also carries an **HTTP research transport**, started with
 `RETIREGOLDEN_HTTP_GATEWAY=1 retiregolden-mcp http`. The opt-in is required: the
-transport is unauthenticated and accepts a client-supplied session id, so it must
+transport accepts a client-supplied session id, so it must
 not be one typo away from the default invocation. Without the variable the
 command exits with an explanation instead of listening.
 
@@ -44,6 +44,18 @@ flags.
 
 ## Request contract
 
+Every request requires `Authorization: Bearer <token>`. The token is transport
+configuration, never a tool argument. CLI HTTP mode requires
+`RETIREGOLDEN_HTTP_GATEWAY_TOKEN`; it must be at least 32 printable ASCII
+characters with no whitespace and is never printed. Programmatic callers may
+pass `token`, or omit both sources to receive a per-server random token through
+`getHttpGatewayToken(server)`.
+
+Every route also requires the exact bound loopback authority in `Host`. A
+present `Origin` must be `http://` plus that authority, and a present
+`Sec-Fetch-Site` must be `same-origin` or `none`. These checks and bearer
+authentication run before request bodies are read or sessions are allocated.
+
 - `POST /tool` with body `{ tool, arguments }`.
 - An `x-session-id` header (max 128 chars) is **required** on every `/tool` request;
   each id maps to its own isolated in-memory session. Missing header →
@@ -61,8 +73,8 @@ flags.
   `policy` shapes, `batch_evaluate` policies 1–500, objective enum) → `400 INVALID_ARGS`.
 - An exception out of a tool handler answers `500 TOOL_FAILED` and nothing else.
   The exception is written to the server's stderr; it is never echoed in the
-  response body, which would leak internals to an unauthenticated caller.
-- `GET /health` is unauthenticated and reports only
+  response body, which would leak internals to a caller.
+- `GET /health` requires the same bearer token and reports only
   `{ ok, transport: 'http-research', sessions }` (a session count, never another
   session's plan state).
 
@@ -75,10 +87,21 @@ not accepted either — it resolves through the hosts file and DNS, so it is not
 reliable way to say "loopback". `tests/httpGatewayFencing.test.ts` pins both the
 clamp and the opt-in.
 
-An unauthenticated listener on a routable interface is not something this package
-will help you do, so there are no hosting instructions here. If you need this
-surface reachable from anywhere but the machine it runs on, the authentication
-has to live somewhere, and it is not in here.
+The listener remains local-only even with its bearer token; a listener on a
+routable interface is not something this package will help you do, so there are
+no hosting instructions here. If you need this
+surface reachable from anywhere but the machine it runs on, use a separately
+reviewed production transport rather than widening this research listener.
 
 Do not treat results from this transport as official leaderboard evidence until
 parity tests pass.
+
+## Input and work limits
+
+Calendar start years are 1900 through 2200 and an effective plan span is at
+most 120 years. Full plan documents are inspected for serialized size, nesting,
+node count, and major collection counts before engine parsing or simulation.
+The normal documented envelope remains available: typed household horizons up
+to 100 years, Monte Carlo runs up to 5,000 paths, and batches up to 500
+policies. Combined horizon and work are also bounded before projection,
+optimization, and spending calculations begin.

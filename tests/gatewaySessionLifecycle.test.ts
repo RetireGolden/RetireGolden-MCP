@@ -10,8 +10,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { singleHousehold, singlePolicy } from './fixtures.js'
 import { startTestGateway, type TestGateway } from './helpers/gateway.js'
 
-async function sessionCount(base: string): Promise<number> {
-  return ((await (await fetch(`${base}/health`)).json()) as { sessions: number }).sessions
+async function sessionCount(base: string, token: string): Promise<number> {
+  return ((await (await fetch(`${base}/health`, { headers: { authorization: `Bearer ${token}` } })).json()) as { sessions: number }).sessions
 }
 
 const buildBody = {
@@ -55,7 +55,7 @@ describe('gateway session store lifecycle', () => {
     const gateway = await start()
     const built = await gateway.post(buildBody, { 'x-session-id': 'released' })
     expect(built.status).toBe(200)
-    expect(await sessionCount(gateway.base)).toBe(1)
+    expect(await sessionCount(gateway.base, gateway.token)).toBe(1)
 
     await gateway.close()
     open.length = 0
@@ -68,11 +68,11 @@ describe('gateway session store lifecycle', () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
     try {
       const relisted = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-      expect(await sessionCount(relisted)).toBe(0)
+      expect(await sessionCount(relisted, gateway.token)).toBe(0)
 
       const after = await fetch(`${relisted}/tool`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-session-id': 'released' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${gateway.token}`, 'x-session-id': 'released' },
         body: JSON.stringify({ tool: 'explain_modeled_result' }),
       })
       expect(((await after.json()) as { hasPlan: boolean }).hasPlan).toBe(false)
@@ -101,7 +101,7 @@ describe('gateway session store lifecycle', () => {
       expect(handle.hasRef()).toBe(false)
 
       expect((await gateway.post(buildBody, { 'x-session-id': 'idle' })).status).toBe(200)
-      expect(await sessionCount(gateway.base)).toBe(1)
+      expect(await sessionCount(gateway.base, gateway.token)).toBe(1)
 
       // Fire the timer's own callback with the clock past the TTL, then put the
       // clock back before the next request. Sweeping under a still-advanced
@@ -113,7 +113,7 @@ describe('gateway session store lifecycle', () => {
       } finally {
         nowSpy.mockRestore()
       }
-      expect(await sessionCount(gateway.base)).toBe(0)
+      expect(await sessionCount(gateway.base, gateway.token)).toBe(0)
 
       await gateway.close()
       open.length = 0

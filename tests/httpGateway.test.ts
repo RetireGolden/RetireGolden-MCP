@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { request } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { singleHousehold, singlePolicy } from './fixtures.js'
 import { startTestGateway, type TestGateway } from './helpers/gateway.js'
 
@@ -23,11 +25,54 @@ describe('HTTP gateway integration', () => {
   })
 
   it('serves /health', async () => {
-    const r = await fetch(`${BASE}/health`)
+    const r = await gateway.get('/health')
     expect(r.status).toBe(200)
     const body = (await r.json()) as { ok: boolean; transport: string }
     expect(body.ok).toBe(true)
     expect(body.transport).toBe('http-research')
+  })
+
+  it('requires bearer authentication before routing or reading a body', async () => {
+    const r = await fetch(`${BASE}/tool`, { method: 'POST', body: 'not json' })
+    expect(r.status).toBe(401)
+    expect(await r.json()).toEqual({ error: 'UNAUTHORIZED' })
+  })
+
+  it('rejects mismatched origin metadata before routing', async () => {
+    const r = await gateway.get('/health', { origin: 'null' })
+    expect(r.status).toBe(403)
+    expect(await r.json()).toEqual({ error: 'INVALID_ORIGIN' })
+  })
+
+  it('rejects a non-literal Host and cross-site fetch metadata', async () => {
+    const port = (gateway.server.address() as AddressInfo).port
+    const wrongHost = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = request({ hostname: '127.0.0.1', port, path: '/health', headers: { host: `localhost:${port}`, authorization: `Bearer ${gateway.token}` } }, (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (chunk: Buffer) => chunks.push(chunk))
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }))
+      })
+      req.on('error', reject)
+      req.end()
+    })
+    expect(wrongHost.status).toBe(403)
+    expect(JSON.parse(wrongHost.body)).toEqual({ error: 'INVALID_HOST' })
+
+    const crossSite = await gateway.get('/health', { 'sec-fetch-site': 'cross-site' })
+    expect(crossSite.status).toBe(403)
+    expect(await crossSite.json()).toEqual({ error: 'INVALID_FETCH_SITE' })
+  })
+
+  it.each([null, [], 1, 'text'])('rejects non-object /tool JSON: %j', async (body) => {
+    const r = await post(body, { 'x-session-id': 'shape' })
+    expect(r.status).toBe(400)
+    expect(((await r.json()) as { error: string }).error).toBe('INVALID_JSON')
+  })
+
+  it.each([null, [], 1, 'text'])('rejects non-object arguments: %j', async (argumentsValue) => {
+    const r = await post({ tool: 'explain_modeled_result', arguments: argumentsValue }, { 'x-session-id': 'args-shape' })
+    expect(r.status).toBe(400)
+    expect(((await r.json()) as { error: string }).error).toBe('INVALID_ARGS')
   })
 
   it('rejects a request with no x-session-id header (400)', async () => {
@@ -57,7 +102,7 @@ describe('HTTP gateway integration', () => {
   })
 
   it('does not burn a session slot on an invalid request', async () => {
-    const before = ((await (await fetch(`${BASE}/health`)).json()) as { sessions: number })
+    const before = ((await (await gateway.get('/health')).json()) as { sessions: number })
       .sessions
     await post('not json at all', { 'x-session-id': 'never-created-1' })
     await post({ tool: 'no_such_tool' }, { 'x-session-id': 'never-created-2' })
@@ -65,7 +110,7 @@ describe('HTTP gateway integration', () => {
       { tool: 'batch_evaluate', arguments: { policies: [] } },
       { 'x-session-id': 'never-created-3' },
     )
-    const after = ((await (await fetch(`${BASE}/health`)).json()) as { sessions: number })
+    const after = ((await (await gateway.get('/health')).json()) as { sessions: number })
       .sessions
     expect(after).toBe(before)
   })

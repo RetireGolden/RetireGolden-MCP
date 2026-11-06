@@ -24,6 +24,8 @@ export interface TestGateway {
    * observable by re-listening the same server and re-reading `/health`.
    */
   server: Server
+  token: string
+  get(path: string, headers?: Record<string, string>): Promise<Response>
   /**
    * POST to `/tool`. A string body is sent verbatim (so a suite can post
    * malformed JSON); anything else is JSON-stringified.
@@ -50,9 +52,10 @@ export async function startTestGateway(): Promise<TestGateway> {
   }
 
   const { startHttpGateway } = await import('../../src/http/gateway.js')
+  const token = 'test-only-http-gateway-token-000000000000'
   let server: Server
   try {
-    server = await startHttpGateway({ port: 0, host: '127.0.0.1' })
+    server = await startHttpGateway({ port: 0, host: '127.0.0.1', token })
   } catch (e) {
     restoreOptIn()
     throw e
@@ -62,10 +65,14 @@ export async function startTestGateway(): Promise<TestGateway> {
   return {
     base,
     server,
+    token,
+    get(path, headers = {}) {
+      return fetch(`${base}${path}`, { headers: { authorization: `Bearer ${token}`, ...headers } })
+    },
     post(body, headers = {}) {
       return fetch(`${base}/tool`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...headers },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, ...headers },
         body: typeof body === 'string' ? body : JSON.stringify(body),
       })
     },

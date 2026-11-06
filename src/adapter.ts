@@ -49,6 +49,22 @@ import {
 } from './buildPlan.js'
 import { getVersions } from './versions.js'
 import type { ConventionKnobs, SessionState } from './session.js'
+import {
+  boundedCaveats,
+  calendarSpanIssues,
+  complexityIssue,
+  planEndYear,
+  structuralBudgetIssue,
+} from './limits.js'
+
+function sessionComputationIssue(session: SessionState, work = 1): string | null {
+  if (!session.plan) return null
+  return (
+    structuralBudgetIssue(session.plan) ??
+    calendarSpanIssues(session.plan, session.startYear)[0] ??
+    complexityIssue((planEndYear(session.plan) ?? session.startYear) - session.startYear + 1, work)
+  )
+}
 
 /**
  * The tax stack EVERY simulating path runs. Deliberately identical to the
@@ -193,7 +209,7 @@ export { getVersions }
  * to JSON.stringify of the original, so the protocol baseline does not move.
  */
 export function snapshotCaveats(session: SessionState): string[] {
-  return [...session.caveats]
+  return boundedCaveats(session.caveats)
 }
 
 /**
@@ -233,6 +249,14 @@ function snapshotJson<T>(value: T): T {
  * alone, as before. @see startYearIssues
  */
 export function validatePlanJson(input: unknown, startYear?: number) {
+  const budgetIssue = structuralBudgetIssue(input)
+  if (budgetIssue) {
+    return {
+      ok: false as const,
+      issues: [budgetIssue],
+      ...(startYear === undefined ? {} : { startYear }),
+    }
+  }
   const parsed = parsePlan(input)
   if (startYear === undefined) return parsed
   if (!parsed.ok) return { ...parsed, startYear }
@@ -284,6 +308,8 @@ export function runProjection(
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
+  const budgetIssue = sessionComputationIssue(session)
+  if (budgetIssue) return { ok: false as const, error: 'COMPUTATION_LIMIT', message: budgetIssue }
   const simulateOptions = {
     startYear: session.startYear,
     taxCalculator: taxCalc(session.plan),
@@ -371,6 +397,8 @@ export function runMonteCarlo(
   // An omitted pathCount takes the engine's default parameter, the headline's.
   const headline = headlineMonteCarloOptions(session.plan, session.startYear, opts.pathCount)
   const pathCount = headline.pathCount
+  const budgetIssue = sessionComputationIssue(session, pathCount)
+  if (budgetIssue) return { ok: false as const, error: 'COMPUTATION_LIMIT', message: budgetIssue }
   const seed = opts.seed ?? headline.seed
   const returnVolPct = opts.returnVolPct ?? MC_DEFAULT_RETURN_VOL_PCT
   const modelConfig =
@@ -430,6 +458,8 @@ export function batchEvaluate(
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan with a household first' }
   }
+  const budgetIssue = sessionComputationIssue(session, policies.length)
+  if (budgetIssue) return { ok: false as const, error: 'COMPUTATION_LIMIT', message: budgetIssue }
   const results: Array<{
     index: number
     policy: PolicyParams
@@ -632,7 +662,7 @@ export function batchEvaluate(
           : objective === 'ending_trad'
             ? summary.endingByCategory.traditional
             : summary.endingAfterTaxEstate
-      results.push({ index: i, policy, objective: obj, ok: true, caveats })
+      results.push({ index: i, policy, objective: obj, ok: true, caveats: boundedCaveats(caveats) })
     } catch (e) {
       results.push({
         index: i,
@@ -659,6 +689,8 @@ export async function runOptimizer(session: SessionState) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
+  const budgetIssue = sessionComputationIssue(session, 5_000)
+  if (budgetIssue) return { ok: false as const, error: 'COMPUTATION_LIMIT', message: budgetIssue }
   try {
     const simulateOptions = {
       startYear: session.startYear,
@@ -703,6 +735,8 @@ export function solveMaxSpending(session: SessionState) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
+  const budgetIssue = sessionComputationIssue(session, 5_000)
+  if (budgetIssue) return { ok: false as const, error: 'COMPUTATION_LIMIT', message: budgetIssue }
   try {
     const simulateOptions = {
       startYear: session.startYear,
@@ -893,6 +927,10 @@ export function compareScenarios(
 ) {
   // Every arm says which year it judged, the refusals included.
   const year = startYear ?? session.startYear
+  const budgetA = structuralBudgetIssue(planA, 'planA')
+  if (budgetA) return { ok: false as const, error: 'INVALID_PLAN_A', startYear: year, issues: [budgetA] }
+  const budgetB = structuralBudgetIssue(planB, 'planB')
+  if (budgetB) return { ok: false as const, error: 'INVALID_PLAN_B', startYear: year, issues: [budgetB] }
   const a = parsePlan(planA)
   const b = parsePlan(planB)
   if (!a.ok) return { ok: false as const, error: 'INVALID_PLAN_A', startYear: year, issues: a.issues }
@@ -1233,6 +1271,8 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
       message: 'Call build_plan first to seed a plan before update_plan',
     }
   }
+  const budgetIssue = structuralBudgetIssue({ plan: session.plan, operations: ops }, 'update')
+  if (budgetIssue) return { ok: false as const, error: 'INVALID_PLAN', issues: [budgetIssue] }
   // Guard the empty batch in the exported adapter (the MCP tool schema already
   // requires min 1, but a programmatic caller can pass []). Without this an empty
   // batch would reparse/commit the unchanged plan, drop the cached projection,
