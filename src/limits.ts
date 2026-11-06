@@ -12,7 +12,13 @@ export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 export const MAX_CAVEATS = 64
 export const MAX_CAVEAT_CHARS = 2_048
 export const MAX_UPDATE_OPERATIONS = 1_000
-const COLLECTION_LIMITS: Record<string, number> = { people: 20, accounts: 500, incomes: 500, oneTimeGoals: 1_000, phases: 1_000, careEvents: 1_000, events: 1_000, operations: MAX_UPDATE_OPERATIONS }
+export const MAX_ARRAY_ENTRIES = 1_500
+const COLLECTION_LIMITS: Record<string, number> = {
+  people: 20,
+  accounts: 500,
+  incomes: 500,
+  operations: MAX_UPDATE_OPERATIONS,
+}
 
 function primitiveBytes(value: unknown): number {
   if (typeof value === 'string') return jsonStringBytes(value)
@@ -34,30 +40,52 @@ function jsonStringBytes(value: string): number {
   return bytes
 }
 
+interface BudgetInspection {
+  issue: string | null
+  collectionCount: number
+  workFactor: number
+}
+
 /** Inspect untrusted JSON-shaped input without first materializing its serialization. */
-export function structuralBudgetIssue(value: unknown, label = 'plan'): string | null {
+function inspectBudget(value: unknown, label = 'plan'): BudgetInspection {
   const stack: Array<{ value: unknown; depth: number; key?: string; exit?: boolean }> = [{ value, depth: 0 }]
   const active = new Set<object>()
   let nodes = 0
   let bytes = 0
+  let structuredArrayEntries = 0
+  let primitiveArrayEntries = 0
+  const result = (issue: string | null): BudgetInspection => {
+    const collectionCount = structuredArrayEntries + Math.ceil(primitiveArrayEntries / 12)
+    return {
+      issue,
+      collectionCount,
+      workFactor: Math.max(1, collectionCount / 25, nodes / 1_000),
+    }
+  }
   while (stack.length > 0) {
     const item = stack.pop()!
     if (item.exit) {
       active.delete(item.value as object)
       continue
     }
-    if (++nodes > MAX_PLAN_NODES) return `${label} exceeds the structural node budget`
-    if (item.depth > MAX_PLAN_DEPTH) return `${label} exceeds the nesting budget`
+    if (++nodes > MAX_PLAN_NODES) return result(`${label} exceeds the structural node budget`)
+    if (item.depth > MAX_PLAN_DEPTH) return result(`${label} exceeds the nesting budget`)
     bytes += primitiveBytes(item.value)
-    if (bytes > MAX_PLAN_BYTES) return `${label} exceeds the ${MAX_PLAN_BYTES}-byte budget`
+    if (bytes > MAX_PLAN_BYTES) return result(`${label} exceeds the ${MAX_PLAN_BYTES}-byte budget`)
     if (typeof item.value !== 'object' || item.value === null) continue
-    if (active.has(item.value)) return `${label} must be acyclic JSON`
+    if (active.has(item.value)) return result(`${label} must be acyclic JSON`)
     active.add(item.value)
     stack.push({ ...item, exit: true })
     if (Array.isArray(item.value)) {
-      const cap = item.key ? COLLECTION_LIMITS[item.key] : undefined
-      if (cap !== undefined && item.value.length > cap) return `${label}.${item.key} exceeds ${cap} entries`
-      for (const child of item.value) stack.push({ value: child, depth: item.depth + 1 })
+      const cap = (item.key ? COLLECTION_LIMITS[item.key] : undefined) ?? MAX_ARRAY_ENTRIES
+      if (item.value.length > cap) {
+        return result(`${label}.${item.key ?? 'items'} exceeds ${cap} entries`)
+      }
+      for (const child of item.value) {
+        if (typeof child === 'object' && child !== null) structuredArrayEntries += 1
+        else primitiveArrayEntries += 1
+        stack.push({ value: child, depth: item.depth + 1 })
+      }
       continue
     }
     for (const [key, child] of Object.entries(item.value)) {
@@ -65,7 +93,11 @@ export function structuralBudgetIssue(value: unknown, label = 'plan'): string | 
       stack.push({ value: child, depth: item.depth + 1, key })
     }
   }
-  return null
+  return result(null)
+}
+
+export function structuralBudgetIssue(value: unknown, label = 'plan'): string | null {
+  return inspectBudget(value, label).issue
 }
 
 export function planEndYear(plan: Plan): number | null {
@@ -90,40 +122,25 @@ export function calendarSpanIssues(plan: Plan, startYear: number): string[] {
 
 interface PlanBudget {
   issue: string | null
+  collectionCount: number
   workFactor: number
 }
 
 const committedPlanBudgets = new WeakMap<object, PlanBudget>()
 
-function arrayLength(value: unknown): number {
-  return Array.isArray(value) ? value.length : 0
-}
-
 export function planCollectionCount(plan: Plan): number {
-  const record = plan as unknown as Record<string, unknown>
-  const expenses = record.expenses as Record<string, unknown> | undefined
-  const household = record.household as Record<string, unknown> | undefined
-  return (
-    arrayLength(household?.people) +
-    arrayLength(record.accounts) +
-    arrayLength(record.incomes) +
-    arrayLength(expenses?.oneTimeGoals) +
-    arrayLength(expenses?.phases) +
-    arrayLength(expenses?.careEvents) +
-    arrayLength(record.careEvents) +
-    arrayLength(record.events)
-  )
+  return committedPlanBudget(plan).collectionCount
 }
 
 export function planWorkFactor(plan: Plan): number {
-  return Math.max(1, planCollectionCount(plan) / 25)
+  return committedPlanBudget(plan).workFactor
 }
 
 /** Inspect an immutable plan once, then reuse the result on calculation paths. */
 export function committedPlanBudget(plan: Plan): PlanBudget {
   const cached = committedPlanBudgets.get(plan)
   if (cached) return cached
-  const result = { issue: structuralBudgetIssue(plan), workFactor: planWorkFactor(plan) }
+  const result = inspectBudget(plan)
   committedPlanBudgets.set(plan, result)
   return result
 }

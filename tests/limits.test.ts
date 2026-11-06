@@ -1,10 +1,28 @@
 import { describe, expect, it } from 'vitest'
+import type { Plan } from '@retiregolden/engine'
 import * as adapter from '../src/adapter.js'
 import { buildPlanFromParams } from '../src/buildPlan.js'
-import { MAX_CAVEAT_CHARS, MAX_CAVEATS, structuralBudgetIssue } from '../src/limits.js'
+import {
+  MAX_ARRAY_ENTRIES,
+  MAX_CAVEAT_CHARS,
+  MAX_CAVEATS,
+  planCollectionCount,
+  planWorkFactor,
+  structuralBudgetIssue,
+} from '../src/limits.js'
 import { createSession } from '../src/session.js'
 import { jsonResult, getTool, validateToolArgs } from '../src/toolTable.js'
 import { singleHousehold, singlePolicy, builtOk } from './fixtures.js'
+
+function legacyConversionActions(count: number): Plan['strategies']['retirementActions'] {
+  return Array.from({ length: count }, (_, index) => ({
+    actionId: `action-${index}`,
+    kind: 'legacyAggregateRothConversion',
+    year: 2026,
+    requestedAmount: 1,
+    provenance: { source: 'migration' },
+  })) as unknown as Plan['strategies']['retirementActions']
+}
 
 describe('shared input and response limits', () => {
   it.each(['build_plan', 'validate_plan', 'compare_scenarios'])('publishes the shared calendar-year range for %s', (name) => {
@@ -196,5 +214,52 @@ describe('shared input and response limits', () => {
       ok: false,
       error: 'COMPUTATION_LIMIT',
     })
+  })
+
+  it('counts nested engine collections in the aggregate work budget', () => {
+    const seed = builtOk(buildPlanFromParams({
+      household: singleHousehold,
+      policy: singlePolicy,
+      startYear: 2026,
+    }))
+    const plan = structuredClone(seed.plan)
+    plan.household.people[0]!.longevity.planningAge = 120
+    plan.strategies.retirementActions = legacyConversionActions(500)
+    const session = createSession(2026)
+    expect(adapter.setPlanFromBuild(session, { plan, startYear: 2026 }).ok).toBe(true)
+    expect(planCollectionCount(session.plan!)).toBeGreaterThanOrEqual(500)
+    expect(planWorkFactor(session.plan!)).toBeGreaterThanOrEqual(20)
+    expect(adapter.runProjection(session).ok).toBe(true)
+    expect(adapter.runMonteCarlo(session, { pathCount: 5_000 })).toMatchObject({
+      ok: false,
+      error: 'COMPUTATION_LIMIT',
+    })
+    expect(adapter.batchEvaluate(
+      session,
+      Array.from({ length: 500 }, () => ({ ...singlePolicy })),
+    )).toMatchObject({
+      ok: false,
+      error: 'COMPUTATION_LIMIT',
+    })
+  })
+
+  it('rejects an oversized nested plan array before parsing', () => {
+    const seed = builtOk(buildPlanFromParams({
+      household: singleHousehold,
+      policy: singlePolicy,
+      startYear: 2026,
+    }))
+    const plan = structuredClone(seed.plan)
+    plan.strategies.retirementActions = legacyConversionActions(MAX_ARRAY_ENTRIES + 1)
+    expect(structuralBudgetIssue(plan)).toBe(
+      `plan.retirementActions exceeds ${MAX_ARRAY_ENTRIES} entries`,
+    )
+    const result = buildPlanFromParams({ plan, startYear: 2026 })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.issues).toEqual([
+        `plan.retirementActions exceeds ${MAX_ARRAY_ENTRIES} entries`,
+      ])
+    }
   })
 })

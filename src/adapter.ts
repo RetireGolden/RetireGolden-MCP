@@ -56,7 +56,6 @@ import {
   complexityIssue,
   normalizeCaveat,
   planEndYear,
-  planWorkFactor,
   structuralBudgetIssue,
 } from './limits.js'
 
@@ -959,9 +958,11 @@ export function compareScenarios(
   if (asOfB.length > 0) return { ok: false as const, error: 'INVALID_PLAN_B', startYear: year, issues: asOfB }
   const horizonA = (planEndYear(a.plan) ?? year) - year + 1
   const horizonB = (planEndYear(b.plan) ?? year) - year + 1
+  const workBudgetA = committedPlanBudget(a.plan)
+  const workBudgetB = committedPlanBudget(b.plan)
   const comparisonIssue = complexityIssue(
     1,
-    horizonA * planWorkFactor(a.plan) + horizonB * planWorkFactor(b.plan),
+    horizonA * workBudgetA.workFactor + horizonB * workBudgetB.workFactor,
   )
   if (comparisonIssue) {
     return {
