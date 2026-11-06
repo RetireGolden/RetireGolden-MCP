@@ -7,7 +7,7 @@ import { execFile as execFileCallback } from 'node:child_process'
 import type { Dirent } from 'node:fs'
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, relative, resolve, sep } from 'node:path'
+import { basename, join, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -269,6 +269,11 @@ function shellSafe(args: string[]): string[] {
   return args.map((arg) => (/[\s^&()%!"]/.test(arg) ? `"${arg}"` : arg))
 }
 
+function configuredTarballPath(value: string | undefined): string | undefined {
+  const configured = value?.trim()
+  return configured ? resolve(configured) : undefined
+}
+
 /**
  * The harness captures the malformed call only when asked to, and this gate
  * always asks; a missing capture is a harness wiring bug, not a lane result.
@@ -293,26 +298,37 @@ describe('packed npm artifact', () => {
   let v2Default!: LaneCapture
   let v2Auto!: LaneCapture
   let v2Pinned!: LaneCapture
+  let tarballPath!: string
   let packDirectory: string | undefined
   let consumerDirectory: string | undefined
 
   beforeAll(async () => {
     packageManifest = await readPackageManifest(join(packageRoot, 'package.json'))
-    packDirectory = await mkdtemp(join(tmpdir(), 'retiregolden-mcp-pack-'))
 
     // `pnpm pack` publishes dist/, so it must be current — but the build itself
     // belongs to tests/globalSetup.ts, which has already run. Assert only.
     await ensureBuild(packageRoot)
     expectedFiles = await expectedTarballFiles(packageManifest)
-    await execFile('pnpm', shellSafe(['pack', '--pack-destination', packDirectory]), {
-      cwd: packageRoot,
-      windowsHide: true,
-      maxBuffer: 10 * 1024 * 1024,
-      shell: process.platform === 'win32',
-    })
 
     const tarballName = `${packageManifest.name.replace(/^@/, '').replace('/', '-')}-${packageManifest.version}.tgz`
-    const tarballPath = join(packDirectory, tarballName)
+    const suppliedTarball = configuredTarballPath(process.env.PACKED_TARBALL_PATH)
+    if (suppliedTarball) {
+      tarballPath = suppliedTarball
+      if (basename(tarballPath) !== tarballName) {
+        throw new Error(
+          `PACKED_TARBALL_PATH named ${basename(tarballPath)}; expected ${tarballName}`,
+        )
+      }
+    } else {
+      packDirectory = await mkdtemp(join(tmpdir(), 'retiregolden-mcp-pack-'))
+      await execFile('pnpm', shellSafe(['pack', '--pack-destination', packDirectory]), {
+        cwd: packageRoot,
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024,
+        shell: process.platform === 'win32',
+      })
+      tarballPath = join(packDirectory, tarballName)
+    }
     await stat(tarballPath)
     tarballFiles = await listTarballFiles(tarballPath)
 
@@ -427,6 +443,19 @@ describe('packed npm artifact', () => {
       expect(tarballFiles.some((entry) => entry.startsWith(forbiddenPrefix)), forbiddenPrefix).toBe(false)
     }
   }, 120_000)
+
+  it('resolves the workflow tarball handoff without assigning it to test cleanup', () => {
+    expect(configuredTarballPath(' ./artifact/example.tgz ')).toBe(
+      resolve('./artifact/example.tgz'),
+    )
+    expect(configuredTarballPath('')).toBeUndefined()
+    if (process.env.PACKED_TARBALL_PATH?.trim()) {
+      expect(tarballPath).toBe(configuredTarballPath(process.env.PACKED_TARBALL_PATH))
+      expect(packDirectory).toBeUndefined()
+    } else {
+      expect(packDirectory).toBeDefined()
+    }
+  })
 
   it('installs one v2 MCP runtime, one exact engine and one exact solver through npm', () => {
     const mcpPackages = installedPackages.filter((installed) =>
