@@ -12,6 +12,16 @@ import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema/current'
 import { stateParamsFor } from '@retiregolden/engine/params/state'
 import { getVersions } from './versions.js'
 import { clockStartYear, systemClock, type Clock } from './session.js'
+import {
+  boundedCaveats,
+  calendarSpanIssues,
+  normalizeCaveat,
+  structuralBudgetIssue,
+} from './limits.js'
+
+function normalizedUniqueCaveats(caveats: readonly string[]): string[] {
+  return boundedCaveats([...new Set(caveats.map(normalizeCaveat))])
+}
 
 export const PersonParamsSchema = z.object({
   birth_year: z.number().int().min(1900).max(2100).describe('4-digit birth year, e.g. 1960'),
@@ -744,13 +754,32 @@ export interface BuildPlanOptions {
  * engine's own issue text, which names both ways to restate it.
  */
 export function startYearIssues(plan: Plan, startYear: number): string[] {
-  return asOfIssues(plan, startYear)
+  return [...calendarSpanIssues(plan, startYear), ...asOfIssues(plan, startYear)]
 }
 
 export function buildPlanFromParams(input: BuildPlanInput, options: BuildPlanOptions = {}): BuildPlanResult {
   const caveats: string[] = []
   const clock = options.clock ?? systemClock
   const startYear = input.startYear ?? options.defaultStartYear ?? clockStartYear(clock)
+  for (const [name, value] of [
+    ['engineVersion', input.engineVersion],
+    ['mcpVersion', input.mcpVersion],
+  ] as const) {
+    if (
+      value !== undefined &&
+      value !== null &&
+      (value.length > 128 || !/^[\x20-\x7e]*$/u.test(value))
+    ) {
+      return {
+        ok: false,
+        startYear,
+        caveats,
+        issues: [`${name} must be at most 128 single-line printable ASCII characters`],
+      }
+    }
+  }
+  const budgetIssue = input.plan === undefined ? null : structuralBudgetIssue(input.plan)
+  if (budgetIssue) return { ok: false, startYear, caveats, issues: [budgetIssue] }
   const conventions = input.conventions ?? {}
 
   if (input.plan != null) {
@@ -865,7 +894,7 @@ export function buildPlanFromParams(input: BuildPlanInput, options: BuildPlanOpt
       documentOverride > 0 ? documentOverride : null,
     )
     if (documentStateCaveat) caveats.push(documentStateCaveat)
-    return { ok: true, plan: documentPlan, startYear, caveats }
+    return { ok: true, plan: documentPlan, startYear, caveats: normalizedUniqueCaveats(caveats) }
   }
 
   // The typed-path shape rules, in the ONE place both transports read them from.
@@ -1157,7 +1186,7 @@ function buildTypedPlan(
     plan: parsed.plan,
     startYear,
     endYear,
-    caveats,
+    caveats: normalizedUniqueCaveats(caveats),
     ordering_unsupported,
   }
 }

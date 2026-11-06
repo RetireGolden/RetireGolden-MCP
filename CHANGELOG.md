@@ -3,6 +3,17 @@
 All notable changes to `@retiregolden/mcp` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- Calendar start years are limited to 1900–2200 and effective plan spans to
+  120 years. Full-plan documents previously accepted outside those bounds must
+  be adjusted before import.
+- Full plans, calculations, caveats, update batches, and serialized responses
+  now have explicit structural and work limits sized above documented household
+  usage.
+- The opt-in loopback HTTP research gateway now requires a transport-only bearer
+  token and the exact bound loopback authority on every request.
+
 ## 0.13.1
 
 **Moves the exact `@retiregolden/engine` dependency from 0.5.0 to 0.6.0, and

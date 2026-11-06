@@ -21,6 +21,11 @@ import {
   type BuildPlanInput,
   type PolicyParams,
 } from './buildPlan.js'
+import {
+  CalendarYearSchema,
+  MAX_UPDATE_OPERATIONS,
+  stringifyBoundedJson,
+} from './limits.js'
 
 export const EDUCATIONAL =
   'Educational decision-support only — not tax, legal, or financial advice. Do not prescribe securities actions.'
@@ -72,7 +77,7 @@ const UpdatePlanOpSchema = z.discriminatedUnion('op', [
 
 export function jsonResult(data: unknown) {
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+    content: [{ type: 'text' as const, text: stringifyBoundedJson(data, 2) }],
   }
 }
 
@@ -132,12 +137,10 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       conversion: ConversionSchema.optional().describe(
         'Optional manual Roth conversion schedule (overrides bracket-fill conversions)',
       ),
-      startYear: z
-        .number()
-        .int()
+      startYear: CalendarYearSchema
         .optional()
         .describe(
-          "The calendar year the projection starts in (its first ledger year). Omit it and the build uses the current calendar year on this server's clock, as the RetireGolden app does for a user's plan. Pass the startYear an export carries (export_plan's, or the app's copied plan): the projection then starts where the exported one did, while a plan rebuilt without it in a later calendar year starts later and its figures move. Every projecting tool echoes the startYear it ran from.",
+          "The calendar year the projection starts in (its first ledger year), supported from 1900–2200 with an effective plan span of at most 120 years. Omit it and the build uses the current calendar year on this server's clock, as the RetireGolden app does for a user's plan. Pass the startYear an export carries (export_plan's, or the app's copied plan): the projection then starts where the exported one did, while a plan rebuilt without it in a later calendar year starts later and its figures move. Every projecting tool echoes the startYear it ran from.",
         ),
       schemaVersion: z
         .number()
@@ -148,6 +151,8 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         ),
       engineVersion: z
         .string()
+        .max(128)
+        .regex(/^[\x20-\x7e]*$/, 'must be single-line printable ASCII')
         .nullable()
         .optional()
         .describe(
@@ -155,6 +160,8 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
         ),
       mcpVersion: z
         .string()
+        .max(128)
+        .regex(/^[\x20-\x7e]*$/, 'must be single-line printable ASCII')
         .nullable()
         .optional()
         .describe(
@@ -187,12 +194,10 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     description: `${EDUCATIONAL} Validate plan JSON (or the current session plan) with the engine, and against a start year as build_plan checks it: a pension lump-sum election dated before that year is reported as an issue. Fields the engine does not read, which build_plan would drop, are listed in warnings. The result echoes the startYear it checked against.`,
     inputShape: {
       plan: z.unknown().optional(),
-      startYear: z
-        .number()
-        .int()
+      startYear: CalendarYearSchema
         .optional()
         .describe(
-          "The calendar year to check the plan against, the year its projection would start in. Omit it to use the session's startYear.",
+          "The calendar year to check the plan against, supported from 1900–2200 with an effective plan span of at most 120 years. Omit it to use the session's startYear.",
         ),
     },
     handler: (session, args) => {
@@ -311,12 +316,10 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
     inputShape: {
       planA: z.unknown(),
       planB: z.unknown(),
-      startYear: z
-        .number()
-        .int()
+      startYear: CalendarYearSchema
         .optional()
         .describe(
-          "The calendar year both plans are projected from. Omit it to use the session's startYear (the year of the last build_plan, or the current calendar year before any build).",
+          "The calendar year both plans are projected from, supported from 1900–2200 with each effective plan span limited to 120 years. Omit it to use the session's startYear (the year of the last build_plan, or the current calendar year before any build).",
         ),
     },
     handler: (session, args) =>
@@ -387,6 +390,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       operations: z
         .array(UpdatePlanOpSchema)
         .min(1)
+        .max(MAX_UPDATE_OPERATIONS)
         .describe('Ordered list of merge operations applied atomically (all-or-nothing).'),
     },
     handler: (session, args) => adapter.updatePlan(session, args.operations as adapter.UpdatePlanOp[]),

@@ -31,6 +31,7 @@ import {
   recordSuppliedArguments,
   type ToolEntry,
 } from './toolTable.js'
+import { stringifyBoundedJson } from './limits.js'
 
 export { EDUCATIONAL, jsonResult } from './toolTable.js'
 
@@ -165,7 +166,7 @@ export function registerResources(server: McpServer): void {
         {
           uri: PLAN_SCHEMA_ID,
           mimeType: 'application/json',
-          text: JSON.stringify(planJsonSchema),
+          text: stringifyBoundedJson(planJsonSchema),
         },
       ],
     }),

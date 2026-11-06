@@ -1,11 +1,11 @@
 /**
  * The HTTP gateway is a RetireBench research transport, not a product API: it is
- * unauthenticated and accepts a client-supplied session id. These tests pin the
+ * It accepts a client-supplied session id. These tests pin the
  * two properties that keep it from becoming a liability in a package a desktop
  * app depends on — it binds loopback only, and it does not start by accident.
  */
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HTTP_GATEWAY_OPT_IN_ENV } from '../src/http/gateway.js'
 
 // The exported constant, not a copy of its value: a rename that missed this
@@ -17,6 +17,7 @@ const OPT_IN = HTTP_GATEWAY_OPT_IN_ENV
 afterEach(() => {
   delete process.env[OPT_IN]
   delete process.env.RETIREGOLDEN_HTTP_HOST
+  delete process.env.RETIREGOLDEN_HTTP_GATEWAY_TOKEN
 })
 
 describe('HTTP gateway fencing', () => {
@@ -65,6 +66,47 @@ describe('HTTP gateway fencing', () => {
       expect(server.listening).toBe(true)
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('rejects malformed configured tokens', async () => {
+    process.env[OPT_IN] = '1'
+    const { startHttpGateway } = await import('../src/http/gateway.js')
+    await expect(startHttpGateway({ port: 0, token: 'too short' })).rejects.toThrow(/opts\.token must be at least 32 printable ASCII/i)
+    process.env.RETIREGOLDEN_HTTP_GATEWAY_TOKEN = 'also short'
+    await expect(startHttpGateway({ port: 0 })).rejects.toThrow(/RETIREGOLDEN_HTTP_GATEWAY_TOKEN must be at least 32 printable ASCII/i)
+  })
+
+  it('mints a distinct programmatic token without printing it', async () => {
+    process.env[OPT_IN] = '1'
+    delete process.env.RETIREGOLDEN_HTTP_GATEWAY_TOKEN
+    const { getHttpGatewayToken, startHttpGateway } = await import('../src/http/gateway.js')
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as typeof process.stdout.write)
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as typeof process.stderr.write)
+    let a: Awaited<ReturnType<typeof startHttpGateway>> | undefined
+    let b: Awaited<ReturnType<typeof startHttpGateway>> | undefined
+    try {
+      a = await startHttpGateway({ port: 0 })
+      b = await startHttpGateway({ port: 0 })
+      const tokenA = getHttpGatewayToken(a)
+      const tokenB = getHttpGatewayToken(b)
+      expect(tokenA).toMatch(/^[\x21-\x7e]{32,}$/)
+      expect(tokenB).not.toBe(tokenA)
+      const output = [consoleError, consoleLog, stdout, stderr]
+        .flatMap((spy) => spy.mock.calls.flat())
+        .map(String)
+        .join('\n')
+      expect(output).not.toContain(tokenA)
+      expect(output).not.toContain(tokenB)
+    } finally {
+      if (a) await new Promise<void>((resolve) => a!.close(() => resolve()))
+      if (b) await new Promise<void>((resolve) => b!.close(() => resolve()))
+      consoleError.mockRestore()
+      consoleLog.mockRestore()
+      stdout.mockRestore()
+      stderr.mockRestore()
     }
   })
 })

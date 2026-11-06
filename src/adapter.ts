@@ -49,6 +49,33 @@ import {
 } from './buildPlan.js'
 import { getVersions } from './versions.js'
 import type { ConventionKnobs, SessionState } from './session.js'
+import {
+  boundedCaveats,
+  calendarSpanIssues,
+  committedPlanBudget,
+  complexityIssue,
+  normalizeCaveat,
+  planEndYear,
+  structuralBudgetIssue,
+} from './limits.js'
+
+function sessionComputationIssue(session: SessionState, work = 1): string | null {
+  if (!session.plan) return null
+  const budget = committedPlanBudget(session.plan)
+  return (
+    budget.issue ??
+    calendarSpanIssues(session.plan, session.startYear)[0] ??
+    complexityIssue(
+      (planEndYear(session.plan) ?? session.startYear) - session.startYear + 1,
+      work,
+      budget.workFactor,
+    )
+  )
+}
+
+function normalizedUniqueCaveats(caveats: readonly string[]): string[] {
+  return boundedCaveats([...new Set(caveats.map(normalizeCaveat))])
+}
 
 /**
  * The tax stack EVERY simulating path runs. Deliberately identical to the
@@ -193,7 +220,7 @@ export { getVersions }
  * to JSON.stringify of the original, so the protocol baseline does not move.
  */
 export function snapshotCaveats(session: SessionState): string[] {
-  return [...session.caveats]
+  return boundedCaveats(session.caveats)
 }
 
 /**
@@ -233,6 +260,14 @@ function snapshotJson<T>(value: T): T {
  * alone, as before. @see startYearIssues
  */
 export function validatePlanJson(input: unknown, startYear?: number) {
+  const budgetIssue = structuralBudgetIssue(input)
+  if (budgetIssue) {
+    return {
+      ok: false as const,
+      issues: [budgetIssue],
+      ...(startYear === undefined ? {} : { startYear }),
+    }
+  }
   const parsed = parsePlan(input)
   if (startYear === undefined) return parsed
   if (!parsed.ok) return { ...parsed, startYear }
@@ -240,7 +275,7 @@ export function validatePlanJson(input: unknown, startYear?: number) {
   // without them, and build_plan would accept it with the same sentence as a
   // caveat. @see droppedFieldsSentence
   const dropped = droppedFields(input, parsed.plan)
-  const warnings = dropped.length > 0 ? [droppedFieldsSentence(dropped, 'document')] : []
+  const warnings = dropped.length > 0 ? [normalizeCaveat(droppedFieldsSentence(dropped, 'document'))] : []
   const asOf = startYearIssues(parsed.plan, startYear)
   if (asOf.length > 0) return { ok: false as const, issues: asOf, startYear, warnings }
   return { ...parsed, startYear, warnings }
@@ -267,14 +302,15 @@ export function setPlanFromBuild(
   }
   session.plan = result.plan
   session.startYear = result.startYear
-  session.caveats = [...result.caveats]
+  session.caveats = normalizedUniqueCaveats(result.caveats)
+  committedPlanBudget(session.plan)
   // structuredClone, not a spread: `irmaaLookbackMagis` is a tuple, so a
   // shallow copy would leave the CALLER holding the array the session now
   // treats as its own — mutating it after build_plan would silently change
   // exported conventions and modeled results.
   if (input.conventions) session.conventions = structuredClone(input.conventions)
   session.lastProjection = null
-  return result
+  return { ...result, caveats: snapshotCaveats(session) }
 }
 
 export function runProjection(
@@ -284,6 +320,8 @@ export function runProjection(
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
+  const budgetIssue = sessionComputationIssue(session)
+  if (budgetIssue) return { ok: false as const, error: 'COMPUTATION_LIMIT', message: budgetIssue }
   const simulateOptions = {
     startYear: session.startYear,
     taxCalculator: taxCalc(session.plan),
@@ -371,6 +409,8 @@ export function runMonteCarlo(
   // An omitted pathCount takes the engine's default parameter, the headline's.
   const headline = headlineMonteCarloOptions(session.plan, session.startYear, opts.pathCount)
   const pathCount = headline.pathCount
+  const budgetIssue = sessionComputationIssue(session, pathCount)
+  if (budgetIssue) return { ok: false as const, error: 'COMPUTATION_LIMIT', message: budgetIssue }
   const seed = opts.seed ?? headline.seed
   const returnVolPct = opts.returnVolPct ?? MC_DEFAULT_RETURN_VOL_PCT
   const modelConfig =
@@ -430,6 +470,8 @@ export function batchEvaluate(
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan with a household first' }
   }
+  const budgetIssue = sessionComputationIssue(session, policies.length)
+  if (budgetIssue) return { ok: false as const, error: 'COMPUTATION_LIMIT', message: budgetIssue }
   const results: Array<{
     index: number
     policy: PolicyParams
@@ -632,7 +674,7 @@ export function batchEvaluate(
           : objective === 'ending_trad'
             ? summary.endingByCategory.traditional
             : summary.endingAfterTaxEstate
-      results.push({ index: i, policy, objective: obj, ok: true, caveats })
+      results.push({ index: i, policy, objective: obj, ok: true, caveats: normalizedUniqueCaveats(caveats) })
     } catch (e) {
       results.push({
         index: i,
@@ -659,6 +701,8 @@ export async function runOptimizer(session: SessionState) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
+  const budgetIssue = sessionComputationIssue(session, 5_000)
+  if (budgetIssue) return { ok: false as const, error: 'COMPUTATION_LIMIT', message: budgetIssue }
   try {
     const simulateOptions = {
       startYear: session.startYear,
@@ -703,6 +747,8 @@ export function solveMaxSpending(session: SessionState) {
   if (!session.plan) {
     return { ok: false as const, error: 'NO_PLAN', message: 'Call build_plan first' }
   }
+  const budgetIssue = sessionComputationIssue(session, 5_000)
+  if (budgetIssue) return { ok: false as const, error: 'COMPUTATION_LIMIT', message: budgetIssue }
   try {
     const simulateOptions = {
       startYear: session.startYear,
@@ -893,6 +939,10 @@ export function compareScenarios(
 ) {
   // Every arm says which year it judged, the refusals included.
   const year = startYear ?? session.startYear
+  const budgetA = structuralBudgetIssue(planA, 'planA')
+  if (budgetA) return { ok: false as const, error: 'INVALID_PLAN_A', startYear: year, issues: [budgetA] }
+  const budgetB = structuralBudgetIssue(planB, 'planB')
+  if (budgetB) return { ok: false as const, error: 'INVALID_PLAN_B', startYear: year, issues: [budgetB] }
   const a = parsePlan(planA)
   const b = parsePlan(planB)
   if (!a.ok) return { ok: false as const, error: 'INVALID_PLAN_A', startYear: year, issues: a.issues }
@@ -906,6 +956,23 @@ export function compareScenarios(
   if (asOfA.length > 0) return { ok: false as const, error: 'INVALID_PLAN_A', startYear: year, issues: asOfA }
   const asOfB = startYearIssues(b.plan, year)
   if (asOfB.length > 0) return { ok: false as const, error: 'INVALID_PLAN_B', startYear: year, issues: asOfB }
+  const horizonA = (planEndYear(a.plan) ?? year) - year + 1
+  const horizonB = (planEndYear(b.plan) ?? year) - year + 1
+  const workBudgetA = committedPlanBudget(a.plan)
+  const workBudgetB = committedPlanBudget(b.plan)
+  const comparisonIssue = complexityIssue(
+    1,
+    horizonA * workBudgetA.workFactor + horizonB * workBudgetB.workFactor,
+  )
+  if (comparisonIssue) {
+    return {
+      ok: false as const,
+      error: 'COMPUTATION_LIMIT',
+      startYear: year,
+      issues: [comparisonIssue],
+      message: comparisonIssue,
+    }
+  }
   // Each side gets ITS OWN calculator: the two documents can name different states
   // or different flat overrides, and a "compare" that priced B at A's state rates
   // would attribute a tax difference to whatever else changed between them.
@@ -1244,6 +1311,8 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
       message: 'Provide at least one operation',
     }
   }
+  const operationsIssue = structuralBudgetIssue({ operations: ops }, 'operations')
+  if (operationsIssue) return { ok: false as const, error: 'INVALID_PLAN', issues: [operationsIssue] }
   // Work on a clone: nothing touches the live session until validation passes.
   const working = structuredClone(session.plan) as unknown as MutablePlan
   for (let i = 0; i < ops.length; i++) {
@@ -1263,6 +1332,9 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
   const priorMs = Date.parse(session.plan.updatedAtIso)
   const nextMs = Math.max(session.clock().getTime(), (Number.isNaN(priorMs) ? 0 : priorMs) + 1)
   working.updatedAtIso = new Date(nextMs).toISOString()
+
+  const planIssue = structuralBudgetIssue(working, 'plan')
+  if (planIssue) return { ok: false as const, error: 'INVALID_PLAN', issues: [planIssue] }
 
   const parsed = parsePlan(working)
   if (!parsed.ok) {
@@ -1285,6 +1357,7 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
   // message is stable (no per-call operation count) so repeated update_plan calls
   // cannot accumulate unbounded near-duplicate caveats.
   session.plan = parsed.plan
+  committedPlanBudget(session.plan)
   session.lastProjection = null
   if (!session.caveats.includes(STALE_PROJECTION_CAVEAT)) session.caveats.push(STALE_PROJECTION_CAVEAT)
 
@@ -1337,6 +1410,15 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
     if (!session.caveats.includes(magiCaveat)) session.caveats.push(magiCaveat)
   }
 
+  session.caveats = normalizedUniqueCaveats(session.caveats)
+  const responseCaveats =
+    dropped.length > 0
+      ? normalizedUniqueCaveats([
+          ...session.caveats,
+          droppedFieldsSentence(dropped, 'operations'),
+        ])
+      : snapshotCaveats(session)
+
   return {
     ok: true as const,
     appliedOperations: ops.length,
@@ -1346,10 +1428,7 @@ export function updatePlan(session: SessionState, ops: UpdatePlanOp[]) {
     plan: planSummary(parsed.plan),
     // A dropped-field note describes this call's operations, so it rides on
     // this response only and is not kept with the session's caveats.
-    caveats:
-      dropped.length > 0
-        ? [...snapshotCaveats(session), droppedFieldsSentence(dropped, 'operations')]
-        : snapshotCaveats(session),
+    caveats: responseCaveats,
   }
 }
 
