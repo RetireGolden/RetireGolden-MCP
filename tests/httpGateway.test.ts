@@ -33,9 +33,58 @@ describe('HTTP gateway integration', () => {
   })
 
   it('requires bearer authentication before routing or reading a body', async () => {
-    const r = await fetch(`${BASE}/tool`, { method: 'POST', body: 'not json' })
-    expect(r.status).toBe(401)
-    expect(await r.json()).toEqual({ error: 'UNAUTHORIZED' })
+    let client: ReturnType<typeof request> | undefined
+    const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      let finished = false
+      client = request(`${BASE}/tool`, { method: 'POST' }, (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (chunk: Buffer) => chunks.push(chunk))
+        res.on('end', () => {
+          finished = true
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') })
+        })
+      })
+      client.on('error', (error) => {
+        if (!finished) reject(error)
+      })
+      client.write('{"tool":"build_plan",')
+    })
+    client?.destroy()
+    expect(response.status).toBe(401)
+    expect(JSON.parse(response.body)).toEqual({ error: 'UNAUTHORIZED' })
+  })
+
+  it('settles a client-aborted request body quietly', async () => {
+    const port = (gateway.server.address() as AddressInfo).port
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const req = request({
+          hostname: '127.0.0.1',
+          port,
+          path: '/tool',
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${gateway.token}`,
+            'x-session-id': 'aborted-body',
+          },
+        })
+        req.on('error', (error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ECONNRESET') reject(error)
+        })
+        req.on('close', resolve)
+        req.on('socket', (socket) => {
+          socket.once('connect', () => {
+            req.write('{"tool":"build_plan",')
+            req.destroy()
+          })
+        })
+      })
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(logged.mock.calls.flat().join(' ')).not.toContain('request failed')
+    } finally {
+      logged.mockRestore()
+    }
   })
 
   it('rejects mismatched origin metadata before routing', async () => {

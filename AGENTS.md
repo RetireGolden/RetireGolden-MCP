@@ -26,8 +26,9 @@ Do not add private planning, strategy, or competitor material here.
   `pnpm run contract:generate`. Keep schemas and auth/secrets tight: do not put plan
   arguments on authorization callbacks; do not add credentials to tool
   input.
-- The HTTP gateway is an unauthenticated research stub. It stays opt-in
-  (`RETIREGOLDEN_HTTP_GATEWAY=1`) and loopback-only.
+- The HTTP gateway is a local research stub, not a product API. It stays opt-in
+  (`RETIREGOLDEN_HTTP_GATEWAY=1`), loopback-only, and fenced by a transport-only
+  bearer token (`RETIREGOLDEN_HTTP_GATEWAY_TOKEN` in CLI mode).
 - No comparisons to, or integrations with, third-party retirement engines.
 
 ## Tooling

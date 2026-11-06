@@ -4,8 +4,8 @@
  *
  * The `http` subcommand starts the fenced research transport. It needs an
  * explicit subcommand AND RETIREGOLDEN_HTTP_GATEWAY=1 — see src/http/gateway.ts
- * for why an unauthenticated listener should not be one word away from the
- * default invocation.
+ * for why this local listener should not be one word away from the default
+ * invocation.
  */
 
 import { startStdioServer } from './server.js'

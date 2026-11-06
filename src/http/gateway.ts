@@ -42,7 +42,8 @@ function validToken(token: string): boolean {
 function resolveToken(explicit?: string): string {
   const configured = explicit ?? process.env[HTTP_GATEWAY_TOKEN_ENV]
   if (configured === undefined) return randomBytes(32).toString('base64url')
-  if (!validToken(configured)) throw new Error(`${HTTP_GATEWAY_TOKEN_ENV} must be at least 32 printable ASCII characters with no whitespace`)
+  const source = explicit !== undefined ? 'opts.token' : HTTP_GATEWAY_TOKEN_ENV
+  if (!validToken(configured)) throw new Error(`${source} must be at least 32 printable ASCII characters with no whitespace`)
   return configured
 }
 
@@ -137,12 +138,16 @@ function readBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer | n
     req.on('error', (error) => {
       if (settled) return
       settled = true
-      reject(error)
+      if (req.aborted || req.destroyed || (error as NodeJS.ErrnoException).code === 'ECONNRESET') {
+        resolve(null)
+      } else {
+        reject(error)
+      }
     })
     req.on('aborted', () => {
       if (settled) return
       settled = true
-      reject(new Error('request body aborted'))
+      resolve(null)
     })
   })
 }
@@ -308,6 +313,7 @@ export async function startHttpGateway(
   }
   server = createServer((req, res) => {
     void handleRequest(req, res).catch((error: unknown) => {
+      if (req.aborted || res.destroyed || res.writableEnded) return
       console.error('RetireGolden HTTP gateway: request failed', error)
       if (!res.headersSent) {
         res.writeHead(500, { 'Content-Type': 'application/json' })

@@ -11,13 +11,14 @@ const MAX_PLAN_NODES = 100_000
 export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 export const MAX_CAVEATS = 64
 export const MAX_CAVEAT_CHARS = 2_048
-const COLLECTION_LIMITS: Record<string, number> = { people: 20, accounts: 500, incomes: 500, oneTimeGoals: 1_000, phases: 1_000, careEvents: 1_000, events: 1_000, operations: 1_000 }
+export const MAX_UPDATE_OPERATIONS = 1_000
+const COLLECTION_LIMITS: Record<string, number> = { people: 20, accounts: 500, incomes: 500, oneTimeGoals: 1_000, phases: 1_000, careEvents: 1_000, events: 1_000, operations: MAX_UPDATE_OPERATIONS }
 
 function primitiveBytes(value: unknown): number {
   if (typeof value === 'string') return jsonStringBytes(value)
   if (value === null) return 4
   if (typeof value === 'boolean') return value ? 4 : 5
-  if (typeof value === 'number') return 24
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value).length : 4
   return 0
 }
 
@@ -87,14 +88,65 @@ export function calendarSpanIssues(plan: Plan, startYear: number): string[] {
   return issues
 }
 
-export function complexityIssue(horizon: number, work = 1): string | null {
-  return horizon * work > 500_000 ? 'requested work exceeds the aggregate computation budget' : null
+interface PlanBudget {
+  issue: string | null
+  workFactor: number
+}
+
+const committedPlanBudgets = new WeakMap<object, PlanBudget>()
+
+function arrayLength(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0
+}
+
+export function planCollectionCount(plan: Plan): number {
+  const record = plan as unknown as Record<string, unknown>
+  const expenses = record.expenses as Record<string, unknown> | undefined
+  const household = record.household as Record<string, unknown> | undefined
+  return (
+    arrayLength(household?.people) +
+    arrayLength(record.accounts) +
+    arrayLength(record.incomes) +
+    arrayLength(expenses?.oneTimeGoals) +
+    arrayLength(expenses?.phases) +
+    arrayLength(expenses?.careEvents) +
+    arrayLength(record.careEvents) +
+    arrayLength(record.events)
+  )
+}
+
+export function planWorkFactor(plan: Plan): number {
+  return Math.max(1, planCollectionCount(plan) / 25)
+}
+
+/** Inspect an immutable plan once, then reuse the result on calculation paths. */
+export function committedPlanBudget(plan: Plan): PlanBudget {
+  const cached = committedPlanBudgets.get(plan)
+  if (cached) return cached
+  const result = { issue: structuralBudgetIssue(plan), workFactor: planWorkFactor(plan) }
+  committedPlanBudgets.set(plan, result)
+  return result
+}
+
+export function complexityIssue(horizon: number, work = 1, workFactor = 1): string | null {
+  return horizon * work * workFactor > 500_000 ? 'requested work exceeds the aggregate computation budget' : null
+}
+
+export function normalizeCaveat(value: string): string {
+  const normalized = value.replace(/[\r\n\t]+/gu, ' ').trim()
+  return normalized.length > MAX_CAVEAT_CHARS
+    ? `${normalized.slice(0, MAX_CAVEAT_CHARS - 3)}...`
+    : normalized
 }
 
 export function boundedCaveats(caveats: readonly string[]): string[] {
-  if (caveats.length > MAX_CAVEATS) throw new Error(`caveats exceed ${MAX_CAVEATS} entries`)
-  if (caveats.some((value) => value.length > MAX_CAVEAT_CHARS || /[\r\n]/u.test(value))) throw new Error('caveat exceeds the single-line text budget')
-  return [...caveats]
+  const normalized = caveats.map(normalizeCaveat)
+  if (normalized.length <= MAX_CAVEATS) return normalized
+  const retained = MAX_CAVEATS - 1
+  return [
+    ...normalized.slice(0, retained),
+    `... (${normalized.length - retained} additional caveats omitted)`,
+  ]
 }
 
 export function stringifyBoundedJson(value: unknown, spacing?: number): string {

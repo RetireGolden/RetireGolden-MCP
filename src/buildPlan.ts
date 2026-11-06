@@ -12,7 +12,16 @@ import { PLAN_SCHEMA_VERSION } from '@retiregolden/engine/schema/current'
 import { stateParamsFor } from '@retiregolden/engine/params/state'
 import { getVersions } from './versions.js'
 import { clockStartYear, systemClock, type Clock } from './session.js'
-import { calendarSpanIssues, structuralBudgetIssue } from './limits.js'
+import {
+  boundedCaveats,
+  calendarSpanIssues,
+  normalizeCaveat,
+  structuralBudgetIssue,
+} from './limits.js'
+
+function normalizedUniqueCaveats(caveats: readonly string[]): string[] {
+  return boundedCaveats([...new Set(caveats.map(normalizeCaveat))])
+}
 
 export const PersonParamsSchema = z.object({
   birth_year: z.number().int().min(1900).max(2100).describe('4-digit birth year, e.g. 1960'),
@@ -885,7 +894,7 @@ export function buildPlanFromParams(input: BuildPlanInput, options: BuildPlanOpt
       documentOverride > 0 ? documentOverride : null,
     )
     if (documentStateCaveat) caveats.push(documentStateCaveat)
-    return { ok: true, plan: documentPlan, startYear, caveats }
+    return { ok: true, plan: documentPlan, startYear, caveats: normalizedUniqueCaveats(caveats) }
   }
 
   // The typed-path shape rules, in the ONE place both transports read them from.
@@ -1177,7 +1186,7 @@ function buildTypedPlan(
     plan: parsed.plan,
     startYear,
     endYear,
-    caveats,
+    caveats: normalizedUniqueCaveats(caveats),
     ordering_unsupported,
   }
 }

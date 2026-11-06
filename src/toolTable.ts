@@ -21,7 +21,11 @@ import {
   type BuildPlanInput,
   type PolicyParams,
 } from './buildPlan.js'
-import { CalendarYearSchema, stringifyBoundedJson } from './limits.js'
+import {
+  CalendarYearSchema,
+  MAX_UPDATE_OPERATIONS,
+  stringifyBoundedJson,
+} from './limits.js'
 
 export const EDUCATIONAL =
   'Educational decision-support only — not tax, legal, or financial advice. Do not prescribe securities actions.'
@@ -136,7 +140,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       startYear: CalendarYearSchema
         .optional()
         .describe(
-          "The calendar year the projection starts in (its first ledger year). Omit it and the build uses the current calendar year on this server's clock, as the RetireGolden app does for a user's plan. Pass the startYear an export carries (export_plan's, or the app's copied plan): the projection then starts where the exported one did, while a plan rebuilt without it in a later calendar year starts later and its figures move. Every projecting tool echoes the startYear it ran from.",
+          "The calendar year the projection starts in (its first ledger year), supported from 1900–2200 with an effective plan span of at most 120 years. Omit it and the build uses the current calendar year on this server's clock, as the RetireGolden app does for a user's plan. Pass the startYear an export carries (export_plan's, or the app's copied plan): the projection then starts where the exported one did, while a plan rebuilt without it in a later calendar year starts later and its figures move. Every projecting tool echoes the startYear it ran from.",
         ),
       schemaVersion: z
         .number()
@@ -193,7 +197,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       startYear: CalendarYearSchema
         .optional()
         .describe(
-          "The calendar year to check the plan against, the year its projection would start in. Omit it to use the session's startYear.",
+          "The calendar year to check the plan against, supported from 1900–2200 with an effective plan span of at most 120 years. Omit it to use the session's startYear.",
         ),
     },
     handler: (session, args) => {
@@ -315,7 +319,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       startYear: CalendarYearSchema
         .optional()
         .describe(
-          "The calendar year both plans are projected from. Omit it to use the session's startYear (the year of the last build_plan, or the current calendar year before any build).",
+          "The calendar year both plans are projected from, supported from 1900–2200 with each effective plan span limited to 120 years. Omit it to use the session's startYear (the year of the last build_plan, or the current calendar year before any build).",
         ),
     },
     handler: (session, args) =>
@@ -386,6 +390,7 @@ export const TOOL_TABLE: readonly ToolEntry[] = [
       operations: z
         .array(UpdatePlanOpSchema)
         .min(1)
+        .max(MAX_UPDATE_OPERATIONS)
         .describe('Ordered list of merge operations applied atomically (all-or-nothing).'),
     },
     handler: (session, args) => adapter.updatePlan(session, args.operations as adapter.UpdatePlanOp[]),

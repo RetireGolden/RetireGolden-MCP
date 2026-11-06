@@ -4,7 +4,8 @@ Official RetireBench scored runs use **ephemeral stdio** (`npx @retiregolden/mcp
 `retiregolden-mcp`) with pinned package versions.
 
 This package also carries an **HTTP research transport**, started with
-`RETIREGOLDEN_HTTP_GATEWAY=1 retiregolden-mcp http`. The opt-in is required: the
+`RETIREGOLDEN_HTTP_GATEWAY=1 RETIREGOLDEN_HTTP_GATEWAY_TOKEN=<32+-char-token> retiregolden-mcp http`.
+The opt-in is required: the
 transport accepts a client-supplied session id, so it must
 not be one typo away from the default invocation. Without the variable the
 command exits with an explanation instead of listening.
@@ -14,7 +15,8 @@ transport returns the same numbers as stdio for a fixture matrix. It is not a
 product API, it is not exported from the package index, and it has no subpath in
 the `exports` map. From an installed package the only way in is this CLI
 subcommand; working in a clone of the repository, `pnpm run build` then
-`RETIREGOLDEN_HTTP_GATEWAY=1 pnpm run mcp http` runs the same `src/cli.ts`
+`RETIREGOLDEN_HTTP_GATEWAY=1 RETIREGOLDEN_HTTP_GATEWAY_TOKEN=<32+-char-token> pnpm run mcp http`
+runs the same `src/cli.ts`
 subcommand against your checkout (the opt-in variable is still required), or you
 can call `startHttpGateway()` in `src/http/gateway.ts` directly.
 
@@ -99,9 +101,11 @@ parity tests pass.
 ## Input and work limits
 
 Calendar start years are 1900 through 2200 and an effective plan span is at
-most 120 years. Full plan documents are inspected for serialized size, nesting,
-node count, and major collection counts before engine parsing or simulation.
+most 120 years. Full plan documents have a 2 MiB structural budget and are
+inspected for serialized size, nesting, node count, and major collection counts
+before engine parsing or simulation. The HTTP `/tool` transport applies a
+stricter 1 MiB request-body cap and returns `413 PAYLOAD_TOO_LARGE` above it.
 The normal documented envelope remains available: typed household horizons up
 to 100 years, Monte Carlo runs up to 5,000 paths, and batches up to 500
 policies. Combined horizon and work are also bounded before projection,
-optimization, and spending calculations begin.
+scenario comparison, optimization, and spending calculations begin.
