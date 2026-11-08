@@ -43,11 +43,11 @@ const wireInputSchemas = new Map<string, unknown>(
 )
 
 /**
- * The generator is plain `.mjs` with no declarations, so it is loaded the same
- * way tests/protocolBaseline.test.ts loads the baseline capture: a runtime URL
- * import narrowed by an explicit interface. Sharing the function (rather than
- * re-deriving the schemas here) is the point — a test with its own copy of the
- * conversion options could pass while `contract:generate` writes something else.
+ * The generator is plain `.mjs` with no declarations, so it is loaded through
+ * a runtime URL import narrowed by an explicit interface. Sharing the function
+ * (rather than re-deriving the schemas here) is the point — a test with its own
+ * copy of the conversion options could pass while `contract:generate` writes
+ * something else.
  */
 const generatorUrl = new URL('../scripts/gen-tool-contract.mjs', import.meta.url).href
 interface ContractGenerator {
