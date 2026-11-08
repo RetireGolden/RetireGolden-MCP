@@ -7,12 +7,14 @@
  * casually update away.
  */
 
+import { execFile as execFileCallback } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { describe, expect, beforeAll, it } from 'vitest'
-import { singleHousehold, singlePolicy } from './fixtures.js'
 import { PACKAGE_ROOT as packageRoot, ensureBuild } from './helpers/build.js'
 
+const execFile = promisify(execFileCallback)
 const baselinePath = fileURLToPath(new URL('./protocol-baseline/baseline.json', import.meta.url))
 const captureModuleUrl = new URL('../scripts/capture-protocol-baseline.mjs', import.meta.url).href
 
@@ -54,12 +56,37 @@ interface ProtocolBaseline {
   matrix: MatrixStep[]
 }
 
-interface CaptureLibrary {
-  captureProtocolBaseline(options: {
-    root: string
-    fixtures: { singleHousehold: typeof singleHousehold; singlePolicy: typeof singlePolicy }
-  }): Promise<ProtocolBaseline>
-  optimizerTimedOut(baseline: ProtocolBaseline): boolean
+interface NativeCapture {
+  baseline: ProtocolBaseline
+  timedOut: boolean
+}
+
+async function captureInNode(): Promise<NativeCapture> {
+  // The capture's strict authorization check compares static tool-table objects
+  // by identity. Mixing Vitest's module runner with native dynamic imports can
+  // load dist/toolTable.js twice on Windows, even at the same file URL. Run the
+  // whole capture in one native ESM graph, as the CLI capture does, rather than
+  // weakening that check. Its default fixtures are the same shared fixtures.ts;
+  // Node 24+ strips their type-only imports and annotations.
+  const { stdout } = await execFile(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `const { captureProtocolBaseline, optimizerTimedOut } = await import(process.argv[1]);
+const baseline = await captureProtocolBaseline({ root: process.argv[2] });
+process.stdout.write(JSON.stringify({ baseline, timedOut: optimizerTimedOut(baseline) }));`,
+      captureModuleUrl,
+      packageRoot,
+    ],
+    {
+      cwd: packageRoot,
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 85_000,
+    },
+  )
+  return JSON.parse(stdout) as NativeCapture
 }
 
 async function readBaseline(): Promise<ProtocolBaseline> {
@@ -105,22 +132,16 @@ describe('protocol baseline', () => {
   beforeAll(async () => {
     await ensureBuild()
     expected = await readBaseline()
-    const capture = (await import(captureModuleUrl)) as CaptureLibrary
-    actual = await capture.captureProtocolBaseline({
-      root: packageRoot,
-      fixtures: { singleHousehold, singlePolicy },
-    })
-    if (capture.optimizerTimedOut(actual)) {
-      actual = await capture.captureProtocolBaseline({
-        root: packageRoot,
-        fixtures: { singleHousehold, singlePolicy },
-      })
-      if (capture.optimizerTimedOut(actual)) {
+    let capture = await captureInNode()
+    if (capture.timedOut) {
+      capture = await captureInNode()
+      if (capture.timedOut) {
         throw new Error(
           'run_optimizer_default timed out on two consecutive captures; CI contention prevented a stable baseline replay — this is not baseline drift.',
         )
       }
     }
+    actual = capture.baseline
     // Two captures, each of which can reach the optimizer's 60-second guard
     // under contention, plus the build and the other steps.
   }, 180_000)
