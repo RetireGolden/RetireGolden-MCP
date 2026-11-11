@@ -5,6 +5,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- The development lockfile moves Vitest from 5.0.5 to 5.1.0 (range unchanged),
+  with matching `@vitest/mocker` and `@vitest/spy` versions. Development-only
+  transitive updates move `@napi-rs/wasm-runtime` from 1.2.6 to 1.2.7,
+  `@types/estree` from 1.0.9 to 1.0.10, `magic-string` from 1.4.3 to 1.4.5,
+  and `tinybench` from 6.2.2 to 6.2.3.
 - Calendar start years are limited to 1900–2200 and effective plan spans to
   120 years. Full-plan documents previously accepted outside those bounds must
   be adjusted before import.
