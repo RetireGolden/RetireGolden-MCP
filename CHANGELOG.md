@@ -5,6 +5,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- The development lockfile updates the MCP SDK's transitive `hono` dependency
+  from 4.13.13 to 4.13.18 and `@hono/node-server` from 2.1.5 to 2.1.8 for
+  dependency fixes within the existing declared ranges.
 - The development lockfile moves Vitest from 5.0.5 to 5.1.0 (range unchanged),
   with matching `@vitest/mocker` and `@vitest/spy` versions. Development-only
   transitive updates move `@napi-rs/wasm-runtime` from 1.2.6 to 1.2.7,
